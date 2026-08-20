@@ -13,7 +13,7 @@ import path from "node:path";
 import type { RankedClip, TranscriptSegment } from "@clipforge/shared";
 import { DEFAULT_TEMPLATES } from "@clipforge/shared";
 import { renderClip } from "../render/render-clip.js";
-import { CenterCropFaceTracker } from "../face-tracking/center-crop-face-tracker.js";
+import { ReactionCamFaceTracker } from "../face-tracking/reaction-cam-face-tracker.js";
 
 async function main() {
   const sourcePath = process.argv[2];
@@ -71,7 +71,7 @@ async function main() {
     clip,
     template,
     transcriptSegments: segments,
-    faceTracker: new CenterCropFaceTracker(),
+    faceTracker: new ReactionCamFaceTracker(),
     workDir,
     outputPath,
   });

@@ -21,7 +21,7 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
 **Interfacce pensate per essere sostituite** (Fase 1 usa l'implementazione più semplice/economica, dietro un contratto chiaro):
 - `TranscriptionProvider` → `OpenAIWhisperProvider` (Whisper API). Sostituibile con un provider self-hosted.
 - `StorageProvider` → `R2StorageProvider` (Cloudflare R2, compatibile S3). Un'implementazione `SupabaseStorageProvider` alternativa esiste ancora nel codice ma non è usata di default: il piano Free di Supabase Storage limita ogni file a 50MB, troppo poco per video sorgente.
-- `FaceTracker` → `CenterCropFaceTracker` (crop centrato statico, **nessun rilevamento volto reale**). Interfaccia pronta per un tracker basato su un modello ML.
+- `FaceTracker` → `ReactionCamFaceTracker`: rilevamento volto reale (ONNX, Ultra-Light-Fast-Generic-Face-Detector, ~1.2MB, `onnxruntime-node` — binari precompilati, nessuna compilazione nativa richiesta) su alcuni frame campionati della clip. Se trova un volto piccolo e stabile vicino a un bordo (webcam in sovraimpressione su gameplay/reaction) produce un layout split-screen (webcam sopra, contenuto sotto); se trova un volto "normale" centra il crop su di esso; altrimenti ricade su `CenterCropFaceTracker` (crop centrato statico). Modello in `apps/worker/models/`.
 - Rendering: FFmpeg puro (crop, zoompan-style zoom via espressioni, sottotitoli ASS/libass) invece di Remotion — più economico e veloce per gli obiettivi di Fase 1; Remotion resta un'opzione futura dietro un eventuale `RenderEngine`.
 - Pubblicazione YouTube: non implementata. Andrebbe aggiunta come `Publisher` interface + OAuth YouTube Data API v3.
 
@@ -113,12 +113,12 @@ pnpm --filter @clipforge/worker exec tsx src/dev/smoke-test-render.ts <path-vide
 ## Deploy
 
 - **Frontend (`apps/web`)**: Vercel, root directory `apps/web`. Variabili d'ambiente da impostare nel progetto Vercel: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`. Ricorda di aggiungere il dominio Vercel definitivo alla CORS policy del bucket R2 (vedi sopra).
-- **Worker (`apps/worker`)**: qualsiasi host capace di eseguire un processo Node long-running (Railway, Fly.io, un VPS con Docker/systemd, ecc.) — **non Vercel**, che non è pensato per processi persistenti né per rendering video pesante. Build: `pnpm --filter @clipforge/worker build`, avvio: `pnpm --filter @clipforge/worker start` (richiede ffmpeg **e** yt-dlp installati nell'immagine/host).
+- **Worker (`apps/worker`)**: qualsiasi host capace di eseguire un processo Node long-running (Railway, Fly.io, un VPS con Docker/systemd, ecc.) — **non Vercel**, che non è pensato per processi persistenti né per rendering video pesante. Build: `pnpm --filter @clipforge/worker build`, avvio: `pnpm --filter @clipforge/worker start` (richiede ffmpeg **e** yt-dlp installati nell'immagine/host; `apps/worker/models/` e `node_modules` devono essere presenti accanto a `dist/` — `onnxruntime-node` ha un addon nativo per piattaforma che esbuild lascia esterno, vedi commento in `scripts/build.mjs`).
 
 ## Limitazioni note di questa Fase 1
 
 - **Font dei sottotitoli**: i template referenziano font (Montserrat, Poppins, Anton, ...) che libass risolve tramite i font di sistema disponibili sulla macchina che esegue il worker; se non installati, libass usa un fallback (i sottotitoli restano leggibili ma con font diverso). Per un deploy in produzione, valuta di includere i file `.ttf` nell'immagine del worker e puntarli esplicitamente.
-- **Face tracking**: crop centrato statico, non un vero rilevamento volto (vedi `CenterCropFaceTracker`).
+- **Reaction-cam / face tracking**: euristica basata su rilevamento volto reale (non un vero riconoscimento di "finestra webcam"): funziona bene per il caso comune (bolla fissa in un angolo, piccola rispetto al frame) ma può non attivarsi con overlay non standard (bolla grande, posizione centrale, forma non tipica). Nessun tracking frame-per-frame: il crop è fisso per l'intera durata della clip, calcolato da alcuni frame campionati.
 - **Loudness normalization**: `loudnorm` a singolo passaggio (non i due passaggi raccomandati per la massima precisione) — scelta per semplicità/velocità.
 - **Pubblicazione automatica su YouTube**: non implementata.
 - **Import da YouTube**: usa `yt-dlp`, quindi eredita i suoi limiti — video privati, con restrizione età o soggetti a protezioni anti-bot possono fallire il download; nessun supporto per playlist (viene scaricato solo il video singolo).

@@ -67,6 +67,52 @@ export function runFfprobe(args: string[], options?: RunOptions): Promise<{ stdo
   return run("ffprobe", args, options);
 }
 
+/**
+ * Come `runFfmpeg`, ma raccoglie stdout come Buffer binario invece che stringa — necessario
+ * quando l'output è un frame raw (`-f rawvideo`), non testo, altrimenti i byte vengono
+ * corrotti dalla conversione a stringa.
+ */
+export function runFfmpegBinary(args: string[], options: RunOptions = {}): Promise<Buffer> {
+  const timeoutMs = options.timeoutMs ?? 60 * 1000;
+
+  return new Promise((resolve, reject) => {
+    const child = spawn("ffmpeg", args, { windowsHide: true });
+    const stdoutChunks: Buffer[] = [];
+    let stderr = "";
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutChunks.push(chunk);
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(new FFmpegError(`Impossibile avviare ffmpeg: ${err.message}`, null, stderr));
+    });
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new FFmpegError(`ffmpeg ha superato il timeout di ${timeoutMs}ms ed è stato terminato`, code, stderr));
+        return;
+      }
+      if (code !== 0) {
+        reject(new FFmpegError(`ffmpeg terminato con codice ${code}: ${stderr.slice(-500)}`, code, stderr));
+        return;
+      }
+      resolve(Buffer.concat(stdoutChunks));
+    });
+  });
+}
+
 export interface ProbeResult {
   durationSeconds: number;
   width: number | null;

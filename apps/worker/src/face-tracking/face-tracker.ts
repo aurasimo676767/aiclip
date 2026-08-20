@@ -7,26 +7,31 @@ export interface CropWindow {
 }
 
 /**
- * Astrazione sul tracking di volto/speaker usato per centrare il crop verticale 9:16.
+ * Layout del crop verticale per una clip:
+ * - "single": un solo crop 9:16 (caso normale, uno speaker/soggetto).
+ * - "split_vertical": due crop impilati (es. webcam in alto, contenuto principale in
+ *   basso) — usato per contenuti "reaction"/gaming dove uno speaker reagisce a un video
+ *   in 16:9 tramite una webcam in sovraimpressione.
+ */
+export type Layout =
+  | { type: "single"; crop: CropWindow }
+  | { type: "split_vertical"; top: CropWindow; bottom: CropWindow; topRatio: number };
+
+/**
+ * Astrazione sul tracking di volto/speaker usato per decidere il layout del crop verticale.
  *
- * Fase 1: implementazione di default `CenterCropFaceTracker`, che centra staticamente
- * il crop sul frame senza rilevamento volto reale (vedi commento nel file).
- *
- * Sostituibile in futuro con un tracker basato su un modello ML (es. face detection +
- * tracking per-frame, o diarizzazione audio/video per capire chi parla in ogni istante)
- * implementando la stessa interfaccia: il resto della pipeline di render dipende solo
- * da `computeCropWindow`.
+ * Implementazioni:
+ * - `CenterCropFaceTracker`: crop centrato statico, nessun rilevamento reale (fallback).
+ * - `ReactionCamFaceTracker`: rilevamento volto reale (ONNX, vedi onnx-face-detector.ts) +
+ *   euristica per riconoscere un layout "reaction cam" (webcam piccola in un angolo,
+ *   separata dal contenuto principale) e costruire uno split-screen.
  */
 export interface FaceTracker {
-  /**
-   * Calcola la finestra di crop 9:16 da applicare al video sorgente per l'intervallo
-   * [startSeconds, endSeconds]. Può ritornare una finestra statica o una funzione del tempo;
-   * in Fase 1 ritorniamo sempre una finestra statica per clip.
-   */
-  computeCropWindow(params: {
+  computeLayout(params: {
+    sourceVideoPath: string;
     sourceWidth: number;
     sourceHeight: number;
     startSeconds: number;
     endSeconds: number;
-  }): Promise<CropWindow>;
+  }): Promise<Layout>;
 }

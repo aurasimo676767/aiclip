@@ -75,7 +75,8 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
 
   const zoomExpression = buildZoomExpression(remappedEvents, template.zoomIntensity);
 
-  const faceCrop = await faceTracker.computeCropWindow({
+  const layout = await faceTracker.computeLayout({
+    sourceVideoPath,
     sourceWidth: sourceProbe.width,
     sourceHeight: sourceProbe.height,
     startSeconds: clip.start,
@@ -83,7 +84,7 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
   });
 
   const filterComplex = buildVideoFilterComplex({
-    faceCrop,
+    layout,
     zoomExpression,
     assSubtitlesPath: assPath,
     showProgressBar: template.showProgressBar,

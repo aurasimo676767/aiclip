@@ -48,7 +48,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     captionStyle: {
       fontFamily: "Montserrat ExtraBold",
       fontSize: 72,
-      position: "center",
+      position: "bottom",
       textColor: "#FFFFFF",
       highlightColor: "#FFD400",
       outlineColor: "#000000",
@@ -86,7 +86,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     captionStyle: {
       fontFamily: "Poppins Black",
       fontSize: 78,
-      position: "center",
+      position: "bottom",
       textColor: "#FFFFFF",
       highlightColor: "#00E5FF",
       outlineColor: "#000000",
@@ -124,7 +124,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     captionStyle: {
       fontFamily: "Anton",
       fontSize: 80,
-      position: "center",
+      position: "bottom",
       textColor: "#FFFFFF",
       highlightColor: "#FF3B30",
       outlineColor: "#000000",

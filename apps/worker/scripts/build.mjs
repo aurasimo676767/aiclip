@@ -20,6 +20,9 @@ const EXTERNAL_PACKAGES = [
   "@supabase/supabase-js",
   "@aws-sdk/client-s3",
   "@aws-sdk/s3-request-presigner",
+  // Contiene un addon nativo (.node) specifico per piattaforma: non bundlabile da esbuild,
+  // deve restare un require verso node_modules a runtime.
+  "onnxruntime-node",
 ];
 
 await rm("dist", { recursive: true, force: true });
