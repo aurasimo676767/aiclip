@@ -24,33 +24,39 @@ export function AuthForm({ mode }: AuthFormProps) {
     setError(null);
     setInfoMessage(null);
 
-    const supabase = createSupabaseBrowserClient();
+    try {
+      const supabase = createSupabaseBrowserClient();
 
-    if (mode === "signup") {
-      const { error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-      });
-      setLoading(false);
-      if (signUpError) {
-        setError(signUpError.message);
+      if (mode === "signup") {
+        const { error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+        });
+        if (signUpError) {
+          setError(signUpError.message);
+          return;
+        }
+        setInfoMessage("Controlla la tua email per confermare la registrazione.");
         return;
       }
-      setInfoMessage("Controlla la tua email per confermare la registrazione.");
-      return;
-    }
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
-    if (signInError) {
-      setError(signInError.message);
-      return;
-    }
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInError) {
+        setError(signInError.message);
+        return;
+      }
 
-    const next = searchParams.get("next") ?? "/dashboard";
-    router.push(next);
-    router.refresh();
+      const next = searchParams.get("next") ?? "/dashboard";
+      router.push(next);
+      router.refresh();
+    } catch (err) {
+      // Es. variabili d'ambiente Supabase mancanti nel build: senza questo catch il
+      // pulsante restava bloccato su "Attendere..." senza alcun messaggio per l'utente.
+      setError(err instanceof Error ? err.message : "Errore imprevisto");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
