@@ -26,7 +26,7 @@ const MAX_CHUNK_DURATION_SECONDS = 4;
 export function buildAssSubtitles(
   segments: TranscriptSegment[],
   style: CaptionStyleConfig,
-  options: { highlightWords?: Set<string>; hookText?: string; hookDurationSeconds?: number } = {},
+  options: { highlightWords?: Set<string> } = {},
 ): string {
   const highlightWords = options.highlightWords ?? new Set<string>();
   const alignment = style.position === "top" ? 8 : style.position === "center" ? 5 : 2;
@@ -37,16 +37,7 @@ export function buildAssSubtitles(
     ? buildKaraokeEvents(segments, style, highlightWords)
     : buildPlainEvents(segments, style);
 
-  if (options.hookText) {
-    events.unshift(buildHookEvent(options.hookText, options.hookDurationSeconds ?? 3));
-  }
-
   return `${header}\n${events.join("\n")}\n`;
-}
-
-function buildHookEvent(hookText: string, durationSeconds: number): string {
-  const text = escapeAssText(hookText.trim());
-  return `Dialogue: 1,${formatAssTime(0)},${formatAssTime(durationSeconds)},HookStyle,,0,0,0,,${text}`;
 }
 
 function buildHeader(style: CaptionStyleConfig, alignment: number, marginV: number): string {
@@ -63,7 +54,6 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,${style.fontFamily},${style.fontSize},${primary},${secondary},${outline},&H64000000,-1,0,0,0,100,100,0,0,1,4,2,${alignment},60,60,${marginV},1
-Style: HookStyle,${style.fontFamily},${Math.round(style.fontSize * 0.85)},${primary},${secondary},${outline},&H64000000,-1,0,0,0,100,100,0,0,1,4,2,8,60,60,140,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`;

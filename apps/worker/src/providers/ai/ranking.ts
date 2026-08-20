@@ -96,9 +96,9 @@ const RANKING_TOOL_SCHEMA = {
   },
 };
 
-const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts. Ricevi una lista di finestre candidate (già pre-selezionate da un primo passaggio economico) con il transcript di contesto, e devi:
+const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il primo passaggio (economico) ha già scremato molto, ma tende comunque a lasciar passare momenti "energici ma vuoti" — rumorosi o pieni di parolacce senza un vero payoff comico/narrativo dietro. Il tuo lavoro è il controllo qualità finale. Ricevi una lista di finestre candidate con il transcript di contesto, e devi:
 
-1. Scartare i candidati deboli (poco hook, poco comprensibili da soli, ripetitivi).
+1. Scartare senza pietà i candidati deboli: poco hook, poco comprensibili da soli, ripetitivi, o semplicemente "rumorosi" (esclamazioni/parolacce) senza una battuta, una svolta o un fatto concreto dietro. Meglio restituire 2 clip forti che 6 mediocri — non riempire la lista per riempirla.
 2. Per ognuno dei rimanenti, assegnare 6 punteggi da 0 a 100 (hook, retention, emotion, clarity, payoff, virality) usando l'INTERA scala in modo calibrato, non ammassata in una fascia stretta:
    - 90-100: eccezionale, tra i migliori momenti possibili per quel tipo di contenuto — riservalo a ciò che è realmente il top, non usarlo come default per "molto buono".
    - 75-89: forte, chiaramente sopra la media, funzionerebbe bene come Short.

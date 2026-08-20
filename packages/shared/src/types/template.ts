@@ -32,8 +32,6 @@ export interface TemplateConfig {
   captionStyle: CaptionStyleConfig;
   /** Moltiplicatore di intensità per gli eventi di zoom generati/interpretati dall'AI (0 = disattivato, 1 = normale, >1 = più aggressivo). */
   zoomIntensity: number;
-  /** Mostra un breve testo hook sovraimpresso nei primi secondi della clip. */
-  showHookText: boolean;
   /** Mostra una progress bar in basso che indica l'avanzamento della clip. */
   showProgressBar: boolean;
   /** Rimuove automaticamente le pause/silenzi superiori alla soglia (secondi). null = disattivato. */
@@ -56,7 +54,6 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
       uppercase: true,
     },
     zoomIntensity: 1.2,
-    showHookText: true,
     showProgressBar: true,
     silenceRemovalThresholdSeconds: 0.6,
   },
@@ -75,7 +72,6 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
       uppercase: false,
     },
     zoomIntensity: 0.4,
-    showHookText: false,
     showProgressBar: false,
     silenceRemovalThresholdSeconds: 1.0,
   },
@@ -94,7 +90,6 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
       uppercase: true,
     },
     zoomIntensity: 1.5,
-    showHookText: true,
     showProgressBar: true,
     silenceRemovalThresholdSeconds: 0.5,
   },
@@ -113,7 +108,6 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
       uppercase: false,
     },
     zoomIntensity: 0.6,
-    showHookText: true,
     showProgressBar: false,
     silenceRemovalThresholdSeconds: 1.2,
   },
@@ -132,7 +126,6 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
       uppercase: true,
     },
     zoomIntensity: 1.3,
-    showHookText: true,
     showProgressBar: true,
     silenceRemovalThresholdSeconds: 0.6,
   },

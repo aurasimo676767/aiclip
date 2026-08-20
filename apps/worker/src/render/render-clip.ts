@@ -3,7 +3,7 @@ import path from "node:path";
 import type { RankedClip, TranscriptSegment, TemplateConfig } from "@clipforge/shared";
 import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
-import type { FaceTracker } from "../face-tracking/face-tracker.js";
+import type { FaceTracker, Layout, TimedCrop } from "../face-tracking/face-tracker.js";
 import { buildZoomExpression } from "./edl-executor.js";
 import { buildAssSubtitles } from "./captions.js";
 import { buildVideoFilterComplex } from "./build-video-filter.js";
@@ -61,11 +61,7 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
       .map((e) => e.word.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase()),
   );
 
-  const assContent = buildAssSubtitles(clipRelativeSegments, template.captionStyle, {
-    highlightWords,
-    hookText: template.showHookText ? clip.hook : undefined,
-    hookDurationSeconds: 3,
-  });
+  const assContent = buildAssSubtitles(clipRelativeSegments, template.captionStyle, { highlightWords });
   const assPath = path.join(workDir, "captions.ass");
   await fsp.writeFile(assPath, assContent, "utf-8");
 
@@ -75,13 +71,14 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
 
   const zoomExpression = buildZoomExpression(remappedEvents, template.zoomIntensity);
 
-  const layout = await faceTracker.computeLayout({
+  const rawLayout = await faceTracker.computeLayout({
     sourceVideoPath,
     sourceWidth: sourceProbe.width,
     sourceHeight: sourceProbe.height,
     startSeconds: clip.start,
     endSeconds: clip.end,
   });
+  const layout = remapLayout(rawLayout, timeRemap, finalDuration);
 
   const filterComplex = buildVideoFilterComplex({
     layout,
@@ -132,6 +129,32 @@ async function extractRawClip(
 
 function segmentIsShorterThanClip(segment: TimeSegment, clipDuration: number): boolean {
   return segment.end - segment.start < clipDuration - 0.05;
+}
+
+/**
+ * Applica il remap dei silenzi (vedi silence.ts) ai confini temporali dei TimedCrop di un
+ * Layout — necessario perché il crop viene calcolato sulla timeline "originale" della clip,
+ * ma il filtergraph ffmpeg gira sul file GIÀ tagliato (senza silenzi), con `t` che riparte da 0.
+ */
+function remapLayout(layout: Layout, timeRemap: (t: number) => number, finalDuration: number): Layout {
+  if (layout.type === "single") {
+    return { type: "single", crops: remapTimedCrops(layout.crops, timeRemap, finalDuration) };
+  }
+  return { ...layout, topCrops: remapTimedCrops(layout.topCrops, timeRemap, finalDuration) };
+}
+
+function remapTimedCrops(crops: TimedCrop[], timeRemap: (t: number) => number, finalDuration: number): TimedCrop[] {
+  const remapped = crops
+    .map((c) => ({ startSeconds: timeRemap(c.startSeconds), endSeconds: timeRemap(c.endSeconds), crop: c.crop }))
+    .filter((c) => c.endSeconds > c.startSeconds + 0.01);
+
+  if (remapped.length === 0) {
+    const last = crops[crops.length - 1];
+    return [{ startSeconds: 0, endSeconds: finalDuration, crop: (last ?? crops[0]!).crop }];
+  }
+
+  remapped[remapped.length - 1]!.endSeconds = finalDuration;
+  return remapped;
 }
 
 /** Estrae i segmenti transcript dentro [clipStart, clipEnd], li rende clip-relativi e applica il remap dei silenzi. */
