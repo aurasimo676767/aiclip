@@ -1,0 +1,15 @@
+{
+  "name": "clipforge",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@11.22.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @clipforge/web dev",
+    "dev:worker": "pnpm --filter @clipforge/worker dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
