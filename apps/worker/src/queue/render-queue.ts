@@ -9,7 +9,8 @@ export async function claimNextRenderJob(): Promise<RenderJobRow | null> {
     logger.error("claim_next_render_job fallita", { error: error.message });
     throw new Error(`claim_next_render_job fallita: ${error.message}`);
   }
-  return data ?? null;
+  // Vedi commento analogo in queue/video-queue.ts: nessuna riga -> tutti i campi null, non JSON null.
+  return data && data.id ? data : null;
 }
 
 export async function updateRenderJobStatus(

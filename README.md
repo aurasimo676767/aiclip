@@ -47,11 +47,14 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
 
 ### 2. Variabili d'ambiente
 
+`pnpm --filter` esegue ogni app nella propria cartella, quindi servono **due file separati** (non uno alla radice) — `.env.example` alla radice resta solo come riferimento con la lista completa delle variabili:
+
 ```bash
-cp .env.example .env
+cp .env.example apps/worker/.env
+cp .env.example apps/web/.env.local
 ```
 
-Compila `.env` con i valori di Supabase/Anthropic/OpenAI. **Non committare mai `.env`** (è già in `.gitignore`).
+Compila entrambi con i valori di Supabase/Anthropic/OpenAI (`apps/web/.env.local` non ha bisogno delle variabili solo-worker come `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`, ma lasciarle non fa danno). **Non committare mai questi file** (sono già in `.gitignore`).
 
 ### 3. Installazione
 

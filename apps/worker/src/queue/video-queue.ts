@@ -10,7 +10,9 @@ export async function claimNextVideo(): Promise<VideoRow | null> {
     logger.error("claim_next_video fallita", { error: error.message });
     throw new Error(`claim_next_video fallita: ${error.message}`);
   }
-  return data ?? null;
+  // Una funzione SQL "RETURNS public.videos" senza righe da restituire produce, via
+  // PostgREST, una riga con tutti i campi null (non un vero JSON null) — va normalizzata qui.
+  return data && data.id ? data : null;
 }
 
 export async function updateVideoStatus(
