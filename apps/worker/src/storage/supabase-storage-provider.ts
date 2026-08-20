@@ -27,7 +27,10 @@ export class SupabaseStorageProvider implements StorageProvider {
       upsert: true,
     });
     if (error) {
-      throw new Error(`Upload storage fallito per "${storagePath}": ${error.message}`);
+      const hint = /maximum allowed size/i.test(error.message)
+        ? ' — alza il "File size limit" del bucket in Supabase (Storage → bucket → Edit) o riduci la qualità sorgente'
+        : "";
+      throw new Error(`Upload storage fallito per "${storagePath}": ${error.message}${hint}`);
     }
     return storagePath;
   }

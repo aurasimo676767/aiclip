@@ -22,7 +22,10 @@ export async function downloadYoutubeVideo(url: string, outputDir: string): Prom
 
   const { stdout } = await runYtDlp([
     "-f",
-    "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+    // Limitato a 1080p: per generare Shorts verticali 1080x1920 non serve la sorgente in
+    // 4K, e file più piccoli sono più veloci da processare e più facilmente sotto il
+    // "file size limit" configurato sul bucket Supabase Storage.
+    "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/b",
     "--merge-output-format",
     "mp4",
     "--no-playlist",
