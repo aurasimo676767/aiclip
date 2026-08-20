@@ -10,7 +10,7 @@ const SAMPLE_COUNT = 6;
 const MIN_STABLE_RATIO = 0.5; // il cluster deve comparire in almeno metà dei sample con un volto
 const WEBCAM_MAX_AREA_RATIO = 0.05; // il volto occupa <5% dell'area del frame
 const WEBCAM_CENTER_MARGIN = 0.3; // centro del volto fuori dal 30%-70% centrale (orizz. o vert.)
-const WEBCAM_PADDING_FACTOR = 4.5; // quanto "allargare" il crop attorno al volto per includere l'intera bolla webcam
+const WEBCAM_PADDING_FACTOR = 3.2; // quanto "allargare" il crop attorno al volto — più basso = più primo piano
 const TOP_RATIO = 0.35; // frazione di altezza dedicata alla webcam nel layout split
 
 interface Cluster {
@@ -22,9 +22,11 @@ interface Cluster {
  * FaceTracker che usa rilevamento volto reale (ONNX, vedi onnx-face-detector.ts) su alcuni
  * frame campionati della clip per decidere il layout del crop verticale:
  *
- * - Se trova un volto piccolo e stabile vicino a un bordo/angolo per la maggior parte dei
- *   campioni (tipico di una webcam in sovraimpressione su gameplay/video reagito), produce
- *   un layout split_vertical: webcam in alto, contenuto principale in basso.
+ * - Se trova uno o più volti piccoli e stabili vicino a un bordo/angolo (tipico di una
+ *   webcam in sovraimpressione su gameplay/video reagito), produce un layout split_vertical:
+ *   SOLO il volto più stabile va in alto (mai più di una webcam anche con più speaker), il
+ *   contenuto principale in basso resta sempre centrato orizzontalmente sul frame intero
+ *   (mai su un volto, per non tagliare fuori il gameplay/video reagito).
  * - Se trova un volto stabile ma "normale" (centrale, non piccolo), centra il crop su di
  *   esso invece che sul centro geometrico del frame.
  * - Se non trova nessun volto stabile, ricade su `CenterCropFaceTracker`.
@@ -69,9 +71,13 @@ export class ReactionCamFaceTracker implements FaceTracker {
 
     const withMeta = stable.map((c) => ({ cluster: c, avg: averageBox(c.boxes), count: c.sampleIndices.size }));
 
+    // Tra tutti i volti "tipo webcam" (piccoli, vicino a un bordo), tieni SOLO il più stabile
+    // (rilevato nel maggior numero di campioni) — mai più di una webcam nel layout, anche se
+    // il video ne mostra più d'una (es. duo streamer): mostriamo solo chi è più costantemente
+    // inquadrato, a parità scegliendo il volto più piccolo/ravvicinato.
     const webcamCandidate = withMeta
       .filter(({ avg }) => isWebcamLike(avg, sourceWidth, sourceHeight))
-      .sort((a, b) => areaRatio(a.avg, sourceWidth, sourceHeight) - areaRatio(b.avg, sourceWidth, sourceHeight))[0];
+      .sort((a, b) => b.count - a.count || areaRatio(a.avg, sourceWidth, sourceHeight) - areaRatio(b.avg, sourceWidth, sourceHeight))[0];
 
     if (!webcamCandidate) {
       // Nessun pattern "webcam in un angolo": centra semplicemente sul volto stabile più prominente.
@@ -83,21 +89,15 @@ export class ReactionCamFaceTracker implements FaceTracker {
       return { type: "single", crop: centeredCrop(cx, cy, sourceWidth, sourceHeight, targetAspect) };
     }
 
-    const mainCandidate = withMeta.find((m) => m !== webcamCandidate);
-
     const topAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * TOP_RATIO);
     const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - TOP_RATIO));
 
     const top = subjectCentricCrop(webcamCandidate.avg, sourceWidth, sourceHeight, topAspect, WEBCAM_PADDING_FACTOR);
-    const bottom = mainCandidate
-      ? centeredCrop(
-          mainCandidate.avg.x + mainCandidate.avg.width / 2,
-          mainCandidate.avg.y + mainCandidate.avg.height / 2,
-          sourceWidth,
-          sourceHeight,
-          bottomAspect,
-        )
-      : centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
+    // Il contenuto principale (gameplay/video reagito) resta SEMPRE centrato orizzontalmente
+    // sul frame intero: non va mai centrato su un volto (altrimenti, se c'è un secondo volto
+    // altrove nel frame — es. un secondo streamer, o un personaggio nel gioco stesso — il
+    // gameplay vero e proprio finisce fuori inquadratura invece di stare al centro).
+    const bottom = centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
 
     logger.info("Layout reaction-cam rilevato", {
       webcam: webcamCandidate.avg,
