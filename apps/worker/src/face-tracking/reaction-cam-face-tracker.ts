@@ -2,6 +2,7 @@ import { OUTPUT_RESOLUTION } from "@clipforge/shared";
 import type { CropWindow, FaceTracker, Layout, TimedCrop } from "./face-tracker.js";
 import { extractRawFrameBGR } from "./frame-extractor.js";
 import { detectFaces, type FaceBox } from "./onnx-face-detector.js";
+import { computeMouthMotion } from "./mouth-motion.js";
 import { centeredCrop, subjectCentricCrop } from "./crop-geometry.js";
 import { CenterCropFaceTracker } from "./center-crop-face-tracker.js";
 import { logger } from "../lib/logger.js";
@@ -9,16 +10,29 @@ import { logger } from "../lib/logger.js";
 const SEGMENT_LENGTH_SECONDS = 6;
 const MAX_SEGMENTS = 5;
 const SAMPLES_PER_SEGMENT = 3;
+const MOTION_FRAME_DELAY_SECONDS = 0.15; // distanza tra i due frame usati per stimare il movimento della bocca
 
 const MIN_STABLE_RATIO = 0.5; // il cluster deve comparire in almeno metà dei sample (del segmento) con un volto
 const WEBCAM_MAX_AREA_RATIO = 0.05; // il volto occupa <5% dell'area del frame
 const WEBCAM_CENTER_MARGIN = 0.3; // centro del volto fuori dal 30%-70% centrale (orizz. o vert.)
 const WEBCAM_PADDING_FACTOR = 2.6; // quanto "allargare" il crop attorno al volto — basso = primo piano stretto, meno sfondo/gioco visibile
 const TOP_RATIO = 0.35; // frazione di altezza dedicata alla webcam nel layout split
+const MOTION_NOISE_FLOOR = 4; // sotto questa soglia il "movimento" è rumore/compressione, non parlato reale
+
+interface DetectionEntry {
+  box: FaceBox;
+  motion: number;
+}
 
 interface Cluster {
-  boxes: FaceBox[];
+  entries: DetectionEntry[];
   sampleIndices: Set<number>;
+}
+
+interface ClusterMeta {
+  avg: FaceBox;
+  count: number;
+  motion: number;
 }
 
 interface SegmentDecision {
@@ -30,23 +44,23 @@ interface SegmentDecision {
 
 /**
  * FaceTracker che usa rilevamento volto reale (ONNX, vedi onnx-face-detector.ts), campionato
- * su più segmenti temporali della clip (non un solo blocco statico), per seguire un feed
- * webcam che può cambiare posizione/persona durante la clip:
+ * su più segmenti temporali della clip, per seguire chi sta effettivamente parlando:
  *
  * - Divide la clip in alcuni segmenti (~6s l'uno) e per ciascuno rileva indipendentemente i
- *   volti presenti.
- * - Se ALMENO UN segmento mostra un volto piccolo e stabile vicino a un bordo (tipico di una
- *   webcam in sovraimpressione), l'intera clip usa un layout split_vertical: la webcam in
- *   alto segue il crop segmento per segmento (per i segmenti senza rilevamento, riusa la
- *   posizione del segmento valido più vicino); il contenuto principale in basso resta
- *   SEMPRE centrato orizzontalmente sul frame intero, mai su un volto — altrimenti un
- *   secondo speaker/personaggio nel gioco stesso "ruberebbe" lo spazio al gameplay vero.
- * - Se non trova mai un pattern webcam, centra semplicemente il crop sul volto più prominente
- *   di ciascun segmento (o sul centro geometrico se nessun volto è mai rilevato).
+ *   volti presenti, stimando anche il movimento della bocca di ciascuno (vedi
+ *   mouth-motion.ts) per distinguere chi sta parlando da chi sta solo ascoltando quando più
+ *   webcam sono visibili insieme nello stesso momento.
+ * - Se un segmento mostra un volto piccolo vicino a un bordo (tipico di una webcam in
+ *   sovraimpressione), l'intera clip usa un layout split_vertical: la webcam in alto segue
+ *   il crop segmento per segmento (per i segmenti senza rilevamento, riusa la posizione del
+ *   segmento valido più vicino); il contenuto principale in basso resta SEMPRE centrato
+ *   orizzontalmente sul frame intero, mai su un volto.
+ * - Se non trova mai un pattern webcam, centra il crop sul volto più prominente di ciascun
+ *   segmento (per prominente si intende: chi parla di più, non semplicemente chi è più
+ *   stabile/grande — a parità di movimento, vince stabilità poi dimensione).
  *
- * Euristica, non un vero riconoscimento di "finestra webcam": funziona bene per il caso
- * comune (bolla fissa in un angolo, anche se il feed attivo cambia) ma può sbagliare con
- * overlay non standard.
+ * Euristica, non un vero riconoscimento "chi sta parlando": funziona bene per il caso comune
+ * ma può sbagliare con inquadrature molto ravvicinate o webcam di bassa qualità/frame rate.
  */
 export class ReactionCamFaceTracker implements FaceTracker {
   private readonly fallback = new CenterCropFaceTracker();
@@ -112,7 +126,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     return { type: "split_vertical", topCrops, bottom, topRatio: TOP_RATIO };
   }
 
-  /** Rileva i volti in un singolo segmento temporale e decide il crop per QUEL segmento. */
+  /** Rileva i volti (e chi sta parlando) in un singolo segmento temporale e decide il crop per QUEL segmento. */
   private async decideSegment(
     videoPath: string,
     sourceWidth: number,
@@ -126,10 +140,28 @@ export class ReactionCamFaceTracker implements FaceTracker {
       timestamps.push(absStart + (duration * i) / (SAMPLES_PER_SEGMENT + 1));
     }
 
-    const samples: FaceBox[][] = [];
+    const samples: DetectionEntry[][] = [];
     for (const t of timestamps) {
-      const frame = await extractRawFrameBGR(videoPath, t);
-      samples.push(await detectFaces(frame, sourceWidth, sourceHeight));
+      const frameA = await extractRawFrameBGR(videoPath, t);
+      const boxes = await detectFaces(frameA, sourceWidth, sourceHeight);
+      if (boxes.length === 0) {
+        samples.push([]);
+        continue;
+      }
+      // Il secondo frame serve solo a stimare il movimento: se fallisce (es. sample troppo
+      // vicino alla fine del video), i volti restano comunque validi con motion=0.
+      let frameB: Buffer | null = null;
+      try {
+        frameB = await extractRawFrameBGR(videoPath, t + MOTION_FRAME_DELAY_SECONDS);
+      } catch {
+        frameB = null;
+      }
+      samples.push(
+        boxes.map((box) => ({
+          box,
+          motion: frameB ? computeMouthMotion(frameA, frameB, box, sourceWidth, sourceHeight) : 0,
+        })),
+      );
     }
 
     const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
@@ -146,13 +178,14 @@ export class ReactionCamFaceTracker implements FaceTracker {
       return { webcamCrop: null, singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect) };
     }
 
-    const withMeta = stable.map((c) => ({ avg: averageBox(c.boxes), count: c.sampleIndices.size }));
+    const withMeta: ClusterMeta[] = stable.map((c) => ({
+      avg: averageBox(c.entries.map((e) => e.box)),
+      count: c.sampleIndices.size,
+      motion: c.entries.reduce((sum, e) => sum + e.motion, 0) / c.entries.length,
+    }));
 
-    const webcamCandidate = withMeta
-      .filter(({ avg }) => isWebcamLike(avg, sourceWidth, sourceHeight))
-      .sort((a, b) => b.count - a.count || areaRatio(a.avg, sourceWidth, sourceHeight) - areaRatio(b.avg, sourceWidth, sourceHeight))[0];
-
-    const primary = withMeta.sort((a, b) => b.count - a.count || b.avg.width * b.avg.height - a.avg.width * a.avg.height)[0];
+    const webcamCandidate = selectBest(withMeta, (m) => isWebcamLike(m.avg, sourceWidth, sourceHeight));
+    const primary = selectBest(withMeta);
     const primaryCx = primary ? primary.avg.x + primary.avg.width / 2 : sourceWidth / 2;
     const primaryCy = primary ? primary.avg.y + primary.avg.height / 2 : sourceHeight / 2;
     const singleCrop = centeredCrop(primaryCx, primaryCy, sourceWidth, sourceHeight, targetAspect);
@@ -168,6 +201,22 @@ export class ReactionCamFaceTracker implements FaceTracker {
   }
 }
 
+/**
+ * Sceglie il "migliore" tra più cluster candidati: se qualcuno si muove chiaramente più
+ * degli altri (sta parlando), vince quello. Altrimenti (tutti fermi/silenzio, o differenze
+ * nel rumore) si torna al criterio precedente: più stabile, poi più grande.
+ */
+function selectBest(list: ClusterMeta[], filter?: (m: ClusterMeta) => boolean): ClusterMeta | undefined {
+  const candidates = filter ? list.filter(filter) : list;
+  if (candidates.length === 0) return undefined;
+
+  const maxMotion = Math.max(...candidates.map((c) => c.motion));
+  if (maxMotion > MOTION_NOISE_FLOOR) {
+    return [...candidates].sort((a, b) => b.motion - a.motion || b.count - a.count)[0];
+  }
+  return [...candidates].sort((a, b) => b.count - a.count || b.avg.width * b.avg.height - a.avg.width * a.avg.height)[0];
+}
+
 /** Trova il crop webcam del segmento valido più vicino (prima prova indietro, poi avanti). */
 function nearestWebcamCrop(decisions: SegmentDecision[], fromIndex: number): CropWindow {
   for (let offset = 1; offset < decisions.length; offset++) {
@@ -176,29 +225,28 @@ function nearestWebcamCrop(decisions: SegmentDecision[], fromIndex: number): Cro
     const after = decisions[fromIndex + offset];
     if (after?.webcamCrop) return after.webcamCrop;
   }
-  // Non dovrebbe succedere (chiamata solo quando anyWebcam è true), ma un fallback safe non guasta.
   const fallback = decisions.find((d) => d.webcamCrop)?.webcamCrop;
   return fallback ?? decisions[fromIndex]!.singleCrop;
 }
 
-/** Clustering greedy: ogni box viene assegnato al cluster più vicino (centro entro soglia), uno per sample. */
-function clusterDetections(samples: FaceBox[][]): Cluster[] {
+/** Clustering greedy: ogni rilevazione viene assegnata al cluster più vicino (centro entro soglia), una per sample. */
+function clusterDetections(samples: DetectionEntry[][]): Cluster[] {
   const clusters: Cluster[] = [];
 
-  samples.forEach((boxes, sampleIndex) => {
-    for (const box of boxes) {
-      const cx = box.x + box.width / 2;
-      const cy = box.y + box.height / 2;
+  samples.forEach((entries, sampleIndex) => {
+    for (const entry of entries) {
+      const cx = entry.box.x + entry.box.width / 2;
+      const cy = entry.box.y + entry.box.height / 2;
 
       let bestCluster: Cluster | null = null;
       let bestDist = Infinity;
       for (const cluster of clusters) {
-        if (cluster.sampleIndices.has(sampleIndex)) continue; // un solo box per sample per cluster
-        const avg = averageBox(cluster.boxes);
+        if (cluster.sampleIndices.has(sampleIndex)) continue; // una sola rilevazione per sample per cluster
+        const avg = averageBox(cluster.entries.map((e) => e.box));
         const acx = avg.x + avg.width / 2;
         const acy = avg.y + avg.height / 2;
         const dist = Math.hypot(cx - acx, cy - acy);
-        const threshold = Math.max(avg.width, box.width) * 0.75;
+        const threshold = Math.max(avg.width, entry.box.width) * 0.75;
         if (dist < threshold && dist < bestDist) {
           bestDist = dist;
           bestCluster = cluster;
@@ -206,10 +254,10 @@ function clusterDetections(samples: FaceBox[][]): Cluster[] {
       }
 
       if (bestCluster) {
-        bestCluster.boxes.push(box);
+        bestCluster.entries.push(entry);
         bestCluster.sampleIndices.add(sampleIndex);
       } else {
-        clusters.push({ boxes: [box], sampleIndices: new Set([sampleIndex]) });
+        clusters.push({ entries: [entry], sampleIndices: new Set([sampleIndex]) });
       }
     }
   });
