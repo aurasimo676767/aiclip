@@ -16,6 +16,7 @@ const MIN_STABLE_RATIO = 0.5; // il cluster deve comparire in almeno metà dei s
 const WEBCAM_MAX_AREA_RATIO = 0.05; // il volto occupa <5% dell'area del frame
 const WEBCAM_CENTER_MARGIN = 0.3; // centro del volto fuori dal 30%-70% centrale (orizz. o vert.)
 const WEBCAM_PADDING_FACTOR = 2.6; // quanto "allargare" il crop attorno al volto — basso = primo piano stretto, meno sfondo/gioco visibile
+const SINGLE_FACE_PADDING_FACTOR = 7; // idem, ma per il layout "schermo intero": più margine (testa+spalle+contesto), non un primissimo piano
 const TOP_RATIO = 0.35; // frazione di altezza dedicata alla webcam nel layout split
 const MOTION_NOISE_FLOOR = 4; // sotto questa soglia il "movimento" è rumore/compressione, non parlato reale
 
@@ -186,9 +187,13 @@ export class ReactionCamFaceTracker implements FaceTracker {
 
     const webcamCandidate = selectBest(withMeta, (m) => isWebcamLike(m.avg, sourceWidth, sourceHeight));
     const primary = selectBest(withMeta);
-    const primaryCx = primary ? primary.avg.x + primary.avg.width / 2 : sourceWidth / 2;
-    const primaryCy = primary ? primary.avg.y + primary.avg.height / 2 : sourceHeight / 2;
-    const singleCrop = centeredCrop(primaryCx, primaryCy, sourceWidth, sourceHeight, targetAspect);
+    // Crop centrato attorno alla persona (con margine per testa/spalle), NON forzato a piena
+    // altezza sorgente: usare sempre piena altezza include qualunque cosa stia sopra/sotto il
+    // volto (barra del browser, bordi neri, altre finestre) quando la webcam non riempie
+    // davvero l'intero frame sorgente — da qui gli "spezzoni" visti in alto nel crop.
+    const singleCrop = primary
+      ? subjectCentricCrop(primary.avg, sourceWidth, sourceHeight, targetAspect, SINGLE_FACE_PADDING_FACTOR)
+      : centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect);
 
     if (!webcamCandidate) {
       return { webcamCrop: null, singleCrop };
