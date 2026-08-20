@@ -155,12 +155,22 @@ export async function rankAndBuildEdl(
 
     logger.warn("Output di ranking non valido, tentativo di correzione", { attempt, issues: validation.error.issues });
 
+    // Un messaggio assistant con un blocco tool_use DEVE essere seguito da un tool_result
+    // (con lo stesso tool_use_id) nel messaggio successivo, non da testo libero — altrimenti
+    // l'API Anthropic rifiuta la richiesta successiva con un 400.
     messages.push({ role: "assistant", content: message.content });
     messages.push({
       role: "user",
-      content: `Il tuo output precedente non rispetta lo schema richiesto. Errori: ${validation.error.issues
-        .map((i) => `${i.path.join(".")}: ${i.message}`)
-        .join("; ")}. Richiama lo strumento ${TOOL_NAME} con un input corretto.`,
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: toolUseBlock.id,
+          is_error: true,
+          content: `Il tuo output precedente non rispetta lo schema richiesto. Errori: ${validation.error.issues
+            .map((i) => `${i.path.join(".")}: ${i.message}`)
+            .join("; ")}. Richiama lo strumento ${TOOL_NAME} con un input corretto.`,
+        },
+      ],
     });
   }
 
