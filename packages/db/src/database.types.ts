@@ -18,6 +18,7 @@ export type Plan = "FREE" | "PRO" | "BUSINESS";
 export type ProjectStatus =
   | "UPLOADING"
   | "UPLOADED"
+  | "DOWNLOADING"
   | "EXTRACTING_AUDIO"
   | "TRANSCRIBING"
   | "ANALYZING"

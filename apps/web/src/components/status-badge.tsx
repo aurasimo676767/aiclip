@@ -1,6 +1,7 @@
 const STATUS_STYLES: Record<string, string> = {
   UPLOADING: "bg-zinc-700/40 text-zinc-300",
   UPLOADED: "bg-zinc-700/40 text-zinc-300",
+  DOWNLOADING: "bg-amber-500/15 text-amber-300",
   EXTRACTING_AUDIO: "bg-amber-500/15 text-amber-300",
   TRANSCRIBING: "bg-amber-500/15 text-amber-300",
   ANALYZING: "bg-amber-500/15 text-amber-300",
@@ -17,6 +18,7 @@ const STATUS_STYLES: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
   UPLOADING: "Caricamento",
   UPLOADED: "Caricato",
+  DOWNLOADING: "Download da YouTube",
   EXTRACTING_AUDIO: "Estrazione audio",
   TRANSCRIBING: "Trascrizione",
   ANALYZING: "Analisi AI",

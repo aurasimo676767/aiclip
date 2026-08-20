@@ -7,6 +7,7 @@ import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider, transcriptionProvider } from "../lib/providers.js";
 import { extractAudio } from "./extract-audio.js";
+import { downloadYoutubeVideo } from "./download-youtube.js";
 import { detectClipCandidates } from "../providers/ai/candidates.js";
 import { rankAndBuildEdl } from "../providers/ai/ranking.js";
 import { updateVideoStatus } from "../queue/video-queue.js";
@@ -17,13 +18,62 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
   await fsp.mkdir(jobDir, { recursive: true });
 
   try {
-    if (!video.storage_path) {
-      throw new Error("Il video non ha un storage_path: upload non completato correttamente");
+    let localVideoPath: string;
+    let videoTitle = video.original_filename;
+
+    if (video.storage_path) {
+      // Percorso "upload file": il client ha già caricato il video su Storage.
+      await updateVideoStatus(video.id, "EXTRACTING_AUDIO");
+      localVideoPath = path.join(jobDir, `source${path.extname(video.storage_path)}`);
+      await storageProvider.downloadToFile(video.storage_path, localVideoPath);
+    } else if (video.source_url) {
+      // Percorso "URL YouTube": il worker scarica il video (yt-dlp) e lo carica su Storage
+      // lui stesso, così il resto della pipeline (estrazione audio, render) resta identico
+      // indipendentemente dalla sorgente.
+      await updateVideoStatus(video.id, "DOWNLOADING");
+      const downloaded = await downloadYoutubeVideo(video.source_url, jobDir);
+      localVideoPath = downloaded.filePath;
+      videoTitle = downloaded.title;
+
+      const { data: project, error: projectFetchError } = await supabase
+        .from("projects")
+        .select("user_id")
+        .eq("id", video.project_id)
+        .single();
+      if (projectFetchError || !project) {
+        throw new Error(`Impossibile recuperare il progetto per l'import YouTube: ${projectFetchError?.message}`);
+      }
+
+      const storagePath = `videos/${project.user_id}/${video.id}/source.mp4`;
+      await storageProvider.uploadFile(localVideoPath, storagePath, "video/mp4");
+      const stat = await fsp.stat(localVideoPath);
+
+      const { error: videoUpdateError } = await supabase
+        .from("videos")
+        .update({
+          storage_path: storagePath,
+          size_bytes: stat.size,
+          mime_type: "video/mp4",
+          original_filename: downloaded.title,
+        })
+        .eq("id", video.id);
+      if (videoUpdateError) {
+        throw new Error(`Aggiornamento video (import YouTube) fallito: ${videoUpdateError.message}`);
+      }
+
+      const { error: projectUpdateError } = await supabase
+        .from("projects")
+        .update({ title: downloaded.title })
+        .eq("id", video.project_id);
+      if (projectUpdateError) {
+        logger.warn("Aggiornamento titolo progetto fallito", { error: projectUpdateError.message });
+      }
+
+      await updateVideoStatus(video.id, "EXTRACTING_AUDIO");
+    } else {
+      throw new Error("Il video non ha né uno storage_path né un source_url: impossibile procedere");
     }
 
-    await updateVideoStatus(video.id, "EXTRACTING_AUDIO");
-    const localVideoPath = path.join(jobDir, `source${path.extname(video.storage_path)}`);
-    await storageProvider.downloadToFile(video.storage_path, localVideoPath);
     const audioPath = await extractAudio(localVideoPath, jobDir);
 
     await updateVideoStatus(video.id, "TRANSCRIBING");
@@ -49,7 +99,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     const candidates = await detectClipCandidates(transcript.segments, {
       apiKey: env.ANTHROPIC_API_KEY,
       model: env.ANTHROPIC_MODEL_CHEAP,
-      videoTitle: video.original_filename,
+      videoTitle,
       videoDurationSeconds: transcript.durationSeconds,
     });
 
@@ -58,7 +108,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     const rankedClips = await rankAndBuildEdl(candidates, transcript.segments, {
       apiKey: env.ANTHROPIC_API_KEY,
       model: env.ANTHROPIC_MODEL_STRONG,
-      videoTitle: video.original_filename,
+      videoTitle,
     });
 
     await updateVideoStatus(video.id, "CLIP_SELECTION");

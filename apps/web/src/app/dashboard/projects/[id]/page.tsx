@@ -81,6 +81,8 @@ function statusMessage(status: string): string {
     case "UPLOADING":
     case "UPLOADED":
       return "In attesa che il worker prenda in carico il video...";
+    case "DOWNLOADING":
+      return "Download del video da YouTube in corso...";
     case "EXTRACTING_AUDIO":
       return "Estrazione audio in corso...";
     case "TRANSCRIBING":

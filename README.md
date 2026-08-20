@@ -24,7 +24,6 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
 - `FaceTracker` → `CenterCropFaceTracker` (crop centrato statico, **nessun rilevamento volto reale**). Interfaccia pronta per un tracker basato su un modello ML.
 - Rendering: FFmpeg puro (crop, zoompan-style zoom via espressioni, sottotitoli ASS/libass) invece di Remotion — più economico e veloce per gli obiettivi di Fase 1; Remotion resta un'opzione futura dietro un eventuale `RenderEngine`.
 - Pubblicazione YouTube: non implementata. Andrebbe aggiunta come `Publisher` interface + OAuth YouTube Data API v3.
-- URL YouTube come sorgente: il campo è già nello schema (`projects.source_type = 'youtube_url'`) e nella UI, ma il download effettivo (es. via `yt-dlp`) non è implementato in Fase 1 — l'upload di file è il percorso completo e testato.
 
 ## Setup
 
@@ -32,6 +31,7 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
 
 - Node.js ≥ 20, pnpm (`corepack enable && corepack prepare pnpm@latest --activate`)
 - FFmpeg nel PATH (`ffmpeg -version` deve funzionare)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) nel PATH (`yt-dlp --version` deve funzionare) — usato per l'import da link YouTube
 - Un progetto [Supabase](https://supabase.com) (free tier va bene)
 - Una API key [Anthropic](https://console.anthropic.com/)
 - Una API key [OpenAI](https://platform.openai.com/api-keys) (usata solo per Whisper)
@@ -42,6 +42,7 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
 2. Vai su **SQL Editor** ed esegui, in ordine, il contenuto di:
    - `packages/db/migrations/0001_init.sql`
    - `packages/db/migrations/0002_queue_functions.sql`
+   - `packages/db/migrations/0003_add_downloading_status.sql`
 3. Vai su **Storage** e crea un bucket **privato** chiamato `clipforge-media` (o il nome che metterai in `STORAGE_BUCKET`).
 4. Vai su **Project Settings → API** e copia `URL`, `anon public key`, `service_role key`.
 
@@ -74,8 +75,8 @@ pnpm dev:worker   # poll continuo della coda su Supabase
 ### 5. Provare il flusso completo
 
 1. Apri `http://localhost:3000`, registrati (`/signup`), conferma l'email se richiesto da Supabase.
-2. **New Project** → carica un video (MP4/MOV/MKV/WebM).
-3. Il worker (deve essere in esecuzione) lo prende in carico automaticamente: estrazione audio → trascrizione Whisper → analisi Claude (Haiku poi Sonnet) → clip suggerite.
+2. Nella dashboard (**My Clips**), incolla un link YouTube e clicca **Importa e analizza** (oppure passa al tab **Carica file** per un video da PC).
+3. Il worker (deve essere in esecuzione) lo prende in carico automaticamente: (download da YouTube se applicabile →) estrazione audio → trascrizione Whisper → analisi Claude (Haiku poi Sonnet) → clip suggerite.
 4. Nella pagina del progetto: seleziona una o più clip → **Generate Shorts**.
 5. Il worker le renderizza (crop 9:16, captions, zoom, hook text). Ricarica/attendi il polling automatico.
 6. **Preview** per riprodurre nel browser, **Scarica MP4** per il download.
@@ -94,7 +95,7 @@ pnpm --filter @clipforge/worker exec tsx src/dev/smoke-test-render.ts <path-vide
 ## Deploy
 
 - **Frontend (`apps/web`)**: Vercel, root directory `apps/web`. Variabili d'ambiente da impostare nel progetto Vercel: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STORAGE_BUCKET`.
-- **Worker (`apps/worker`)**: qualsiasi host capace di eseguire un processo Node long-running (Railway, Fly.io, un VPS con Docker/systemd, ecc.) — **non Vercel**, che non è pensato per processi persistenti né per rendering video pesante. Build: `pnpm --filter @clipforge/worker build`, avvio: `pnpm --filter @clipforge/worker start` (richiede ffmpeg installato nell'immagine/host).
+- **Worker (`apps/worker`)**: qualsiasi host capace di eseguire un processo Node long-running (Railway, Fly.io, un VPS con Docker/systemd, ecc.) — **non Vercel**, che non è pensato per processi persistenti né per rendering video pesante. Build: `pnpm --filter @clipforge/worker build`, avvio: `pnpm --filter @clipforge/worker start` (richiede ffmpeg **e** yt-dlp installati nell'immagine/host).
 
 ## Limitazioni note di questa Fase 1
 
@@ -103,3 +104,4 @@ pnpm --filter @clipforge/worker exec tsx src/dev/smoke-test-render.ts <path-vide
 - **Loudness normalization**: `loudnorm` a singolo passaggio (non i due passaggi raccomandati per la massima precisione) — scelta per semplicità/velocità.
 - **YouTube URL come sorgente**: non implementato (vedi sopra).
 - **Pubblicazione automatica su YouTube**: non implementata.
+- **Import da YouTube**: usa `yt-dlp`, quindi eredita i suoi limiti — video privati, con restrizione età o soggetti a protezioni anti-bot possono fallire il download; nessun supporto per playlist (viene scaricato solo il video singolo).
