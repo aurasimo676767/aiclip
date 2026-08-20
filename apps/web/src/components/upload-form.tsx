@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ALLOWED_VIDEO_MIME_TYPES } from "@clipforge/shared";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type Stage = "idle" | "creating" | "uploading" | "finalizing" | "error";
 
@@ -47,12 +46,13 @@ export function UploadForm() {
       }
 
       setStage("uploading");
-      const supabase = createSupabaseBrowserClient();
-      const { error: uploadError } = await supabase.storage
-        .from(created.bucket)
-        .uploadToSignedUrl(created.storagePath, created.token, file);
-      if (uploadError) {
-        throw new Error(`Upload fallito: ${uploadError.message}`);
+      const uploadRes = await fetch(created.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!uploadRes.ok) {
+        throw new Error(`Upload fallito (HTTP ${uploadRes.status})`);
       }
 
       setStage("finalizing");
@@ -74,7 +74,7 @@ export function UploadForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-xl space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div>
         <label htmlFor="title" className="mb-1 block text-sm font-medium text-zinc-300">
           Titolo progetto
@@ -104,10 +104,6 @@ export function UploadForm() {
             {file.name} — {(file.size / 1024 / 1024).toFixed(1)} MB
           </p>
         )}
-      </div>
-
-      <div className="rounded-lg border border-dashed border-zinc-800 p-4 text-sm text-zinc-500">
-        URL YouTube — in arrivo in una fase successiva. Per ora carica un file video.
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}

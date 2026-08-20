@@ -4,7 +4,10 @@ import { z } from "zod";
 const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-  STORAGE_BUCKET: z.string().min(1).default("clipforge-media"),
+  R2_ACCOUNT_ID: z.string().min(1),
+  R2_ACCESS_KEY_ID: z.string().min(1),
+  R2_SECRET_ACCESS_KEY: z.string().min(1),
+  R2_BUCKET: z.string().min(1),
   ANTHROPIC_API_KEY: z.string().min(1),
   ANTHROPIC_MODEL_CHEAP: z.string().default("claude-haiku-4-5-20251001"),
   ANTHROPIC_MODEL_STRONG: z.string().default("claude-sonnet-5"),

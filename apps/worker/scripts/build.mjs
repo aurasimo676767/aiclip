@@ -12,7 +12,15 @@ import { rm } from "node:fs/promises";
  * restano esterne (richieste da node_modules a runtime, come da deploy standard).
  */
 
-const EXTERNAL_PACKAGES = ["@anthropic-ai/sdk", "openai", "dotenv", "zod", "@supabase/supabase-js"];
+const EXTERNAL_PACKAGES = [
+  "@anthropic-ai/sdk",
+  "openai",
+  "dotenv",
+  "zod",
+  "@supabase/supabase-js",
+  "@aws-sdk/client-s3",
+  "@aws-sdk/s3-request-presigner",
+];
 
 await rm("dist", { recursive: true, force: true });
 

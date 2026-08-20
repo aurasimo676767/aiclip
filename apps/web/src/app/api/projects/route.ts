@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ALLOWED_VIDEO_MIME_TYPES, HARD_MAX_UPLOAD_SIZE_BYTES, PLAN_LIMITS, type Plan } from "@clipforge/shared";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getPresignedUploadUrl } from "@/lib/storage/r2";
 
 const bodySchema = z.object({
   title: z.string().trim().min(1, "Il titolo è obbligatorio").max(200),
@@ -77,11 +77,12 @@ export async function POST(request: Request) {
   const extension = EXTENSION_BY_MIME[mimeType] ?? "mp4";
   const storagePath = `videos/${user.id}/${video.id}/source.${extension}`;
 
-  const admin = createSupabaseAdminClient();
-  const bucket = process.env.STORAGE_BUCKET ?? "clipforge-media";
-  const { data: signed, error: signError } = await admin.storage.from(bucket).createSignedUploadUrl(storagePath);
-  if (signError || !signed) {
-    return NextResponse.json({ error: `Generazione signed URL fallita: ${signError?.message}` }, { status: 500 });
+  let uploadUrl: string;
+  try {
+    uploadUrl = await getPresignedUploadUrl(storagePath, mimeType);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `Generazione URL di upload fallita: ${message}` }, { status: 500 });
   }
 
   const { error: updateError } = await supabase.from("videos").update({ storage_path: storagePath }).eq("id", video.id);
@@ -92,8 +93,6 @@ export async function POST(request: Request) {
   return NextResponse.json({
     projectId: project.id,
     videoId: video.id,
-    storagePath,
-    token: signed.token,
-    bucket,
+    uploadUrl,
   });
 }

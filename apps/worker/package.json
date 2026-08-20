@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@aws-sdk/client-s3": "^3.687.0",
+    "@aws-sdk/s3-request-presigner": "^3.687.0",
     "@supabase/supabase-js": "^2.45.4",
     "@clipforge/db": "workspace:*",
     "@clipforge/shared": "workspace:*",

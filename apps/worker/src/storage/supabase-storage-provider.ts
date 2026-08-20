@@ -4,6 +4,12 @@ import path from "node:path";
 import type { ServiceRoleClient } from "@clipforge/db";
 import type { StorageProvider } from "./storage-provider.js";
 
+/**
+ * Implementazione StorageProvider su Supabase Storage. Non più usata di default (vedi
+ * r2-storage-provider.ts) — il piano Free di Supabase limita ogni file a 50MB, troppo poco
+ * per video sorgente. Lasciata qui come dimostrazione che il provider di storage è
+ * realmente sostituibile: per tornare a Supabase basta cambiare l'istanza in lib/providers.ts.
+ */
 export class SupabaseStorageProvider implements StorageProvider {
   constructor(
     private readonly client: ServiceRoleClient,
