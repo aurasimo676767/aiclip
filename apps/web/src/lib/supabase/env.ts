@@ -1,24 +1,27 @@
 /**
- * Lettura "pigra" (non al top-level del modulo) delle variabili d'ambiente Supabase.
- * Next.js importa i moduli delle Route Handler durante `next build` per raccoglierne i
- * metadati, anche senza eseguire realmente una richiesta: se questo file lanciasse
- * un'eccezione a livello di modulo (es. `const X = requireEnv(...)`), la build fallirebbe
- * ogni volta che le variabili non sono definite in fase di build — anche per route che le
- * useranno solo a runtime. Le funzioni sotto vengono quindi chiamate dentro le factory dei
- * client Supabase, non a module scope.
+ * Lettura delle variabili d'ambiente Supabase pubbliche (NEXT_PUBLIC_*).
+ *
+ * IMPORTANTE: Next.js sostituisce `process.env.NEXT_PUBLIC_X` con il valore letterale
+ * nel bundle del browser SOLO se scritto come accesso statico diretto (`process.env.NOME`).
+ * Un accesso dinamico come `process.env[nome]` (con `nome` variabile) NON viene individuato
+ * dal suo compilatore e resta sempre `undefined` lato client, qualunque cosa sia configurata
+ * su Vercel. Per questo le due funzioni sotto duplicano l'accesso invece di condividere un
+ * helper generico con il nome della variabile come parametro.
  */
-function requireEnv(name: string): string {
-  const value = process.env[name];
+export function getSupabaseUrl(): string {
+  const value = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!value) {
-    throw new Error(`Variabile d'ambiente mancante: ${name}. Controlla il tuo .env rispetto a .env.example.`);
+    throw new Error("Variabile d'ambiente mancante: NEXT_PUBLIC_SUPABASE_URL. Controlla il tuo .env rispetto a .env.example.");
   }
   return value;
 }
 
-export function getSupabaseUrl(): string {
-  return requireEnv("NEXT_PUBLIC_SUPABASE_URL");
-}
-
 export function getSupabaseAnonKey(): string {
-  return requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  const value = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!value) {
+    throw new Error(
+      "Variabile d'ambiente mancante: NEXT_PUBLIC_SUPABASE_ANON_KEY. Controlla il tuo .env rispetto a .env.example.",
+    );
+  }
+  return value;
 }
