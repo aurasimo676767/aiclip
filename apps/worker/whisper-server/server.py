@@ -82,4 +82,8 @@ def transcribe():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=PORT, threaded=False)
+    # threaded=True: senza, il server accetta UNA connessione alla volta — durante una
+    # trascrizione lunga (single-thread, GPU comunque seriale sulle inferenze) anche solo
+    # /health o una richiesta in coda potevano trovare il socket occupato e fallire con
+    # connessione rifiutata invece di aspettare in coda.
+    app.run(host="127.0.0.1", port=PORT, threaded=True)
