@@ -32,6 +32,15 @@ export function centeredCrop(
  * "zoomare" su una regione piccola (es. la bolla di una webcam) invece di centrare un
  * crop a piena altezza come `centeredCrop`.
  */
+// I rilevatori di volti restituiscono un riquadro STRETTO (circa sopracciglia-mento), che
+// NON include fronte/capelli sopra — quasi niente serve invece sotto il mento. Centrare il
+// padding simmetricamente sul riquadro spreca metà del margine sotto il mento e ne lascia
+// troppo poco sopra la testa: nei segmenti con un riquadro rilevato un po' più piccolo del
+// solito, questo faceva tagliare la cima della testa. Ancoriamo quindi il centro verticale
+// più in basso nel riquadro (vicino agli occhi, non al centro geometrico) così una quota
+// maggiore del padding va sopra.
+const VERTICAL_ANCHOR_RATIO = 0.35; // frazione dall'alto del riquadro volto usata come "centro" verticale
+
 export function subjectCentricCrop(
   subject: { x: number; y: number; width: number; height: number },
   sourceWidth: number,
@@ -40,7 +49,7 @@ export function subjectCentricCrop(
   paddingFactor: number,
 ): CropWindow {
   const cx = subject.x + subject.width / 2;
-  const cy = subject.y + subject.height / 2;
+  const cy = subject.y + subject.height * VERTICAL_ANCHOR_RATIO;
 
   let height = Math.min(sourceHeight, subject.height * paddingFactor);
   let width = height * targetAspect;
