@@ -2,6 +2,7 @@ import type { VideoRow, ProjectStatus } from "@clipforge/db";
 import { supabase } from "../lib/supabase.js";
 import { WORKER_ID } from "../lib/worker-id.js";
 import { logger } from "../lib/logger.js";
+import { withNetworkRetry } from "../lib/retry.js";
 
 /** Reclama il prossimo video pronto per la pipeline di analisi (o un job bloccato scaduto). */
 export async function claimNextVideo(): Promise<VideoRow | null> {
@@ -20,21 +21,24 @@ export async function updateVideoStatus(
   status: ProjectStatus,
   fields: Partial<Pick<VideoRow, "error_message" | "duration_seconds" | "claimed_by" | "claimed_at">> = {},
 ): Promise<void> {
-  const { error } = await supabase
-    .from("videos")
-    .update({ status, ...fields })
-    .eq("id", videoId);
+  const { error } = await withNetworkRetry(
+    () => supabase.from("videos").update({ status, ...fields }).eq("id", videoId),
+    "Aggiornamento status video",
+  );
   if (error) {
     throw new Error(`Aggiornamento status video fallito: ${error.message}`);
   }
 
   // Il progetto rispecchia lo status del suo video (Fase 1: un video per progetto).
-  const { data: video } = await supabase.from("videos").select("project_id").eq("id", videoId).single();
+  const { data: video } = await withNetworkRetry(
+    () => supabase.from("videos").select("project_id").eq("id", videoId).single(),
+    "Lettura project_id video",
+  );
   if (video) {
-    await supabase
-      .from("projects")
-      .update({ status, error_message: fields.error_message ?? null })
-      .eq("id", video.project_id);
+    await withNetworkRetry(
+      () => supabase.from("projects").update({ status, error_message: fields.error_message ?? null }).eq("id", video.project_id),
+      "Aggiornamento status progetto",
+    );
   }
 }
 

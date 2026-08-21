@@ -2,6 +2,7 @@ import type { YoutubePublishJobRow, YoutubePublishStatus } from "@clipforge/db";
 import { supabase } from "../lib/supabase.js";
 import { WORKER_ID } from "../lib/worker-id.js";
 import { logger } from "../lib/logger.js";
+import { withNetworkRetry } from "../lib/retry.js";
 
 export async function claimNextPublishJob(): Promise<YoutubePublishJobRow | null> {
   const { data, error } = await supabase.rpc("claim_next_publish_job", { p_worker_id: WORKER_ID });
@@ -18,10 +19,10 @@ export async function updatePublishJobStatus(
   status: YoutubePublishStatus,
   fields: Partial<Pick<YoutubePublishJobRow, "youtube_video_id" | "youtube_url" | "error_message" | "completed_at">> = {},
 ): Promise<void> {
-  const { error } = await supabase
-    .from("youtube_publish_jobs")
-    .update({ status, ...fields })
-    .eq("id", jobId);
+  const { error } = await withNetworkRetry(
+    () => supabase.from("youtube_publish_jobs").update({ status, ...fields }).eq("id", jobId),
+    "Aggiornamento status publish_job",
+  );
   if (error) {
     throw new Error(`Aggiornamento status publish_job fallito: ${error.message}`);
   }

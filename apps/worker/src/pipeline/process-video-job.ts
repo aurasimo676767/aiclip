@@ -11,6 +11,7 @@ import { downloadYoutubeVideo } from "./download-youtube.js";
 import { detectClipCandidates } from "../providers/ai/candidates.js";
 import { rankAndBuildEdl } from "../providers/ai/ranking.js";
 import { updateVideoStatus } from "../queue/video-queue.js";
+import { withNetworkRetry } from "../lib/retry.js";
 
 /** Esegue l'intera pipeline di analisi per un video appena claimato: audio -> transcript -> AI -> clip suggerite. */
 export async function processVideoJob(video: VideoRow): Promise<void> {
@@ -135,7 +136,10 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       throw new Error("L'AI non ha prodotto nessuna clip valida per questo video");
     }
 
-    const { error: insertError } = await supabase.from("clips").insert(clipsToInsert);
+    const { error: insertError } = await withNetworkRetry(
+      () => supabase.from("clips").insert(clipsToInsert),
+      "Inserimento clip",
+    );
     if (insertError) {
       throw new Error(`Inserimento clip fallito: ${insertError.message}`);
     }
