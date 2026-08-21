@@ -1,10 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
+import { Agent } from "undici";
 import type { Transcript, TranscriptSegment } from "@clipforge/shared";
 import { probeVideo } from "../../lib/ffmpeg.js";
 import { logger } from "../../lib/logger.js";
 import { splitAudioIntoChunks } from "./audio-chunker.js";
 import type { TranscriptionProvider } from "./transcription-provider.js";
+
+// Il fetch nativo di Node usa di default un timeout di ~5 minuti (headers/body) sull'Agent
+// undici sottostante: troppo poco per un audio lungo trascritto su una GPU condivisa con
+// altri carichi (es. un gioco), dove la trascrizione può richiedere più tempo del solito.
+// Un Agent dedicato con timeout esteso evita che il worker abbandoni la richiesta mentre
+// il server whisper sta ancora lavorando (il server poi risponde comunque, ma troppo tardi).
+const LOCAL_WHISPER_TIMEOUT_MS = 30 * 60 * 1000; // 30 minuti
+const localWhisperAgent = new Agent({ headersTimeout: LOCAL_WHISPER_TIMEOUT_MS, bodyTimeout: LOCAL_WHISPER_TIMEOUT_MS });
 
 interface LocalWhisperWord {
   word: string;
@@ -93,7 +102,12 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
 
     let response: Response;
     try {
-      response = await fetch(`${this.serverUrl}/transcribe`, { method: "POST", body: form });
+      response = await fetch(`${this.serverUrl}/transcribe`, {
+        method: "POST",
+        body: form,
+        // @ts-expect-error -- `dispatcher` è supportato dal fetch di Node (undici sotto), non è nel tipo standard DOM
+        dispatcher: localWhisperAgent,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(
