@@ -43,6 +43,16 @@ interface SegmentDecision {
   singleCrop: CropWindow; // sempre disponibile: face-centrato se trovato un volto, altrimenti centro geometrico
 }
 
+/** Risultato grezzo di un segmento, prima della selezione dell'ancora cross-segmento. */
+interface SegmentDetections {
+  startSeconds: number;
+  endSeconds: number;
+  webcamCandidates: ClusterMeta[]; // tutti i volti "webcam-like" trovati in QUESTO segmento, non ancora filtrati
+  singleCrop: CropWindow;
+}
+
+const MIN_ANCHOR_SEGMENT_COVERAGE_RATIO = 0.4; // un volto deve ricomparire in almeno questa frazione dei segmenti per essere considerato "la webcam reale" e non un volto di passaggio nel contenuto reagito
+
 /**
  * FaceTracker che usa rilevamento volto reale (ONNX, vedi onnx-face-detector.ts), campionato
  * su più segmenti temporali della clip, per seguire chi sta effettivamente parlando:
@@ -56,6 +66,13 @@ interface SegmentDecision {
  *   il crop segmento per segmento (per i segmenti senza rilevamento, riusa la posizione del
  *   segmento valido più vicino); il contenuto principale in basso resta SEMPRE centrato
  *   orizzontalmente sul frame intero, mai su un volto.
+ * - Prima di scegliere la webcam per ogni segmento, i volti "webcam-like" vengono raggruppati
+ *   per POSIZIONE attraverso TUTTI i segmenti: solo un volto che ricompare nella stessa zona
+ *   dello schermo in più segmenti viene considerato "la webcam reale" (un overlay fisso resta
+ *   fermo nel tempo). Un volto che appare solo in un segmento isolato — tipicamente qualcuno
+ *   inquadrato DENTRO il video reagito, non chi sta reagendo — viene scartato come "ancora",
+ *   anche se in quel singolo segmento sembrava webcam-like: altrimenti finiva per rubare il
+ *   posto alla vera webcam del reactor quando parlava più forte/muoveva di più la bocca.
  * - Se non trova mai un pattern webcam, centra il crop sul volto più prominente di ciascun
  *   segmento (per prominente si intende: chi parla di più, non semplicemente chi è più
  *   stabile/grande — a parità di movimento, vince stabilità poi dimensione).
@@ -79,26 +96,28 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const segmentCount = Math.min(MAX_SEGMENTS, Math.max(1, Math.round(clipDuration / SEGMENT_LENGTH_SECONDS)));
     const segmentLength = clipDuration / segmentCount;
 
-    const decisions: SegmentDecision[] = [];
+    const rawSegments: SegmentDetections[] = [];
     for (let i = 0; i < segmentCount; i++) {
       const segStart = i * segmentLength;
       const segEnd = (i + 1) * segmentLength;
       try {
-        const decision = await this.decideSegment(sourceVideoPath, sourceWidth, sourceHeight, startSeconds + segStart, startSeconds + segEnd);
-        decisions.push({ startSeconds: segStart, endSeconds: segEnd, ...decision });
+        const detections = await this.detectSegment(sourceVideoPath, sourceWidth, sourceHeight, startSeconds + segStart, startSeconds + segEnd);
+        rawSegments.push({ startSeconds: segStart, endSeconds: segEnd, ...detections });
       } catch (err) {
         logger.warn("Face detection fallita per un segmento, uso crop centrato per quel tratto", {
           error: err instanceof Error ? err.message : String(err),
         });
         const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
-        decisions.push({
+        rawSegments.push({
           startSeconds: segStart,
           endSeconds: segEnd,
-          webcamCrop: null,
+          webcamCandidates: [],
           singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect),
         });
       }
     }
+
+    const decisions: SegmentDecision[] = this.resolveWebcamAnchors(rawSegments, segmentCount, sourceWidth, sourceHeight);
 
     const anyWebcam = decisions.some((d) => d.webcamCrop !== null);
 
@@ -127,14 +146,19 @@ export class ReactionCamFaceTracker implements FaceTracker {
     return { type: "split_vertical", topCrops, bottom, topRatio: TOP_RATIO };
   }
 
-  /** Rileva i volti (e chi sta parlando) in un singolo segmento temporale e decide il crop per QUEL segmento. */
-  private async decideSegment(
+  /**
+   * Rileva i volti in un singolo segmento temporale. Ritorna TUTTI i candidati "webcam-like"
+   * trovati (non ancora ridotti a uno solo: la scelta finale considera anche gli altri
+   * segmenti, vedi resolveWebcamAnchors) più lo speaker principale del segmento per il
+   * layout "single" a schermo intero.
+   */
+  private async detectSegment(
     videoPath: string,
     sourceWidth: number,
     sourceHeight: number,
     absStart: number,
     absEnd: number,
-  ): Promise<{ webcamCrop: CropWindow | null; singleCrop: CropWindow }> {
+  ): Promise<{ webcamCandidates: ClusterMeta[]; singleCrop: CropWindow }> {
     const duration = Math.max(0.1, absEnd - absStart);
     const timestamps: number[] = [];
     for (let i = 1; i <= SAMPLES_PER_SEGMENT; i++) {
@@ -168,7 +192,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
     const framesWithDetection = samples.filter((s) => s.length > 0).length;
     if (framesWithDetection === 0) {
-      return { webcamCrop: null, singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect) };
+      return { webcamCandidates: [], singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect) };
     }
 
     const clusters = clusterDetections(samples);
@@ -176,7 +200,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const stable = clusters.filter((c) => c.sampleIndices.size >= minCount);
 
     if (stable.length === 0) {
-      return { webcamCrop: null, singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect) };
+      return { webcamCandidates: [], singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect) };
     }
 
     const withMeta: ClusterMeta[] = stable.map((c) => ({
@@ -185,7 +209,6 @@ export class ReactionCamFaceTracker implements FaceTracker {
       motion: c.entries.reduce((sum, e) => sum + e.motion, 0) / c.entries.length,
     }));
 
-    const webcamCandidate = selectBest(withMeta, (m) => isWebcamLike(m.avg, sourceWidth, sourceHeight));
     const primary = selectBest(withMeta);
     // Crop centrato attorno alla persona (con margine per testa/spalle), NON forzato a piena
     // altezza sorgente: usare sempre piena altezza include qualunque cosa stia sopra/sotto il
@@ -195,14 +218,48 @@ export class ReactionCamFaceTracker implements FaceTracker {
       ? subjectCentricCrop(primary.avg, sourceWidth, sourceHeight, targetAspect, SINGLE_FACE_PADDING_FACTOR)
       : centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect);
 
-    if (!webcamCandidate) {
-      return { webcamCrop: null, singleCrop };
-    }
+    const webcamCandidates = withMeta.filter((m) => isWebcamLike(m.avg, sourceWidth, sourceHeight));
+
+    return { webcamCandidates, singleCrop };
+  }
+
+  /**
+   * Sceglie, per ogni segmento, quale volto "webcam-like" è davvero la webcam del reactor —
+   * usando la persistenza della posizione ATTRAVERSO i segmenti, non il singolo segmento
+   * isolato. Un overlay reale resta (circa) nello stesso punto dello schermo per tutta la
+   * clip; un volto che appare dentro il contenuto reagito (es. il video che si sta guardando)
+   * compare tipicamente in un solo segmento e sparisce. Solo i volti che ricompaiono in più
+   * segmenti diventano "ancore" valide; tra più ancore nello stesso segmento (vera webcam
+   * doppia/duo) si sceglie comunque in base al movimento della bocca, come prima.
+   */
+  private resolveWebcamAnchors(
+    rawSegments: SegmentDetections[],
+    segmentCount: number,
+    sourceWidth: number,
+    sourceHeight: number,
+  ): SegmentDecision[] {
+    const allCandidates: Array<{ segIndex: number; meta: ClusterMeta }> = [];
+    rawSegments.forEach((seg, segIndex) => {
+      for (const meta of seg.webcamCandidates) {
+        allCandidates.push({ segIndex, meta });
+      }
+    });
+
+    const minAnchorCoverage = segmentCount <= 2 ? 1 : Math.max(2, Math.ceil(segmentCount * MIN_ANCHOR_SEGMENT_COVERAGE_RATIO));
+    const anchorGroups = clusterByPosition(allCandidates).filter((g) => g.segIndices.size >= minAnchorCoverage);
 
     const topAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * TOP_RATIO);
-    const webcamCrop = subjectCentricCrop(webcamCandidate.avg, sourceWidth, sourceHeight, topAspect, WEBCAM_PADDING_FACTOR);
 
-    return { webcamCrop, singleCrop };
+    return rawSegments.map((seg) => {
+      const anchoredHere = seg.webcamCandidates.filter((m) => anchorGroups.some((g) => isNearBox(m.avg, g.avg)));
+      const chosen = selectBest(anchoredHere);
+      return {
+        startSeconds: seg.startSeconds,
+        endSeconds: seg.endSeconds,
+        webcamCrop: chosen ? subjectCentricCrop(chosen.avg, sourceWidth, sourceHeight, topAspect, WEBCAM_PADDING_FACTOR) : null,
+        singleCrop: seg.singleCrop,
+      };
+    });
   }
 }
 
@@ -232,6 +289,56 @@ function nearestWebcamCrop(decisions: SegmentDecision[], fromIndex: number): Cro
   }
   const fallback = decisions.find((d) => d.webcamCrop)?.webcamCrop;
   return fallback ?? decisions[fromIndex]!.singleCrop;
+}
+
+interface PositionGroup {
+  avg: FaceBox;
+  segIndices: Set<number>;
+  entries: FaceBox[];
+}
+
+/**
+ * Raggruppa candidati "webcam-like" per posizione ATTRAVERSO i segmenti (a differenza di
+ * clusterDetections, che raggruppa le rilevazioni DENTRO un singolo segmento): serve a capire
+ * quale volto è un overlay persistente (la vera webcam) e quale è comparso solo di passaggio.
+ */
+function clusterByPosition(items: Array<{ segIndex: number; meta: ClusterMeta }>): PositionGroup[] {
+  const groups: PositionGroup[] = [];
+
+  for (const { segIndex, meta } of items) {
+    let bestGroup: PositionGroup | null = null;
+    let bestDist = Infinity;
+    for (const group of groups) {
+      if (group.segIndices.has(segIndex)) continue; // un solo volto per segmento per gruppo
+      const dist = boxDistance(meta.avg, group.avg);
+      const threshold = Math.max(group.avg.width, meta.avg.width) * 0.75;
+      if (dist < threshold && dist < bestDist) {
+        bestDist = dist;
+        bestGroup = group;
+      }
+    }
+    if (bestGroup) {
+      bestGroup.entries.push(meta.avg);
+      bestGroup.segIndices.add(segIndex);
+      bestGroup.avg = averageBox(bestGroup.entries);
+    } else {
+      groups.push({ avg: meta.avg, segIndices: new Set([segIndex]), entries: [meta.avg] });
+    }
+  }
+
+  return groups;
+}
+
+function isNearBox(a: FaceBox, b: FaceBox): boolean {
+  return boxDistance(a, b) < Math.max(a.width, b.width) * 0.75;
+}
+
+function boxDistance(a: FaceBox, b: FaceBox): number {
+  const acx = a.x + a.width / 2;
+  const acy = a.y + a.height / 2;
+  const bcx = b.x + b.width / 2;
+  const bcy = b.y + b.height / 2;
+  return Math.hypot(acx - bcx, acy - bcy);
 }
 
 /** Clustering greedy: ogni rilevazione viene assegnata al cluster più vicino (centro entro soglia), una per sample. */
