@@ -9,7 +9,7 @@ import { logger } from "../lib/logger.js";
 
 const SEGMENT_LENGTH_SECONDS = 2; // prima 6: un editor umano cambia inquadratura ogni 1-2s, non ogni 6
 const MAX_SEGMENTS = 30; // alzato in proporzione: senza questo, per clip di 20-60s il cap dominava comunque e SEGMENT_LENGTH_SECONDS più basso non aveva alcun effetto reale
-const SAMPLES_PER_SEGMENT = 3;
+const SAMPLES_PER_SEGMENT = 5; // prima 3: verificato su un video reale (4 persone in call) che le webcam più piccole/meno nitide dei partecipanti minori venivano rilevate in una minoranza dei campioni, sparendo dai candidati di interi segmenti anche se stavano parlando
 const MOTION_FRAME_DELAY_SECONDS = 0.15; // distanza tra i due frame usati per stimare il movimento della bocca
 
 const MIN_STABLE_RATIO = 0.5; // il cluster deve comparire in almeno metà dei sample (del segmento) con un volto
