@@ -7,8 +7,8 @@ import { centeredCrop, subjectCentricCrop } from "./crop-geometry.js";
 import { CenterCropFaceTracker } from "./center-crop-face-tracker.js";
 import { logger } from "../lib/logger.js";
 
-const SEGMENT_LENGTH_SECONDS = 6;
-const MAX_SEGMENTS = 5;
+const SEGMENT_LENGTH_SECONDS = 2; // prima 6: un editor umano cambia inquadratura ogni 1-2s, non ogni 6
+const MAX_SEGMENTS = 30; // alzato in proporzione: senza questo, per clip di 20-60s il cap dominava comunque e SEGMENT_LENGTH_SECONDS più basso non aveva alcun effetto reale
 const SAMPLES_PER_SEGMENT = 3;
 const MOTION_FRAME_DELAY_SECONDS = 0.15; // distanza tra i due frame usati per stimare il movimento della bocca
 
