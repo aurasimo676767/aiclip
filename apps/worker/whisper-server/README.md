@@ -41,23 +41,28 @@ Remove-Item get-pip.py
 
 ## Avvio
 
-```powershell
-cd apps/worker/whisper-server
-./python-embed/python.exe server.py
-```
-
-Al primo avvio scarica il modello `large-v3` (~3GB, una tantum, cache in
-`~/.cache/huggingface`). Quando vedi `[whisper-server] Modello pronto.` è in ascolto su
-`http://127.0.0.1:8765`.
-
-Poi, nell'altro terminale dove gira il worker, imposta in `apps/worker/.env`:
+Imposta prima in `apps/worker/.env`:
 
 ```
 TRANSCRIPTION_PROVIDER=local
 ```
 
-e riavvia `pnpm dev:worker`. Se vuoi tornare a Whisper API, basta rimettere
-`TRANSCRIPTION_PROVIDER=openai` (o rimuovere la riga) e riavviare — nessun altro cambio.
+Poi, dalla radice del repository, un solo comando avvia sia il server whisper sia il
+worker insieme (output con prefisso `[whisper]`/`[worker]` nello stesso terminale):
+
+```bash
+pnpm dev:worker:local
+```
+
+(Alternativa: due terminali separati con `pnpm dev:whisper` e `pnpm dev:worker`, se
+preferisci log distinti o vuoi lasciare il server whisper acceso più a lungo del worker.)
+
+Al primo avvio scarica il modello `large-v3` (~3GB, una tantum, cache in
+`~/.cache/huggingface`). Quando vedi `[whisper-server] Modello pronto.` è in ascolto su
+`http://127.0.0.1:8765` e il worker può usarlo.
+
+Per tornare a Whisper API, rimetti `TRANSCRIPTION_PROVIDER=openai` (o rimuovi la riga) e
+riavvia — nessun altro cambio.
 
 ## Variabili d'ambiente opzionali (server Python)
 
