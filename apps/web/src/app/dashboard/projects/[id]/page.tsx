@@ -6,7 +6,7 @@ import { PollingRefresher } from "@/components/polling-refresher";
 import { ClipList, type ClipViewModel } from "@/components/clip-list";
 
 export default async function ProjectDetailPage({ params }: { params: { id: string } }) {
-  const { supabase } = await requireUser();
+  const { supabase, user } = await requireUser();
 
   const { data: project } = await supabase.from("projects").select("*").eq("id", params.id).single();
   if (!project) {
@@ -16,23 +16,52 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
   const { data: video } = await supabase.from("videos").select("*").eq("project_id", params.id).maybeSingle();
   const { data: clipsRaw } = await supabase
     .from("clips")
-    .select("id, title, hook, reason, duration, scores, status, error_message")
+    .select("id, title, hook, reason, duration, scores, status, error_message, hashtags")
     .eq("project_id", params.id);
 
-  const clips: ClipViewModel[] = (clipsRaw ?? []).map((c) => ({
-    id: c.id,
-    title: c.title,
-    hook: c.hook,
-    reason: c.reason,
-    duration: c.duration,
-    scores: c.scores as ClipScores,
-    status: c.status,
-    errorMessage: c.error_message,
-  }));
+  const clipIds = (clipsRaw ?? []).map((c) => c.id);
+
+  const [{ data: youtubeConnection }, { data: publishJobsRaw }] = await Promise.all([
+    supabase.from("youtube_connections").select("channel_title").eq("user_id", user.id).maybeSingle(),
+    clipIds.length > 0
+      ? supabase
+          .from("youtube_publish_jobs")
+          .select("clip_id, status, youtube_url, error_message, created_at")
+          .in("clip_id", clipIds)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as never[] }),
+  ]);
+
+  // Solo il job di pubblicazione più recente per clip (l'array è già ordinato created_at desc).
+  const latestPublishByClip = new Map<string, { status: string; youtubeUrl: string | null; errorMessage: string | null }>();
+  for (const job of publishJobsRaw ?? []) {
+    if (!latestPublishByClip.has(job.clip_id)) {
+      latestPublishByClip.set(job.clip_id, { status: job.status, youtubeUrl: job.youtube_url, errorMessage: job.error_message });
+    }
+  }
+
+  const clips: ClipViewModel[] = (clipsRaw ?? []).map((c) => {
+    const publish = latestPublishByClip.get(c.id);
+    return {
+      id: c.id,
+      title: c.title,
+      hook: c.hook,
+      reason: c.reason,
+      duration: c.duration,
+      scores: c.scores as ClipScores,
+      status: c.status,
+      errorMessage: c.error_message,
+      hashtags: (c.hashtags as string[] | null) ?? [],
+      youtubePublishStatus: publish?.status ?? null,
+      youtubeUrl: publish?.youtubeUrl ?? null,
+      youtubeError: publish?.errorMessage ?? null,
+    };
+  });
 
   const projectProcessing = isProcessingStatus(project.status);
   const anyClipInFlight = clips.some((c) => c.status === "QUEUED" || c.status === "RENDERING");
-  const pollingActive = projectProcessing || anyClipInFlight;
+  const anyPublishInFlight = clips.some((c) => c.youtubePublishStatus === "PENDING" || c.youtubePublishStatus === "UPLOADING");
+  const pollingActive = projectProcessing || anyClipInFlight || anyPublishInFlight;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -69,7 +98,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
       {clips.length > 0 && (
         <div className="space-y-4">
           <p className="text-sm text-zinc-400">Trovate {clips.length} clip potenziali</p>
-          <ClipList clips={clips} />
+          <ClipList clips={clips} youtubeConnected={Boolean(youtubeConnection)} />
         </div>
       )}
     </div>

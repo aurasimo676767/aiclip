@@ -30,6 +30,10 @@ export type ClipStatus = "SUGGESTED" | "QUEUED" | "RENDERING" | "COMPLETED" | "F
 
 export type RenderJobStatus = "PENDING" | "RENDERING" | "COMPLETED" | "FAILED";
 
+export type YoutubePublishStatus = "PENDING" | "UPLOADING" | "COMPLETED" | "FAILED";
+
+export type YoutubePrivacyStatus = "public" | "unlisted" | "private";
+
 export interface Database {
   public: {
     Tables: {
@@ -205,6 +209,7 @@ export interface Database {
           editing_style: string;
           template: string;
           edl: unknown;
+          hashtags: unknown;
           status: ClipStatus;
           output_video_path: string | null;
           thumbnail_path: string | null;
@@ -226,6 +231,7 @@ export interface Database {
           editing_style: string;
           template: string;
           edl: unknown;
+          hashtags?: unknown;
           status?: ClipStatus;
           output_video_path?: string | null;
           thumbnail_path?: string | null;
@@ -247,6 +253,7 @@ export interface Database {
           editing_style?: string;
           template?: string;
           edl?: unknown;
+          hashtags?: unknown;
           status?: ClipStatus;
           output_video_path?: string | null;
           thumbnail_path?: string | null;
@@ -334,6 +341,104 @@ export interface Database {
         Relationships: [];
       };
 
+      youtube_connections: {
+        Row: {
+          id: string;
+          user_id: string;
+          access_token: string;
+          refresh_token: string;
+          expires_at: string;
+          channel_id: string;
+          channel_title: string;
+          scope: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          access_token: string;
+          refresh_token: string;
+          expires_at: string;
+          channel_id: string;
+          channel_title: string;
+          scope: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          access_token?: string;
+          refresh_token?: string;
+          expires_at?: string;
+          channel_id?: string;
+          channel_title?: string;
+          scope?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
+      youtube_publish_jobs: {
+        Row: {
+          id: string;
+          clip_id: string;
+          status: YoutubePublishStatus;
+          title: string;
+          description: string;
+          tags: unknown;
+          privacy_status: YoutubePrivacyStatus;
+          youtube_video_id: string | null;
+          youtube_url: string | null;
+          error_message: string | null;
+          claimed_by: string | null;
+          claimed_at: string | null;
+          attempts: number;
+          started_at: string | null;
+          completed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          clip_id: string;
+          status?: YoutubePublishStatus;
+          title: string;
+          description: string;
+          tags?: unknown;
+          privacy_status?: YoutubePrivacyStatus;
+          youtube_video_id?: string | null;
+          youtube_url?: string | null;
+          error_message?: string | null;
+          claimed_by?: string | null;
+          claimed_at?: string | null;
+          attempts?: number;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          clip_id?: string;
+          status?: YoutubePublishStatus;
+          title?: string;
+          description?: string;
+          tags?: unknown;
+          privacy_status?: YoutubePrivacyStatus;
+          youtube_video_id?: string | null;
+          youtube_url?: string | null;
+          error_message?: string | null;
+          claimed_by?: string | null;
+          claimed_at?: string | null;
+          attempts?: number;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+
       usage: {
         Row: {
           id: string;
@@ -383,6 +488,10 @@ export interface Database {
         Args: { p_worker_id: string; p_stale_seconds?: number; p_max_attempts?: number };
         Returns: Database["public"]["Tables"]["render_jobs"]["Row"] | null;
       };
+      claim_next_publish_job: {
+        Args: { p_worker_id: string; p_stale_seconds?: number; p_max_attempts?: number };
+        Returns: Database["public"]["Tables"]["youtube_publish_jobs"]["Row"] | null;
+      };
     };
   };
 }
@@ -420,3 +529,11 @@ export type SubscriptionUpdate = Database["public"]["Tables"]["subscriptions"]["
 export type UsageRow = Database["public"]["Tables"]["usage"]["Row"];
 export type UsageInsert = Database["public"]["Tables"]["usage"]["Insert"];
 export type UsageUpdate = Database["public"]["Tables"]["usage"]["Update"];
+
+export type YoutubeConnectionRow = Database["public"]["Tables"]["youtube_connections"]["Row"];
+export type YoutubeConnectionInsert = Database["public"]["Tables"]["youtube_connections"]["Insert"];
+export type YoutubeConnectionUpdate = Database["public"]["Tables"]["youtube_connections"]["Update"];
+
+export type YoutubePublishJobRow = Database["public"]["Tables"]["youtube_publish_jobs"]["Row"];
+export type YoutubePublishJobInsert = Database["public"]["Tables"]["youtube_publish_jobs"]["Insert"];
+export type YoutubePublishJobUpdate = Database["public"]["Tables"]["youtube_publish_jobs"]["Update"];

@@ -3,8 +3,10 @@ import { logger } from "./lib/logger.js";
 import { WORKER_ID } from "./lib/worker-id.js";
 import { claimNextVideo } from "./queue/video-queue.js";
 import { claimNextRenderJob } from "./queue/render-queue.js";
+import { claimNextPublishJob } from "./queue/publish-queue.js";
 import { processVideoJob } from "./pipeline/process-video-job.js";
 import { processRenderJob } from "./pipeline/process-render-job.js";
+import { processPublishJob } from "./pipeline/process-publish-job.js";
 
 let shuttingDown = false;
 
@@ -46,6 +48,23 @@ async function renderQueueLoop(): Promise<void> {
   }
 }
 
+/** Loop di polling per la coda di pubblicazione su YouTube. */
+async function publishQueueLoop(): Promise<void> {
+  while (!shuttingDown) {
+    try {
+      const job = await claimNextPublishJob();
+      if (job) {
+        logger.info("Publish job claimato", { jobId: job.id, workerId: WORKER_ID });
+        await processPublishJob(job);
+        continue;
+      }
+    } catch (err) {
+      logger.error("Errore nel loop della coda publish", { error: err instanceof Error ? err.message : String(err) });
+    }
+    await sleep(env.QUEUE_POLL_INTERVAL_MS);
+  }
+}
+
 function handleShutdown(signal: string): void {
   logger.info(`Ricevuto ${signal}, arresto in corso dopo il job corrente...`);
   shuttingDown = true;
@@ -56,4 +75,4 @@ process.on("SIGTERM", () => handleShutdown("SIGTERM"));
 
 logger.info("ClipForge worker avviato", { workerId: WORKER_ID, pollIntervalMs: env.QUEUE_POLL_INTERVAL_MS });
 
-await Promise.all([videoQueueLoop(), renderQueueLoop()]);
+await Promise.all([videoQueueLoop(), renderQueueLoop(), publishQueueLoop()]);

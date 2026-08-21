@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { overallScore, type ClipScores } from "@clipforge/shared";
 import { StatusBadge } from "./status-badge";
+import { PublishYoutubeButton } from "./publish-youtube-button";
 
 export interface ClipViewModel {
   id: string;
@@ -14,9 +15,13 @@ export interface ClipViewModel {
   scores: ClipScores;
   status: string;
   errorMessage: string | null;
+  hashtags: string[];
+  youtubePublishStatus: string | null;
+  youtubeUrl: string | null;
+  youtubeError: string | null;
 }
 
-export function ClipList({ clips }: { clips: ClipViewModel[] }) {
+export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; youtubeConnected: boolean }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
@@ -127,6 +132,9 @@ export function ClipList({ clips }: { clips: ClipViewModel[] }) {
                     {Math.round(clip.duration)}s — Hook: &ldquo;{clip.hook}&rdquo;
                   </p>
                   <p className="text-sm text-zinc-500">{clip.reason}</p>
+                  {clip.hashtags.length > 0 && (
+                    <p className="text-xs text-brand-300/80">{clip.hashtags.map((h) => `#${h}`).join(" ")}</p>
+                  )}
                   {clip.errorMessage && <p className="text-sm text-red-400">Errore: {clip.errorMessage}</p>}
 
                   <ScoreBreakdown scores={clip.scores} />
@@ -154,6 +162,24 @@ export function ClipList({ clips }: { clips: ClipViewModel[] }) {
                         >
                           Scarica MP4
                         </a>
+                      )}
+
+                      {youtubeConnected ? (
+                        <div className="mt-2">
+                          <PublishYoutubeButton
+                            clipId={clip.id}
+                            defaultTitle={clip.title}
+                            defaultDescription={`${clip.hook}\n\n${clip.reason}`}
+                            defaultHashtags={clip.hashtags}
+                            status={clip.youtubePublishStatus}
+                            youtubeUrl={clip.youtubeUrl}
+                            youtubeError={clip.youtubeError}
+                          />
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-zinc-600">
+                          Collega YouTube dalle Impostazioni per pubblicare direttamente.
+                        </p>
                       )}
                     </div>
                   )}

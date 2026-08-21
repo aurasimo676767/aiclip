@@ -23,6 +23,7 @@ const EXTERNAL_PACKAGES = [
   // Contiene un addon nativo (.node) specifico per piattaforma: non bundlabile da esbuild,
   // deve restare un require verso node_modules a runtime.
   "onnxruntime-node",
+  "googleapis",
 ];
 
 await rm("dist", { recursive: true, force: true });

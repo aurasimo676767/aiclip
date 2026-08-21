@@ -2,7 +2,7 @@
 
 Piattaforma SaaS proprietaria per la generazione automatica di YouTube Shorts da video lunghi: upload → trascrizione → analisi AI → clip 9:16 con editing automatico e sottotitoli sincronizzati → download.
 
-**Fase 1 (MVP)**: upload → transcript → AI clip detection → selezione clip → verticalizzazione 9:16 → captions → editing automatico di base → render → preview → download. Non implementati in questa fase: pagamenti, mobile app, team, scheduling social, multi-lingua avanzato, AI B-roll, avatar AI, pubblicazione automatica su YouTube.
+**Fase 1 (MVP)**: upload → transcript → AI clip detection → selezione clip → verticalizzazione 9:16 → captions → editing automatico di base → render → preview → download → pubblicazione su YouTube. Non implementati in questa fase: pagamenti, mobile app, team, scheduling social, multi-lingua avanzato, AI B-roll, avatar AI.
 
 ## Architettura
 
@@ -23,7 +23,7 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
 - `StorageProvider` → `R2StorageProvider` (Cloudflare R2, compatibile S3). Un'implementazione `SupabaseStorageProvider` alternativa esiste ancora nel codice ma non è usata di default: il piano Free di Supabase Storage limita ogni file a 50MB, troppo poco per video sorgente.
 - `FaceTracker` → `ReactionCamFaceTracker`: rilevamento volto reale (ONNX, Ultra-Light-Fast-Generic-Face-Detector, ~1.2MB, `onnxruntime-node` — binari precompilati, nessuna compilazione nativa richiesta) su alcuni frame campionati della clip. Se trova un volto piccolo e stabile vicino a un bordo (webcam in sovraimpressione su gameplay/reaction) produce un layout split-screen (webcam sopra, contenuto sotto); se trova un volto "normale" centra il crop su di esso; altrimenti ricade su `CenterCropFaceTracker` (crop centrato statico). Modello in `apps/worker/models/`.
 - Rendering: FFmpeg puro (crop, zoompan-style zoom via espressioni, sottotitoli ASS/libass) invece di Remotion — più economico e veloce per gli obiettivi di Fase 1; Remotion resta un'opzione futura dietro un eventuale `RenderEngine`.
-- Pubblicazione YouTube: non implementata. Andrebbe aggiunta come `Publisher` interface + OAuth YouTube Data API v3.
+- Pubblicazione YouTube: OAuth Google (`youtube.upload` scope) + coda dedicata (`youtube_publish_jobs`, stesso pattern di `render_jobs`). Il worker carica il file su YouTube via `googleapis` — mai da Vercel. Titolo/descrizione/hashtag sono precompilati dall'AI (generati nello stesso passaggio di ranking, nessuna chiamata extra) e modificabili prima di pubblicare.
 
 ## Setup
 
@@ -36,6 +36,7 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
 - Un account [Cloudflare](https://dash.cloudflare.com) con un bucket [R2](https://developers.cloudflare.com/r2/) (free tier: 10GB, nessun limite per singolo file)
 - Una API key [Anthropic](https://console.anthropic.com/)
 - Una API key [OpenAI](https://platform.openai.com/api-keys) (usata solo per Whisper)
+- Un progetto [Google Cloud](https://console.cloud.google.com) con OAuth configurato (solo se vuoi la pubblicazione automatica su YouTube — vedi sezione 3)
 
 ### 1. Progetto Supabase
 
@@ -44,6 +45,7 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
    - `packages/db/migrations/0001_init.sql`
    - `packages/db/migrations/0002_queue_functions.sql`
    - `packages/db/migrations/0003_add_downloading_status.sql`
+   - `packages/db/migrations/0004_youtube_publishing.sql`
 3. Vai su **Project Settings → API** e copia `URL` e `anon public key` (servono al frontend). Vai su **Project Settings → API → Service role** e copia anche quella (serve solo al worker).
 
 ### 2. Bucket Cloudflare R2
@@ -64,7 +66,21 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
    ```
    (senza questo, l'upload diretto dal browser viene bloccato dal CORS — l'import da YouTube non ne ha bisogno, passa tutto dal worker)
 
-### 3. Variabili d'ambiente
+### 3. OAuth Google/YouTube (opzionale — solo per pubblicare automaticamente)
+
+1. console.cloud.google.com → crea un progetto.
+2. **API e servizi → Libreria** → cerca "YouTube Data API v3" → **Abilita**.
+3. **API e servizi → Schermata consenso OAuth** → tipo **Esterno** → compila i campi minimi → in **Utenti di test** aggiungi il tuo account Google (così l'app resta in modalità Test, nessuna revisione Google necessaria per uso personale).
+4. **API e servizi → Credenziali → Crea credenziali → ID client OAuth** → tipo **Applicazione web** → URI di reindirizzamento autorizzati:
+   ```
+   http://localhost:3000/api/youtube/callback
+   https://il-tuo-dominio.vercel.app/api/youtube/callback
+   ```
+5. Copia **Client ID** e **Client Secret**.
+
+Nota sulla quota: YouTube Data API concede 10.000 unità/giorno gratis, ogni upload ne costa 1.600 (~6 pubblicazioni/giorno di default; aumentabile su richiesta a Google).
+
+### 4. Variabili d'ambiente
 
 `pnpm --filter` esegue ogni app nella propria cartella, quindi servono **due file separati** (non uno alla radice) — `.env.example` alla radice resta solo come riferimento con la lista completa delle variabili:
 
@@ -75,13 +91,13 @@ cp .env.example apps/web/.env.local
 
 Compila entrambi con i valori di Supabase/R2/Anthropic/OpenAI (`apps/web/.env.local` non ha bisogno delle variabili solo-worker come `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`SUPABASE_SERVICE_ROLE_KEY`, ma lasciarle non fa danno). **Non committare mai questi file** (sono già in `.gitignore`).
 
-### 4. Installazione
+### 5. Installazione
 
 ```bash
 pnpm install
 ```
 
-### 5. Avvio in locale
+### 6. Avvio in locale
 
 Servono due processi separati (frontend e worker), in due terminali:
 
@@ -90,7 +106,7 @@ pnpm dev:web      # http://localhost:3000
 pnpm dev:worker   # poll continuo della coda su Supabase
 ```
 
-### 6. Provare il flusso completo
+### 7. Provare il flusso completo
 
 1. Apri `http://localhost:3000`, registrati (`/signup`), conferma l'email se richiesto da Supabase.
 2. Nella dashboard (**My Clips**), incolla un link YouTube e clicca **Importa e analizza** (oppure passa al tab **Carica file** per un video da PC).
@@ -112,7 +128,7 @@ pnpm --filter @clipforge/worker exec tsx src/dev/smoke-test-render.ts <path-vide
 
 ## Deploy
 
-- **Frontend (`apps/web`)**: Vercel, root directory `apps/web`. Variabili d'ambiente da impostare nel progetto Vercel: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`. Ricorda di aggiungere il dominio Vercel definitivo alla CORS policy del bucket R2 (vedi sopra).
+- **Frontend (`apps/web`)**: Vercel, root directory `apps/web`. Variabili d'ambiente da impostare nel progetto Vercel: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (solo se vuoi la pubblicazione YouTube). Ricorda di aggiungere il dominio Vercel definitivo sia alla CORS policy del bucket R2 sia agli URI di reindirizzamento autorizzati del client OAuth Google (vedi sopra).
 - **Worker (`apps/worker`)**: qualsiasi host capace di eseguire un processo Node long-running (Railway, Fly.io, un VPS con Docker/systemd, ecc.) — **non Vercel**, che non è pensato per processi persistenti né per rendering video pesante. Build: `pnpm --filter @clipforge/worker build`, avvio: `pnpm --filter @clipforge/worker start` (richiede ffmpeg **e** yt-dlp installati nell'immagine/host; `apps/worker/models/` e `node_modules` devono essere presenti accanto a `dist/` — `onnxruntime-node` ha un addon nativo per piattaforma che esbuild lascia esterno, vedi commento in `scripts/build.mjs`).
 
 ## Limitazioni note di questa Fase 1
@@ -120,5 +136,5 @@ pnpm --filter @clipforge/worker exec tsx src/dev/smoke-test-render.ts <path-vide
 - **Font dei sottotitoli**: i template referenziano font (Montserrat, Poppins, Anton, ...) che libass risolve tramite i font di sistema disponibili sulla macchina che esegue il worker; se non installati, libass usa un fallback (i sottotitoli restano leggibili ma con font diverso). Per un deploy in produzione, valuta di includere i file `.ttf` nell'immagine del worker e puntarli esplicitamente.
 - **Reaction-cam / face tracking**: euristica basata su rilevamento volto reale (non un vero riconoscimento di "finestra webcam"): funziona bene per il caso comune (bolla fissa in un angolo, piccola rispetto al frame) ma può non attivarsi con overlay non standard (bolla grande, posizione centrale, forma non tipica). Nessun tracking frame-per-frame: il crop è fisso per l'intera durata della clip, calcolato da alcuni frame campionati.
 - **Loudness normalization**: `loudnorm` a singolo passaggio (non i due passaggi raccomandati per la massima precisione) — scelta per semplicità/velocità.
-- **Pubblicazione automatica su YouTube**: non implementata.
+- **Pubblicazione automatica su YouTube**: richiede un client OAuth Google in modalità "Testing" — funziona solo per gli account aggiunti come "Utenti di test" nella schermata di consenso (limite Google, non dell'app); passare in produzione richiede la revisione dell'app da parte di Google. Quota gratuita: 10.000 unità/giorno, ogni upload costa 1.600 unità (~6 pubblicazioni/giorno).
 - **Import da YouTube**: usa `yt-dlp`, quindi eredita i suoi limiti — video privati, con restrizione età o soggetti a protezioni anti-bot possono fallire il download; nessun supporto per playlist (viene scaricato solo il video singolo).

@@ -87,8 +87,14 @@ const RANKING_TOOL_SCHEMA = {
               },
               required: ["template", "events"],
             },
+            hashtags: {
+              type: "array",
+              maxItems: 10,
+              items: { type: "string" },
+              description: "5-8 hashtag pertinenti per la pubblicazione su YouTube Shorts, SENZA il simbolo #, in minuscolo, senza spazi (es. \"podcast\", \"funnymoments\").",
+            },
           },
-          required: ["start", "end", "duration", "hook", "title", "reason", "scores", "editing_style", "edl"],
+          required: ["start", "end", "duration", "hook", "title", "reason", "scores", "editing_style", "edl", "hashtags"],
         },
       },
     },
@@ -108,6 +114,7 @@ const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il pri
 3. Scrivere un titolo breve accattivante e il motivo (reason) per cui la clip funziona.
 4. Scegliere un editing_style (dynamic, clean, high_energy, calm) e un template coerente tra PODCAST_DYNAMIC, PODCAST_CLEAN, STREAMER, STORYTELLING, MOTIVATIONAL.
 5. Generare una Edit Decision List (EDL) con eventi "zoom" (sui momenti di enfasi), "highlight_word" (sulle 2-5 parole chiave più importanti della clip), "speaker_switch" (se cambia chi parla) e opzionalmente "punch_in" su un climax. I timestamp degli eventi devono cadere DENTRO l'intervallo [start, end] della clip e sono relativi al video originale (stessa timeline del transcript), non relativi all'inizio della clip.
+6. Generare 5-8 hashtag pertinenti per la pubblicazione su YouTube Shorts (senza #, minuscolo, senza spazi: es. "podcast", "funnymoments", non "Funny Moments"). Mescola hashtag generici ad alto volume di ricerca (es. "shorts", "viral") con 2-3 specifici al contenuto della clip.
 
 Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 

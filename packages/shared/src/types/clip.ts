@@ -40,6 +40,8 @@ export interface RankedClip {
   /** snake_case intenzionale: rispecchia 1:1 il campo restituito dall'AI e la colonna DB `editing_style`. */
   editing_style: EditingStyle;
   edl: EditDecisionList;
+  /** Hashtag suggeriti per la pubblicazione (senza #), generati nello stesso passaggio di ranking. */
+  hashtags: string[];
 }
 
 /** Media (0-100) dei sei punteggi, usata come "score" complessivo mostrato in dashboard. */

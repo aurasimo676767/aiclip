@@ -12,6 +12,8 @@ const envSchema = z.object({
   ANTHROPIC_MODEL_CHEAP: z.string().default("claude-haiku-4-5-20251001"),
   ANTHROPIC_MODEL_STRONG: z.string().default("claude-sonnet-5"),
   OPENAI_API_KEY: z.string().min(1),
+  GOOGLE_CLIENT_ID: z.string().min(1),
+  GOOGLE_CLIENT_SECRET: z.string().min(1),
   WORKER_TMP_DIR: z.string().default("./tmp"),
   QUEUE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
 });

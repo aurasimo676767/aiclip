@@ -126,6 +126,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       editing_style: clip.editing_style,
       template: clip.edl.template,
       edl: clip.edl,
+      hashtags: clip.hashtags,
       status: "SUGGESTED" as const,
     }));
 
