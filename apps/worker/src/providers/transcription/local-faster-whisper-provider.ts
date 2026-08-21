@@ -1,19 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Agent } from "undici";
+import crypto from "node:crypto";
+import { request } from "undici";
 import type { Transcript, TranscriptSegment } from "@clipforge/shared";
 import { probeVideo } from "../../lib/ffmpeg.js";
 import { logger } from "../../lib/logger.js";
 import { splitAudioIntoChunks } from "./audio-chunker.js";
 import type { TranscriptionProvider } from "./transcription-provider.js";
 
-// Il fetch nativo di Node usa di default un timeout di ~5 minuti (headers/body) sull'Agent
-// undici sottostante: troppo poco per un audio lungo trascritto su una GPU condivisa con
-// altri carichi (es. un gioco), dove la trascrizione può richiedere più tempo del solito.
-// Un Agent dedicato con timeout esteso evita che il worker abbandoni la richiesta mentre
-// il server whisper sta ancora lavorando (il server poi risponde comunque, ma troppo tardi).
+// Trascrivere un audio lungo su una GPU eventualmente condivisa con altri carichi (es. un
+// gioco) può richiedere più dei ~5 minuti di timeout di default del fetch nativo di Node.
+// Usiamo undici.request() direttamente (stesso pacchetto per client e dispatch) invece del
+// fetch nativo di Node con un Agent esterno passato come `dispatcher`: quest'ultimo è
+// incompatibile con l'undici INTERNO di Node (versione diversa da quella installata via npm)
+// e fallisce subito con "invalid onRequestStart method", mascherato da un errore generico.
 const LOCAL_WHISPER_TIMEOUT_MS = 30 * 60 * 1000; // 30 minuti
-const localWhisperAgent = new Agent({ headersTimeout: LOCAL_WHISPER_TIMEOUT_MS, bodyTimeout: LOCAL_WHISPER_TIMEOUT_MS });
 
 interface LocalWhisperWord {
   word: string;
@@ -96,17 +97,25 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
   }
 
   private async transcribeChunk(filePath: string): Promise<LocalWhisperResponse> {
-    const buffer = await fs.promises.readFile(filePath);
-    const form = new FormData();
-    form.append("audio", new Blob([buffer]), path.basename(filePath));
+    const fileBuffer = await fs.promises.readFile(filePath);
+    const filename = path.basename(filePath);
+    const boundary = `----clipforge${crypto.randomUUID()}`;
+    const body = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+      ),
+      fileBuffer,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
 
-    let response: Response;
+    let response: Awaited<ReturnType<typeof request>>;
     try {
-      response = await fetch(`${this.serverUrl}/transcribe`, {
+      response = await request(`${this.serverUrl}/transcribe`, {
         method: "POST",
-        body: form,
-        // @ts-expect-error -- `dispatcher` è supportato dal fetch di Node (undici sotto), non è nel tipo standard DOM
-        dispatcher: localWhisperAgent,
+        headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+        body,
+        headersTimeout: LOCAL_WHISPER_TIMEOUT_MS,
+        bodyTimeout: LOCAL_WHISPER_TIMEOUT_MS,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -115,11 +124,11 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
       );
     }
 
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(`Trascrizione locale fallita per chunk "${path.basename(filePath)}": HTTP ${response.status} ${body}`);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      const text = await response.body.text().catch(() => "");
+      throw new Error(`Trascrizione locale fallita per chunk "${filename}": HTTP ${response.statusCode} ${text}`);
     }
 
-    return (await response.json()) as LocalWhisperResponse;
+    return (await response.body.json()) as LocalWhisperResponse;
   }
 }
