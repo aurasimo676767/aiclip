@@ -11,6 +11,7 @@
     "dev:worker": "pnpm --filter @clipforge/worker dev",
     "dev:whisper": "apps\\worker\\whisper-server\\python-embed\\python.exe apps\\worker\\whisper-server\\server.py",
     "dev:worker:local": "concurrently -n whisper,worker -c green,blue \"pnpm dev:whisper\" \"pnpm dev:worker\"",
+    "dev:all": "concurrently -n whisper,worker,web -c green,blue,magenta \"pnpm dev:whisper\" \"pnpm dev:worker\" \"pnpm dev:web\"",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r typecheck"
   },
