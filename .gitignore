@@ -28,5 +28,12 @@ Thumbs.db
 apps/worker/tmp/
 apps/worker/storage-local/
 
+# server whisper locale (faster-whisper): interprete embeddable + pacchetti scaricati localmente,
+# non versionati — vedi apps/worker/whisper-server/README.md per come ricrearlo
+apps/worker/whisper-server/python-embed/
+apps/worker/whisper-server/*.log
+__pycache__/
+*.pyc
+
 # typescript build info
 *.tsbuildinfo

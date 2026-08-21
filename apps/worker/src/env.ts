@@ -19,6 +19,8 @@ const envSchema = z.object({
   ANTHROPIC_MODEL_CHEAP: z.string().default("claude-haiku-4-5-20251001"),
   ANTHROPIC_MODEL_STRONG: z.string().default("claude-sonnet-5"),
   OPENAI_API_KEY: z.string().min(1),
+  TRANSCRIPTION_PROVIDER: z.enum(["openai", "local"]).default("openai"),
+  LOCAL_WHISPER_URL: z.string().default("http://127.0.0.1:8765"),
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   WORKER_TMP_DIR: z.string().default("./tmp"),
