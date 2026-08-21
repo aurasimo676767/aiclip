@@ -210,6 +210,7 @@ export interface Database {
           template: string;
           edl: unknown;
           hashtags: unknown;
+          caption: string;
           status: ClipStatus;
           output_video_path: string | null;
           thumbnail_path: string | null;
@@ -232,6 +233,7 @@ export interface Database {
           template: string;
           edl: unknown;
           hashtags?: unknown;
+          caption?: string;
           status?: ClipStatus;
           output_video_path?: string | null;
           thumbnail_path?: string | null;
@@ -254,6 +256,7 @@ export interface Database {
           template?: string;
           edl?: unknown;
           hashtags?: unknown;
+          caption?: string;
           status?: ClipStatus;
           output_video_path?: string | null;
           thumbnail_path?: string | null;

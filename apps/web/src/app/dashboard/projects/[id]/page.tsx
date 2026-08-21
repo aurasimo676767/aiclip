@@ -16,7 +16,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
   const { data: video } = await supabase.from("videos").select("*").eq("project_id", params.id).maybeSingle();
   const { data: clipsRaw } = await supabase
     .from("clips")
-    .select("id, title, hook, reason, duration, scores, status, error_message, hashtags")
+    .select("id, title, hook, reason, duration, scores, status, error_message, hashtags, caption")
     .eq("project_id", params.id);
 
   const clipIds = (clipsRaw ?? []).map((c) => c.id);
@@ -52,6 +52,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
       status: c.status,
       errorMessage: c.error_message,
       hashtags: (c.hashtags as string[] | null) ?? [],
+      caption: c.caption ?? "",
       youtubePublishStatus: publish?.status ?? null,
       youtubeUrl: publish?.youtubeUrl ?? null,
       youtubeError: publish?.errorMessage ?? null,

@@ -93,8 +93,13 @@ const RANKING_TOOL_SCHEMA = {
               items: { type: "string" },
               description: "5-8 hashtag pertinenti per la pubblicazione su YouTube Shorts, SENZA il simbolo #, in minuscolo, senza spazi (es. \"podcast\", \"funnymoments\").",
             },
+            caption: {
+              type: "string",
+              description:
+                "Didascalia pronta per la pubblicazione (YouTube Shorts/TikTok), da mostrare al pubblico. 1-2 frasi brevi, in italiano colloquiale/slang naturale (quello che si usa davvero nei titoli/descrizioni di Shorts), DIVERTENTE o ad effetto, MAI cringe o forzata. NON deve spiegare o analizzare la clip (quello è il campo 'reason', che resta interno) — deve essere il testo che leggerebbe un utente reale sotto il video, tipo hook/teaser, non un riassunto.",
+            },
           },
-          required: ["start", "end", "duration", "hook", "title", "reason", "scores", "editing_style", "edl", "hashtags"],
+          required: ["start", "end", "duration", "hook", "title", "reason", "scores", "editing_style", "edl", "hashtags", "caption"],
         },
       },
     },
@@ -111,10 +116,11 @@ const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il pri
    - 55-74: discreto, ha potenziale ma non è memorabile.
    - Sotto 55: debole — se un candidato scende sistematicamente sotto 50 su più dimensioni, scartalo invece di includerlo con punteggi bassi.
    Differenzia davvero il candidato migliore dagli altri: se 5 clip diverse meritano tutte "80" su ogni dimensione, non stai valutando abbastanza a fondo — quasi sempre alcune si distinguono nettamente dalle altre.
-3. Scrivere un titolo breve accattivante e il motivo (reason) per cui la clip funziona.
+3. Scrivere un titolo breve accattivante e il motivo (reason) per cui la clip funziona — reason è un campo INTERNO, mostrato solo nella dashboard per capire la scelta, non finisce mai pubblicato.
 4. Scegliere un editing_style (dynamic, clean, high_energy, calm) e un template coerente tra PODCAST_DYNAMIC, PODCAST_CLEAN, STREAMER, STORYTELLING, MOTIVATIONAL.
 5. Generare una Edit Decision List (EDL) con eventi "zoom" (sui momenti di enfasi), "highlight_word" (sulle 2-5 parole chiave più importanti della clip), "speaker_switch" (se cambia chi parla) e opzionalmente "punch_in" su un climax. I timestamp degli eventi devono cadere DENTRO l'intervallo [start, end] della clip e sono relativi al video originale (stessa timeline del transcript), non relativi all'inizio della clip.
 6. Generare 5-8 hashtag pertinenti per la pubblicazione su YouTube Shorts (senza #, minuscolo, senza spazi: es. "podcast", "funnymoments", non "Funny Moments"). Mescola hashtag generici ad alto volume di ricerca (es. "shorts", "viral") con 2-3 specifici al contenuto della clip.
+7. Scrivere una caption pubblica: 1-2 frasi brevi in italiano colloquiale/slang naturale (il linguaggio vero usato nei titoli/descrizioni di Shorts/TikTok italiani), divertente o ad effetto, MAI cringe, MAI un riassunto o una spiegazione — è il testo che un utente reale legge sotto il video, non l'analisi della clip.
 
 Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 

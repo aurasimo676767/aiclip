@@ -29,6 +29,7 @@ export const rankedClipSchema = z.object({
   editing_style: z.enum(EDITING_STYLES),
   edl: editDecisionListSchema,
   hashtags: z.array(z.string().min(1).max(30)).max(10).default([]),
+  caption: z.string().min(1).max(300),
 });
 
 export const rankedClipsResponseSchema = z.object({

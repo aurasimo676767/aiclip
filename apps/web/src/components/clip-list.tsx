@@ -16,6 +16,7 @@ export interface ClipViewModel {
   status: string;
   errorMessage: string | null;
   hashtags: string[];
+  caption: string;
   youtubePublishStatus: string | null;
   youtubeUrl: string | null;
   youtubeError: string | null;
@@ -169,7 +170,7 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                           <PublishYoutubeButton
                             clipId={clip.id}
                             defaultTitle={clip.title}
-                            defaultDescription={`${clip.hook}\n\n${clip.reason}`}
+                            defaultDescription={clip.caption}
                             defaultHashtags={clip.hashtags}
                             status={clip.youtubePublishStatus}
                             youtubeUrl={clip.youtubeUrl}

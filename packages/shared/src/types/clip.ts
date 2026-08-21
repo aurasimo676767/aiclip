@@ -42,6 +42,12 @@ export interface RankedClip {
   edl: EditDecisionList;
   /** Hashtag suggeriti per la pubblicazione (senza #), generati nello stesso passaggio di ranking. */
   hashtags: string[];
+  /**
+   * Didascalia pronta per la pubblicazione (YouTube/TikTok): breve, divertente, in linguaggio
+   * naturale/slang, pensata per essere letta dal pubblico. Diversa da `reason`, che è invece
+   * una spiegazione interna (per la dashboard) del perché la clip funziona.
+   */
+  caption: string;
 }
 
 /** Media (0-100) dei sei punteggi, usata come "score" complessivo mostrato in dashboard. */

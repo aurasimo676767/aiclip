@@ -52,6 +52,7 @@ async function main() {
     scores: { hook: 90, retention: 85, emotion: 80, clarity: 88, payoff: 82, virality: 79 },
     editing_style: "dynamic",
     hashtags: ["shorts", "smoketest"],
+    caption: "Test di render, ignora questa caption",
     edl: {
       template: "PODCAST_DYNAMIC",
       events: [
