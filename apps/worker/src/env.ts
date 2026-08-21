@@ -1,5 +1,12 @@
 import "dotenv/config";
+import { setDefaultResultOrder } from "node:dns";
 import { z } from "zod";
+
+// Su alcune reti Windows la risoluzione DNS preferisce IPv6 anche quando la rotta IPv6
+// non è realmente raggiungibile, causando "TypeError: fetch failed" intermittenti verso
+// Supabase/Anthropic/OpenAI. Forzare IPv4 come preferenza risolve il problema senza
+// impatto su Linux/produzione (dove IPv6 funziona correttamente ma questo flag è comunque innocuo).
+setDefaultResultOrder("ipv4first");
 
 const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
