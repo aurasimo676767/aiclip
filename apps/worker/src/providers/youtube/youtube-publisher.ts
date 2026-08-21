@@ -7,6 +7,8 @@ export interface YoutubeCredentials {
   clientSecret: string;
   accessToken: string;
   refreshToken: string;
+  /** ms epoch di scadenza dell'access token: senza questo, google-auth-library non sa che è scaduto e non lo rinnova da solo prima della chiamata. */
+  expiryDate: number;
 }
 
 export interface YoutubeUploadParams {
@@ -37,7 +39,11 @@ export async function uploadShortToYoutube(params: YoutubeUploadParams): Promise
   const { credentials, filePath, title, description, tags, privacyStatus } = params;
 
   const oauth2Client = new google.auth.OAuth2(credentials.clientId, credentials.clientSecret);
-  oauth2Client.setCredentials({ access_token: credentials.accessToken, refresh_token: credentials.refreshToken });
+  oauth2Client.setCredentials({
+    access_token: credentials.accessToken,
+    refresh_token: credentials.refreshToken,
+    expiry_date: credentials.expiryDate,
+  });
 
   const youtube = google.youtube({ version: "v3", auth: oauth2Client });
 

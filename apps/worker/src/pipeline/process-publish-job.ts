@@ -54,6 +54,7 @@ export async function processPublishJob(job: YoutubePublishJobRow): Promise<void
         clientSecret: env.GOOGLE_CLIENT_SECRET,
         accessToken: connection.access_token,
         refreshToken: connection.refresh_token,
+        expiryDate: new Date(connection.expires_at).getTime(),
       },
       filePath: localVideoPath,
       title: job.title,
