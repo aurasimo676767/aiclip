@@ -1,13 +1,8 @@
 import { requireUser } from "@/lib/auth";
-import { SidebarNav } from "@/components/sidebar-nav";
+import { DashboardShell } from "@/components/dashboard-shell";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user } = await requireUser();
 
-  return (
-    <div className="flex min-h-screen">
-      <SidebarNav email={user.email ?? ""} />
-      <main className="flex-1 overflow-y-auto p-8">{children}</main>
-    </div>
-  );
+  return <DashboardShell email={user.email ?? ""}>{children}</DashboardShell>;
 }

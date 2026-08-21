@@ -117,12 +117,12 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                     className="mt-1.5 h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-brand-500"
                   />
                 )}
-                <div className="flex-1 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="font-medium text-white">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="min-w-0 break-words font-medium text-white">
                       Clip #{index + 1} — {clip.title}
                     </h3>
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
                       <span className="rounded-full bg-brand-500/15 px-2.5 py-0.5 text-xs font-semibold text-brand-200">
                         Score {score}
                       </span>

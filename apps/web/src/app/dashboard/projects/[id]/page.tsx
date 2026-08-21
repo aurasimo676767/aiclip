@@ -68,11 +68,11 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
     <div className="mx-auto max-w-4xl space-y-6">
       <PollingRefresher active={pollingActive} />
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-white">{project.title}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold text-white break-words">{project.title}</h1>
           {video && (
-            <p className="mt-1 text-sm text-zinc-500">
+            <p className="mt-1 text-sm text-zinc-500 break-words">
               {video.original_filename}
               {video.duration_seconds ? ` — ${Math.round(video.duration_seconds / 60)} min` : ""}
             </p>
