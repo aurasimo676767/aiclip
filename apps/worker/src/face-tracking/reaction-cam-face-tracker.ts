@@ -251,12 +251,24 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const topAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * TOP_RATIO);
 
     return rawSegments.map((seg) => {
-      const anchoredHere = seg.webcamCandidates.filter((m) => anchorGroups.some((g) => isNearBox(m.avg, g.avg)));
-      const chosen = selectBest(anchoredHere);
+      // Per ogni candidato di questo segmento, risali all'ancora (identità) stabile a cui
+      // appartiene. Il movimento (per capire chi parla ORA) è un dato per-segmento reale e va
+      // preso dal candidato di questo segmento; ma la GEOMETRIA del crop deve usare la media
+      // stabile dell'ancora (calcolata su tutti i segmenti in cui quell'identità è comparsa),
+      // non il riquadro rumoroso del singolo segmento — altrimenti anche restando sulla stessa
+      // persona il crop "salta" leggermente ad ogni segmento per il solo rumore del detector,
+      // e una singola rilevazione parziale (es. volto di taglio) produce un crop mal centrato.
+      const anchoredHere = seg.webcamCandidates
+        .map((m) => ({ meta: m, anchor: anchorGroups.find((g) => isNearBox(m.avg, g.avg)) }))
+        .filter((c): c is { meta: ClusterMeta; anchor: PositionGroup } => c.anchor !== undefined);
+
+      const chosenMeta = selectBest(anchoredHere.map((c) => c.meta));
+      const chosen = anchoredHere.find((c) => c.meta === chosenMeta);
+
       return {
         startSeconds: seg.startSeconds,
         endSeconds: seg.endSeconds,
-        webcamCrop: chosen ? subjectCentricCrop(chosen.avg, sourceWidth, sourceHeight, topAspect, WEBCAM_PADDING_FACTOR) : null,
+        webcamCrop: chosen ? subjectCentricCrop(chosen.anchor.avg, sourceWidth, sourceHeight, topAspect, WEBCAM_PADDING_FACTOR) : null,
         singleCrop: seg.singleCrop,
       };
     });
