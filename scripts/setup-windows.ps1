@@ -26,8 +26,17 @@ function Install-IfMissing {
         return
     }
     Write-Host "Installo $DisplayName..." -ForegroundColor Yellow
-    winget install --id $WingetId -e --accept-package-agreements --accept-source-agreements --silent
+    # --source winget (non msstore): su alcune reti aziendali/con antivirus la fonte
+    # msstore fallisce la verifica del certificato (0x8a15005e) - il pacchetto esiste
+    # comunque nella fonte "winget", quindi la saltiamo esplicitamente invece di lasciare
+    # che winget provi entrambe e si blocchi chiedendo di disambiguare.
+    winget install --id $WingetId -e --source winget --accept-package-agreements --accept-source-agreements --silent
+    $installExitCode = $LASTEXITCODE
     Refresh-Path
+    if ($installExitCode -ne 0) {
+        Write-Error "Installazione di $DisplayName fallita (winget ha restituito codice $installExitCode). Vedi l'output sopra per il motivo esatto."
+        exit 1
+    }
     if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
         Write-Warning "$DisplayName installato ma non ancora rilevato in PATH in questa finestra. Se i passi successivi falliscono, chiudi e riapri PowerShell e rilancia lo script."
     }
