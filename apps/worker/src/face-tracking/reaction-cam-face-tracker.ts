@@ -19,6 +19,7 @@ const WEBCAM_PADDING_FACTOR = 2.6; // quanto "allargare" il crop attorno al volt
 const SINGLE_FACE_PADDING_FACTOR = 7; // idem, ma per il layout "schermo intero": più margine (testa+spalle+contesto), non un primissimo piano
 const TOP_RATIO = 0.35; // frazione di altezza dedicata alla webcam nel layout split
 const MOTION_NOISE_FLOOR = 4; // sotto questa soglia il "movimento" è rumore/compressione, non parlato reale
+const SINGLE_CROP_SMOOTHING_ALPHA = 0.4; // solo per il layout "schermo intero" (una persona zoomata): quanto peso dare al nuovo segmento vs quello smussato precedente — basso = più morbido ma più lento a inseguire un movimento reale, alto = più reattivo ma più "a scatti"
 
 interface DetectionEntry {
   box: FaceBox;
@@ -124,9 +125,16 @@ export class ReactionCamFaceTracker implements FaceTracker {
     if (!anyWebcam) {
       const anyFaceFound = decisions.some((d) => d.singleCrop);
       if (!anyFaceFound) return this.fallback.computeLayout(params);
+      const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
+      const smoothedCrops = smoothCropSequence(
+        decisions.map((d) => d.singleCrop),
+        targetAspect,
+        sourceWidth,
+        sourceHeight,
+      );
       return {
         type: "single",
-        crops: decisions.map((d) => ({ startSeconds: d.startSeconds, endSeconds: d.endSeconds, crop: d.singleCrop })),
+        crops: decisions.map((d, i) => ({ startSeconds: d.startSeconds, endSeconds: d.endSeconds, crop: smoothedCrops[i]! })),
       };
     }
 
@@ -409,4 +417,51 @@ function isWebcamLike(box: FaceBox, sourceWidth: number, sourceHeight: number): 
   const offCenterX = ncx < WEBCAM_CENTER_MARGIN || ncx > 1 - WEBCAM_CENTER_MARGIN;
   const offCenterY = ncy < WEBCAM_CENTER_MARGIN || ncy > 1 - WEBCAM_CENTER_MARGIN;
   return offCenterX || offCenterY;
+}
+
+/**
+ * Applica una media mobile esponenziale al centro e all'altezza di una sequenza di crop
+ * (un valore per segmento), poi ricostruisce x/y/width/height mantenendo l'aspect ratio
+ * target e restando dentro i bound sorgente — usato SOLO per il layout "schermo intero"
+ * (una persona zoomata, senza split webcam/contenuto): senza, ogni segmento da 2s calcola
+ * il proprio crop in modo indipendente e anche piccole variazioni nel volto rilevato tra un
+ * segmento e l'altro producevano uno "scatto" visibile pur restando sulla stessa persona.
+ * Non tocca la logica di switch tra chi parla (quella vive in resolveWebcamAnchors).
+ */
+function smoothCropSequence(crops: CropWindow[], targetAspect: number, sourceWidth: number, sourceHeight: number): CropWindow[] {
+  if (crops.length === 0) return crops;
+
+  const rebuild = (cx: number, cy: number, rawHeight: number): CropWindow => {
+    let height = Math.min(sourceHeight, rawHeight);
+    let width = height * targetAspect;
+    if (width > sourceWidth) {
+      width = sourceWidth;
+      height = width / targetAspect;
+    }
+    const x = clampNum(Math.round(cx - width / 2), 0, sourceWidth - width);
+    const y = clampNum(Math.round(cy - height / 2), 0, sourceHeight - height);
+    return { x, y, width: Math.round(width), height: Math.round(height) };
+  };
+
+  const first = crops[0]!;
+  let smoothedCx = first.x + first.width / 2;
+  let smoothedCy = first.y + first.height / 2;
+  let smoothedHeight = first.height;
+  const result: CropWindow[] = [rebuild(smoothedCx, smoothedCy, smoothedHeight)];
+
+  for (let i = 1; i < crops.length; i++) {
+    const cur = crops[i]!;
+    const curCx = cur.x + cur.width / 2;
+    const curCy = cur.y + cur.height / 2;
+    smoothedCx = SINGLE_CROP_SMOOTHING_ALPHA * curCx + (1 - SINGLE_CROP_SMOOTHING_ALPHA) * smoothedCx;
+    smoothedCy = SINGLE_CROP_SMOOTHING_ALPHA * curCy + (1 - SINGLE_CROP_SMOOTHING_ALPHA) * smoothedCy;
+    smoothedHeight = SINGLE_CROP_SMOOTHING_ALPHA * cur.height + (1 - SINGLE_CROP_SMOOTHING_ALPHA) * smoothedHeight;
+    result.push(rebuild(smoothedCx, smoothedCy, smoothedHeight));
+  }
+
+  return result;
+}
+
+function clampNum(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
