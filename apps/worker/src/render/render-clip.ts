@@ -96,9 +96,11 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
     args.push("-an");
   }
 
-  // crf 17 ~ qualità visivamente vicina al lossless: le clip sono corte (30-60s), il file
-  // finale resta comunque piccolo, non c'è motivo di comprimere aggressivamente.
-  args.push("-c:v", "libx264", "-preset", "medium", "-crf", "17", "-pix_fmt", "yuv420p", "-movflags", "+faststart", outputPath);
+  // crf 15 + preset slow: le clip sono corte (30-60s), il file finale resta comunque piccolo
+  // e il tempo di render extra (preset più lento = miglior efficienza di compressione a
+  // parità di qualità) è accettabile per un output pensato per essere pubblicato, non solo
+  // guardato una volta.
+  args.push("-c:v", "libx264", "-preset", "slow", "-crf", "15", "-pix_fmt", "yuv420p", "-movflags", "+faststart", outputPath);
 
   await runFfmpeg(args, { timeoutMs: 10 * 60 * 1000 });
 
@@ -117,7 +119,7 @@ async function extractRawClip(
   // Qualità alta anche qui (non solo sul render finale): questo file intermedio viene poi
   // croppato e spesso ingrandito (es. sulla webcam), quindi ogni perdita di dettaglio qui
   // si amplifica con l'upscale successivo.
-  args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "16");
+  args.push("-c:v", "libx264", "-preset", "fast", "-crf", "14");
   if (hasAudio) {
     args.push("-c:a", "aac", "-b:a", "192k");
   } else {

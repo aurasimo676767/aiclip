@@ -2,8 +2,11 @@ import type { TranscriptSegment, ClipCandidateWindow, RankedClip } from "@clipfo
 import { rankedClipsResponseSchema, TEMPLATE_NAMES, EDITING_STYLES } from "@clipforge/shared";
 import { getAnthropicClient } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
+import { extractCandidateFrameJpegs } from "./frame-sampler.js";
 import { logger } from "../../lib/logger.js";
 import type Anthropic from "@anthropic-ai/sdk";
+
+const FRAMES_PER_CANDIDATE = 3;
 
 const TOOL_NAME = "return_ranked_clips";
 
@@ -107,7 +110,7 @@ const RANKING_TOOL_SCHEMA = {
   },
 };
 
-const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il primo passaggio (economico) ha già scremato molto, ma tende comunque a lasciar passare momenti "energici ma vuoti" — rumorosi o pieni di parolacce senza un vero payoff comico/narrativo dietro. Il tuo lavoro è il controllo qualità finale. Ricevi una lista di finestre candidate con il transcript di contesto, e devi:
+const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il primo passaggio (economico) ha già scremato molto, ma tende comunque a lasciar passare momenti "energici ma vuoti" — rumorosi o pieni di parolacce senza un vero payoff comico/narrativo dietro. Il tuo lavoro è il controllo qualità finale. Ricevi una lista di finestre candidate con il transcript di contesto e, per ognuna, alcuni frame campionati dal video — usali per giudicare anche ciò che il testo non cattura (espressioni, reazioni, energia visiva, cosa sta succedendo a schermo), non solo le parole. Per ogni candidato devi:
 
 1. Scartare senza pietà i candidati deboli: poco hook, poco comprensibili da soli, ripetitivi, o semplicemente "rumorosi" (esclamazioni/parolacce) senza una battuta, una svolta o un fatto concreto dietro. Meglio restituire 2 clip forti che 6 mediocri — non riempire la lista per riempirla.
 2. Per ognuno dei rimanenti, assegnare 6 punteggi da 0 a 100 (hook, retention, emotion, clarity, payoff, virality) usando l'INTERA scala in modo calibrato, non ammassata in una fascia stretta:
@@ -128,6 +131,8 @@ export interface RankingOptions {
   apiKey: string;
   model: string;
   videoTitle: string;
+  /** Video sorgente locale, usato per estrarre i frame mostrati all'AI insieme al transcript. */
+  sourceVideoPath: string;
 }
 
 export async function rankAndBuildEdl(
@@ -138,9 +143,9 @@ export async function rankAndBuildEdl(
   if (candidates.length === 0) return [];
 
   const client = getAnthropicClient(options.apiKey);
-  const userPrompt = buildUserPrompt(candidates, segments, options.videoTitle);
+  const userContent = await buildUserContent(candidates, segments, options.videoTitle, options.sourceVideoPath);
 
-  const messages: Anthropic.MessageParam[] = [{ role: "user", content: userPrompt }];
+  const messages: Anthropic.MessageParam[] = [{ role: "user", content: userContent }];
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     const message = await client.messages.create({
@@ -190,23 +195,52 @@ export async function rankAndBuildEdl(
   throw new Error("Il passaggio di ranking AI non ha prodotto un output valido dopo 2 tentativi");
 }
 
-function buildUserPrompt(candidates: ClipCandidateWindow[], segments: TranscriptSegment[], videoTitle: string): string {
+async function buildUserContent(
+  candidates: ClipCandidateWindow[],
+  segments: TranscriptSegment[],
+  videoTitle: string,
+  sourceVideoPath: string,
+): Promise<Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam>> {
   const CONTEXT_PADDING_SECONDS = 20;
 
-  const candidateBlocks = candidates.map((candidate, index) => {
+  const content: Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> = [
+    { type: "text", text: `Video: "${videoTitle}"` },
+  ];
+
+  for (let index = 0; index < candidates.length; index++) {
+    const candidate = candidates[index]!;
     const contextSegments = segmentsInWindow(
       segments,
       Math.max(0, candidate.start - CONTEXT_PADDING_SECONDS),
       candidate.end + CONTEXT_PADDING_SECONDS,
     );
-    return `### Candidato ${index + 1}
+
+    content.push({
+      type: "text",
+      text: `### Candidato ${index + 1}
 Hook individuato: ${candidate.hook}
 Motivo (dal primo passaggio): ${candidate.reason}
 Transcript con contesto (${(candidate.start - CONTEXT_PADDING_SECONDS).toFixed(0)}s - ${(candidate.end + CONTEXT_PADDING_SECONDS).toFixed(0)}s):
-${formatSegments(contextSegments)}`;
-  });
+${formatSegments(contextSegments)}`,
+    });
 
-  return `Video: "${videoTitle}"
+    let frames: string[] = [];
+    try {
+      frames = await extractCandidateFrameJpegs(sourceVideoPath, candidate.start, candidate.end, FRAMES_PER_CANDIDATE);
+    } catch (err) {
+      logger.warn("Estrazione frame per il ranking fallita per un candidato, procedo senza immagini per questo", {
+        candidateIndex: index,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
-${candidateBlocks.join("\n\n")}`;
+    if (frames.length > 0) {
+      content.push({ type: "text", text: `Frame del candidato ${index + 1}:` });
+      for (const frame of frames) {
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: frame } });
+      }
+    }
+  }
+
+  return content;
 }

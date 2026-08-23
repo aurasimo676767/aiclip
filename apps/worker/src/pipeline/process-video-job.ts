@@ -110,6 +110,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       apiKey: env.ANTHROPIC_API_KEY,
       model: env.ANTHROPIC_MODEL_STRONG,
       videoTitle,
+      sourceVideoPath: localVideoPath,
     });
 
     await updateVideoStatus(video.id, "CLIP_SELECTION");
