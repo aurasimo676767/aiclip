@@ -19,7 +19,7 @@ function isWebcamLike(box: { x: number; y: number; width: number; height: number
   const ncy = (box.y + box.height / 2) / sourceHeight;
   const offCenterX = ncx < WEBCAM_CENTER_MARGIN || ncx > 1 - WEBCAM_CENTER_MARGIN;
   const offCenterY = ncy < WEBCAM_CENTER_MARGIN || ncy > 1 - WEBCAM_CENTER_MARGIN;
-  return offCenterX || offCenterY;
+  return offCenterX && offCenterY;
 }
 
 async function main() {

@@ -429,7 +429,13 @@ function isWebcamLike(box: FaceBox, sourceWidth: number, sourceHeight: number): 
   const ncy = (box.y + box.height / 2) / sourceHeight;
   const offCenterX = ncx < WEBCAM_CENTER_MARGIN || ncx > 1 - WEBCAM_CENTER_MARGIN;
   const offCenterY = ncy < WEBCAM_CENTER_MARGIN || ncy > 1 - WEBCAM_CENTER_MARGIN;
-  return offCenterX || offCenterY;
+  // Richiede spostamento dal centro su ENTRAMBI gli assi (un vero angolo), non uno solo.
+  // Verificato su un caso reale: un volto centrato orizzontalmente ma spostato in alto (tipico
+  // di un volto "principale" dentro un video reagito, non un overlay in un angolo) passava il
+  // filtro con l'OR, e - muovendosi di più essendo un contenuto pre-registrato continuo -
+  // batteva quasi sempre la vera webcam del reactor (piccola, in un angolo vero) nel confronto
+  // sul movimento. Con l'AND quel volto non qualifica nemmeno come candidato.
+  return offCenterX && offCenterY;
 }
 
 /**
