@@ -78,7 +78,7 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
    ```
 5. Copia **Client ID** e **Client Secret**.
 
-Nota sulla quota: YouTube Data API concede 10.000 unità/giorno gratis, ogni upload ne costa 1.600 (~6 pubblicazioni/giorno di default; aumentabile su richiesta a Google).
+Nota sulla quota: da giugno 2026 `videos.insert` ha un bucket dedicato separato dal resto della quota, **100 upload/giorno** gratis (1 unità a chiamata in quel bucket) — molto più permissivo del vecchio limite (~6/giorno, quando l'upload costava 1.600 delle 10.000 unità condivise).
 
 ### 4. Variabili d'ambiente
 
@@ -136,5 +136,5 @@ pnpm --filter @clipforge/worker exec tsx src/dev/smoke-test-render.ts <path-vide
 - **Font dei sottotitoli**: i template referenziano font (Montserrat, Poppins, Anton, ...) che libass risolve tramite i font di sistema disponibili sulla macchina che esegue il worker; se non installati, libass usa un fallback (i sottotitoli restano leggibili ma con font diverso). Per un deploy in produzione, valuta di includere i file `.ttf` nell'immagine del worker e puntarli esplicitamente.
 - **Reaction-cam / face tracking**: euristica basata su rilevamento volto reale (non un vero riconoscimento di "finestra webcam"): funziona bene per il caso comune (bolla fissa in un angolo, piccola rispetto al frame) ma può non attivarsi con overlay non standard (bolla grande, posizione centrale, forma non tipica). Nessun tracking frame-per-frame: il crop è fisso per l'intera durata della clip, calcolato da alcuni frame campionati.
 - **Loudness normalization**: `loudnorm` a singolo passaggio (non i due passaggi raccomandati per la massima precisione) — scelta per semplicità/velocità.
-- **Pubblicazione automatica su YouTube**: richiede un client OAuth Google in modalità "Testing" — funziona solo per gli account aggiunti come "Utenti di test" nella schermata di consenso (limite Google, non dell'app); passare in produzione richiede la revisione dell'app da parte di Google. Quota gratuita: 10.000 unità/giorno, ogni upload costa 1.600 unità (~6 pubblicazioni/giorno).
+- **Pubblicazione automatica su YouTube**: richiede un client OAuth Google in modalità "Testing" — funziona solo per gli account aggiunti come "Utenti di test" nella schermata di consenso (limite Google, non dell'app); passare in produzione richiede la revisione dell'app da parte di Google. Quota gratuita: `videos.insert` ha un bucket dedicato da 100 upload/giorno (aggiornato da giugno 2026, prima erano ~6/giorno).
 - **Import da YouTube**: usa `yt-dlp`, quindi eredita i suoi limiti — video privati, con restrizione età o soggetti a protezioni anti-bot possono fallire il download; nessun supporto per playlist (viene scaricato solo il video singolo).
