@@ -22,11 +22,15 @@ export interface TimedCrop {
  * - "single": crop 9:16 che segue nel tempo lo speaker/soggetto principale.
  * - "split_vertical": due fasce impilate — webcam in alto (segue nel tempo), contenuto
  *   principale in basso (sempre centrato sul frame intero, mai su un volto — vedi
- *   reaction-cam-face-tracker.ts per il perché).
+ *   reaction-cam-face-tracker.ts per il perché). `blurRegions` (coordinate del video
+ *   sorgente) sono le zone note contenere una webcam reale: il contenuto in basso è un crop
+ *   centrato dell'INTERO frame sorgente, quindi senza sfocarle mostrerebbe due volte la
+ *   stessa webcam — una volta ravvicinata in alto, una volta piccola (e spesso tagliata) in
+ *   basso, dentro l'area "contenuto".
  */
 export type Layout =
   | { type: "single"; crops: TimedCrop[] }
-  | { type: "split_vertical"; topCrops: TimedCrop[]; bottom: CropWindow; topRatio: number };
+  | { type: "split_vertical"; topCrops: TimedCrop[]; bottom: CropWindow; topRatio: number; blurRegions: CropWindow[] };
 
 /**
  * Astrazione sul tracking di volto/speaker usato per decidere il layout del crop verticale.

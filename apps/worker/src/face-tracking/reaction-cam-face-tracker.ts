@@ -19,6 +19,7 @@ const WEBCAM_PADDING_FACTOR = 2.6; // quanto "allargare" il crop attorno al volt
 const SINGLE_FACE_PADDING_FACTOR = 7; // idem, ma per il layout "schermo intero": più margine (testa+spalle+contesto), non un primissimo piano
 const TOP_RATIO = 0.35; // frazione di altezza dedicata alla webcam nel layout split
 const MOTION_NOISE_FLOOR = 4; // sotto questa soglia il "movimento" è rumore/compressione, non parlato reale
+const BLUR_REGION_PADDING_FACTOR = 4; // margine generoso: l'overlay webcam reale è quasi sempre più grande del solo riquadro del volto rilevato, meglio sfocare un po' di più che lasciare una fetta visibile
 const SINGLE_CROP_SMOOTHING_ALPHA = 0.4; // solo per il layout "schermo intero" (una persona zoomata): quanto peso dare al nuovo segmento vs quello smussato precedente — basso = più morbido ma più lento a inseguire un movimento reale, alto = più reattivo ma più "a scatti"
 
 interface DetectionEntry {
@@ -118,7 +119,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
       }
     }
 
-    const decisions: SegmentDecision[] = this.resolveWebcamAnchors(rawSegments, segmentCount, sourceWidth, sourceHeight);
+    const { decisions, anchorGroups } = this.resolveWebcamAnchors(rawSegments, segmentCount, sourceWidth, sourceHeight);
 
     const anyWebcam = decisions.some((d) => d.webcamCrop !== null);
 
@@ -149,9 +150,19 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - TOP_RATIO));
     const bottom = centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
 
-    logger.info("Layout reaction-cam (dinamico) rilevato", { segments: segmentCount, withWebcam: decisions.filter((d) => d.webcamCrop).length });
+    // Ogni ancora valida è, per definizione, un overlay webcam fisso nel frame sorgente — e
+    // il pannello "contenuto" sotto è un crop dell'INTERO frame sorgente, quindi la mostra
+    // di nuovo, piccola (e spesso tagliata dal bordo del crop). Sfochiamo quelle zone nel
+    // rendering invece di lasciarle visibili due volte.
+    const blurRegions: CropWindow[] = anchorGroups.map((g) => subjectCentricCrop(g.avg, sourceWidth, sourceHeight, 1, BLUR_REGION_PADDING_FACTOR));
 
-    return { type: "split_vertical", topCrops, bottom, topRatio: TOP_RATIO };
+    logger.info("Layout reaction-cam (dinamico) rilevato", {
+      segments: segmentCount,
+      withWebcam: decisions.filter((d) => d.webcamCrop).length,
+      blurRegions: blurRegions.length,
+    });
+
+    return { type: "split_vertical", topCrops, bottom, topRatio: TOP_RATIO, blurRegions };
   }
 
   /**
@@ -245,7 +256,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     segmentCount: number,
     sourceWidth: number,
     sourceHeight: number,
-  ): SegmentDecision[] {
+  ): { decisions: SegmentDecision[]; anchorGroups: PositionGroup[] } {
     const allCandidates: Array<{ segIndex: number; meta: ClusterMeta }> = [];
     rawSegments.forEach((seg, segIndex) => {
       for (const meta of seg.webcamCandidates) {
@@ -258,7 +269,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
 
     const topAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * TOP_RATIO);
 
-    return rawSegments.map((seg) => {
+    const decisions = rawSegments.map((seg) => {
       // Per ogni candidato di questo segmento, risali all'ancora (identità) stabile a cui
       // appartiene. Il movimento (per capire chi parla ORA) è un dato per-segmento reale e va
       // preso dal candidato di questo segmento; ma la GEOMETRIA del crop deve usare la media
@@ -280,6 +291,8 @@ export class ReactionCamFaceTracker implements FaceTracker {
         singleCrop: seg.singleCrop,
       };
     });
+
+    return { decisions, anchorGroups };
   }
 }
 

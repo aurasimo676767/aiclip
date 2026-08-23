@@ -1,4 +1,4 @@
-import type { Layout, TimedCrop } from "../face-tracking/face-tracker.js";
+import type { CropWindow, Layout, TimedCrop } from "../face-tracking/face-tracker.js";
 import { OUTPUT_RESOLUTION } from "@clipforge/shared";
 import { toFfmpegFilterPath } from "./ffmpeg-filter-utils.js";
 
@@ -58,22 +58,54 @@ function buildSplitVerticalSteps(
 ): string[] {
   const topHeight = evenRound(OUTPUT_RESOLUTION.height * layout.topRatio);
   const bottomHeight = OUTPUT_RESOLUTION.height - topHeight;
-  const { topCrops, bottom } = layout;
+  const { topCrops, bottom, blurRegions } = layout;
 
   const topXExpr = piecewiseExpr(topCrops, (c) => c.x);
   const topYExpr = piecewiseExpr(topCrops, (c) => c.y);
   const topWExpr = piecewiseExpr(topCrops, (c) => c.width);
   const topHExpr = piecewiseExpr(topCrops, (c) => c.height);
 
-  return [
+  const steps = [
     // Webcam: crop che segue nel tempo il segmento attivo, nessuno zoom EDL (l'area è già ravvicinata di suo).
     `[0:v]crop=w='${topWExpr}':h='${topHExpr}':x='${topXExpr}':y='${topYExpr}',scale=${OUTPUT_RESOLUTION.width}:${topHeight}:flags=lanczos,setsar=1[top]`,
-    // Contenuto principale: crop statico centrato + zoom (EDL) come nel layout singolo, poi scala all'altezza restante.
+    // Contenuto principale: crop statico centrato dell'intero frame sorgente.
     `[0:v]crop=w=${bottom.width}:h=${bottom.height}:x=${bottom.x}:y=${bottom.y}[bmain]`,
-    `[bmain]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[bzoomed]`,
+  ];
+
+  // Il crop "contenuto" sopra è dell'INTERO frame sorgente, quindi mostra di nuovo (piccola,
+  // spesso tagliata) qualunque webcam venga già mostrata ravvicinata nel pannello "top" — le
+  // sfochiamo qui, prima dello zoom EDL, così la sfocatura segue il crop invece di restare fissa.
+  const localRegions = blurRegions
+    .map((region) => intersectCropWithBottom(region, bottom))
+    .filter((r): r is CropWindow => r !== null);
+
+  let lastLabel = "bmain";
+  localRegions.forEach((region, i) => {
+    const patchLabel = `bpatch${i}`;
+    const nextLabel = `bmain${i}`;
+    steps.push(`[${lastLabel}]split=2[${lastLabel}_keep][${lastLabel}_src]`);
+    steps.push(`[${lastLabel}_src]crop=w=${region.width}:h=${region.height}:x=${region.x}:y=${region.y},boxblur=24:3[${patchLabel}]`);
+    steps.push(`[${lastLabel}_keep][${patchLabel}]overlay=${region.x}:${region.y}[${nextLabel}]`);
+    lastLabel = nextLabel;
+  });
+
+  steps.push(
+    `[${lastLabel}]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[bzoomed]`,
     `[bzoomed]scale=${OUTPUT_RESOLUTION.width}:${bottomHeight}:flags=lanczos,setsar=1[bottom]`,
     `[top][bottom]vstack=inputs=2[scaled]`,
-  ];
+  );
+
+  return steps;
+}
+
+/** Interseca `region` (coordinate sorgente) con il rettangolo `bottom`, tradotto in coordinate locali al crop "contenuto". Null se non si sovrappongono affatto. */
+function intersectCropWithBottom(region: CropWindow, bottom: CropWindow): CropWindow | null {
+  const x0 = Math.max(region.x, bottom.x);
+  const y0 = Math.max(region.y, bottom.y);
+  const x1 = Math.min(region.x + region.width, bottom.x + bottom.width);
+  const y1 = Math.min(region.y + region.height, bottom.y + bottom.height);
+  if (x1 <= x0 || y1 <= y0) return null;
+  return { x: Math.round(x0 - bottom.x), y: Math.round(y0 - bottom.y), width: Math.round(x1 - x0), height: Math.round(y1 - y0) };
 }
 
 /**
