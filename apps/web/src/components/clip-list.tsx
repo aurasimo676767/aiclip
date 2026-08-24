@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { overallScore, type ClipScores } from "@clipforge/shared";
 import { StatusBadge } from "./status-badge";
 import { PublishYoutubeButton } from "./publish-youtube-button";
+import { TrimClipButton } from "./trim-clip-button";
 
 export interface ClipViewModel {
   id: string;
@@ -165,6 +166,10 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                           Scarica MP4
                         </a>
                       )}
+
+                      <div className="mt-2">
+                        <TrimClipButton clipId={clip.id} duration={clip.duration} />
+                      </div>
 
                       {youtubeConnected ? (
                         <div className="mt-2">
