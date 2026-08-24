@@ -16,6 +16,7 @@ const filterComplex = buildVideoFilterComplex({
     blurRegions: [
       { x: 1600, y: 700, width: 200, height: 200 }, // dentro bottom
       { x: -500, y: -500, width: 100, height: 100 }, // fuori bottom, deve essere scartata
+      { x: 1919, y: 500, width: 100, height: 100 }, // overlap sub-pixel col bordo destro (1920), caso che causava crop w=0
     ],
   },
   zoomExpression: "1.0",

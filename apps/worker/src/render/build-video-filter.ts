@@ -98,14 +98,27 @@ function buildSplitVerticalSteps(
   return steps;
 }
 
-/** Interseca `region` (coordinate sorgente) con il rettangolo `bottom`, tradotto in coordinate locali al crop "contenuto". Null se non si sovrappongono affatto. */
+// Sotto questa soglia (px) una regione da sfocare viene scartata invece di generare un crop
+// ffmpeg minuscolo: un ritaglio troppo piccolo non serve a nulla, e arrotondare le coordinate
+// PRIMA di derivarne la larghezza (vedi sotto) evita comunque lo zero, ma teniamo un margine.
+const MIN_BLUR_REGION_PX = 4;
+
+/**
+ * Interseca `region` (coordinate sorgente) con il rettangolo `bottom`, tradotto in coordinate
+ * locali al crop "contenuto". Null se non si sovrappongono affatto o l'overlap è troppo
+ * sottile per avere senso. Arrotonda i BORDI (x0/y0/x1/y1) prima di derivarne larghezza/
+ * altezza — arrotondarle indipendentemente (com'era prima) poteva produrre un crop con
+ * larghezza o altezza 0 per un overlap sub-pixel, che ffmpeg rifiuta con un errore.
+ */
 function intersectCropWithBottom(region: CropWindow, bottom: CropWindow): CropWindow | null {
-  const x0 = Math.max(region.x, bottom.x);
-  const y0 = Math.max(region.y, bottom.y);
-  const x1 = Math.min(region.x + region.width, bottom.x + bottom.width);
-  const y1 = Math.min(region.y + region.height, bottom.y + bottom.height);
-  if (x1 <= x0 || y1 <= y0) return null;
-  return { x: Math.round(x0 - bottom.x), y: Math.round(y0 - bottom.y), width: Math.round(x1 - x0), height: Math.round(y1 - y0) };
+  const x0 = Math.round(Math.max(region.x, bottom.x));
+  const y0 = Math.round(Math.max(region.y, bottom.y));
+  const x1 = Math.round(Math.min(region.x + region.width, bottom.x + bottom.width));
+  const y1 = Math.round(Math.min(region.y + region.height, bottom.y + bottom.height));
+  const width = x1 - x0;
+  const height = y1 - y0;
+  if (width < MIN_BLUR_REGION_PX || height < MIN_BLUR_REGION_PX) return null;
+  return { x: x0 - bottom.x, y: y0 - bottom.y, width, height };
 }
 
 /**
