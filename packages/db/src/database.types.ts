@@ -384,6 +384,34 @@ export interface Database {
         Relationships: [];
       };
 
+      followed_channels: {
+        Row: {
+          id: string;
+          user_id: string;
+          channel_id: string;
+          channel_title: string;
+          uploads_playlist_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          channel_id: string;
+          channel_title: string;
+          uploads_playlist_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          channel_id?: string;
+          channel_title?: string;
+          uploads_playlist_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+
       youtube_publish_jobs: {
         Row: {
           id: string;
@@ -539,6 +567,9 @@ export type UsageUpdate = Database["public"]["Tables"]["usage"]["Update"];
 export type YoutubeConnectionRow = Database["public"]["Tables"]["youtube_connections"]["Row"];
 export type YoutubeConnectionInsert = Database["public"]["Tables"]["youtube_connections"]["Insert"];
 export type YoutubeConnectionUpdate = Database["public"]["Tables"]["youtube_connections"]["Update"];
+
+export type FollowedChannelRow = Database["public"]["Tables"]["followed_channels"]["Row"];
+export type FollowedChannelInsert = Database["public"]["Tables"]["followed_channels"]["Insert"];
 
 export type YoutubePublishJobRow = Database["public"]["Tables"]["youtube_publish_jobs"]["Row"];
 export type YoutubePublishJobInsert = Database["public"]["Tables"]["youtube_publish_jobs"]["Insert"];

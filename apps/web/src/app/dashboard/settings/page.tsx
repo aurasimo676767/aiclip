@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { YoutubeConnectionPanel } from "@/components/youtube-connection-panel";
+import { FollowedChannelsPanel } from "@/components/followed-channels-panel";
 
 export default async function SettingsPage({
   searchParams,
@@ -13,6 +14,11 @@ export default async function SettingsPage({
     .select("channel_title")
     .eq("user_id", user.id)
     .maybeSingle();
+  const { data: followedChannels } = await supabase
+    .from("followed_channels")
+    .select("id, channel_title")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: true });
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -52,6 +58,18 @@ export default async function SettingsPage({
         <h2 className="mb-3 text-sm font-semibold text-zinc-300">Pubblicazione YouTube</h2>
         <YoutubeConnectionPanel channelTitle={youtubeConnection?.channel_title ?? null} />
       </div>
+
+      {youtubeConnection && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+          <h2 className="mb-1 text-sm font-semibold text-zinc-300">Canali seguiti</h2>
+          <p className="mb-3 text-xs text-zinc-500">
+            Aggiungi canali YouTube da controllare — lo scan importa da solo i video nuovi nella pipeline normale.
+          </p>
+          <FollowedChannelsPanel
+            channels={(followedChannels ?? []).map((c) => ({ id: c.id, channelTitle: c.channel_title }))}
+          />
+        </div>
+      )}
 
       <p className="text-xs text-zinc-600">
         Gestione fatturazione e upgrade piano non ancora disponibili in questa fase.
