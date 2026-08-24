@@ -26,17 +26,25 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
     clipIds.length > 0
       ? supabase
           .from("youtube_publish_jobs")
-          .select("clip_id, status, youtube_url, error_message, created_at")
+          .select("clip_id, status, youtube_url, error_message, created_at, publish_at")
           .in("clip_id", clipIds)
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as never[] }),
   ]);
 
   // Solo il job di pubblicazione più recente per clip (l'array è già ordinato created_at desc).
-  const latestPublishByClip = new Map<string, { status: string; youtubeUrl: string | null; errorMessage: string | null }>();
+  const latestPublishByClip = new Map<
+    string,
+    { status: string; youtubeUrl: string | null; errorMessage: string | null; publishAt: string | null }
+  >();
   for (const job of publishJobsRaw ?? []) {
     if (!latestPublishByClip.has(job.clip_id)) {
-      latestPublishByClip.set(job.clip_id, { status: job.status, youtubeUrl: job.youtube_url, errorMessage: job.error_message });
+      latestPublishByClip.set(job.clip_id, {
+        status: job.status,
+        youtubeUrl: job.youtube_url,
+        errorMessage: job.error_message,
+        publishAt: job.publish_at,
+      });
     }
   }
 
@@ -56,6 +64,7 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
       youtubePublishStatus: publish?.status ?? null,
       youtubeUrl: publish?.youtubeUrl ?? null,
       youtubeError: publish?.errorMessage ?? null,
+      youtubePublishAt: publish?.publishAt ?? null,
     };
   });
 

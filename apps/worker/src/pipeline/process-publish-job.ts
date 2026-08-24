@@ -61,6 +61,7 @@ export async function processPublishJob(job: YoutubePublishJobRow): Promise<void
       description: job.description,
       tags: (job.tags as string[] | null) ?? [],
       privacyStatus: job.privacy_status,
+      publishAt: job.publish_at,
     });
 
     if (result.refreshedAccessToken) {

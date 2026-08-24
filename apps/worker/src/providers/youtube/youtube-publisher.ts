@@ -18,6 +18,8 @@ export interface YoutubeUploadParams {
   description: string;
   tags: string[];
   privacyStatus: YoutubePrivacyStatus;
+  /** ISO 8601. Se presente, il video viene caricato subito ma reso pubblico da YouTube stessa a quest'ora — non serve nessuno scheduler nostro. YouTube richiede privacyStatus "private" quando publishAt è impostato. */
+  publishAt?: string | null;
 }
 
 export interface YoutubeUploadResult {
@@ -36,7 +38,7 @@ export interface YoutubeUploadResult {
  * speciale da passare.
  */
 export async function uploadShortToYoutube(params: YoutubeUploadParams): Promise<YoutubeUploadResult> {
-  const { credentials, filePath, title, description, tags, privacyStatus } = params;
+  const { credentials, filePath, title, description, tags, privacyStatus, publishAt } = params;
 
   const oauth2Client = new google.auth.OAuth2(credentials.clientId, credentials.clientSecret);
   oauth2Client.setCredentials({
@@ -47,6 +49,8 @@ export async function uploadShortToYoutube(params: YoutubeUploadParams): Promise
 
   const youtube = google.youtube({ version: "v3", auth: oauth2Client });
 
+  // YouTube richiede privacyStatus "private" quando si passa publishAt (rifiuta "public"/"unlisted"
+  // insieme a una data futura) — lo forziamo qui, non ci si può fidare del solo valore in ingresso.
   const response = await youtube.videos.insert({
     part: ["snippet", "status"],
     requestBody: {
@@ -57,8 +61,9 @@ export async function uploadShortToYoutube(params: YoutubeUploadParams): Promise
         categoryId: "24", // Entertainment
       },
       status: {
-        privacyStatus,
+        privacyStatus: publishAt ? "private" : privacyStatus,
         selfDeclaredMadeForKids: false,
+        ...(publishAt ? { publishAt } : {}),
       },
     },
     media: {

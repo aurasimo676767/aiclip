@@ -11,6 +11,7 @@ interface PublishYoutubeButtonProps {
   status: string | null;
   youtubeUrl: string | null;
   youtubeError: string | null;
+  youtubePublishAt: string | null;
 }
 
 export function PublishYoutubeButton({
@@ -21,25 +22,31 @@ export function PublishYoutubeButton({
   status,
   youtubeUrl,
   youtubeError,
+  youtubePublishAt,
 }: PublishYoutubeButtonProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(defaultTitle.slice(0, 100));
   const [description, setDescription] = useState(defaultDescription);
   const [hashtags, setHashtags] = useState(defaultHashtags.join(" "));
-  const [submitting, setSubmitting] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState(""); // valore di <input type="datetime-local">, vuoto = nessuna programmazione
+  const [submitting, setSubmitting] = useState<"now" | "scheduled" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (status === "COMPLETED" && youtubeUrl) {
+    const scheduledInFuture = youtubePublishAt && new Date(youtubePublishAt).getTime() > Date.now();
     return (
-      <a
-        href={youtubeUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-block text-xs font-medium text-emerald-400 hover:underline"
-      >
-        Pubblicato su YouTube ↗
-      </a>
+      <div className="space-y-0.5">
+        <a href={youtubeUrl} target="_blank" rel="noreferrer" className="inline-block text-xs font-medium text-emerald-400 hover:underline">
+          {scheduledInFuture ? "Caricato, in attesa di pubblicazione ↗" : "Pubblicato su YouTube ↗"}
+        </a>
+        {scheduledInFuture && (
+          <p className="text-xs text-zinc-500">
+            Diventerà pubblico il{" "}
+            {new Date(youtubePublishAt).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "short" })}
+          </p>
+        )}
+      </div>
     );
   }
 
@@ -47,9 +54,8 @@ export function PublishYoutubeButton({
     return <span className="text-xs text-amber-300">Pubblicazione su YouTube in corso...</span>;
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
+  async function submit(mode: "now" | "scheduled") {
+    setSubmitting(mode);
     setError(null);
     try {
       const tags = hashtags
@@ -57,10 +63,14 @@ export function PublishYoutubeButton({
         .map((t) => t.replace(/^#/, "").trim())
         .filter(Boolean);
 
+      // <input type="datetime-local"> non ha timezone: interpretato come ora LOCALE del
+      // browser da `new Date(...)`, poi convertito in UTC da toISOString() per l'API.
+      const publishAt = mode === "scheduled" && scheduledAt ? new Date(scheduledAt).toISOString() : null;
+
       const res = await fetch(`/api/clips/${clipId}/publish-youtube`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, description, tags, privacyStatus: "public" }),
+        body: JSON.stringify({ title, description, tags, privacyStatus: "public", publishAt }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Pubblicazione fallita");
@@ -69,9 +79,18 @@ export function PublishYoutubeButton({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore imprevisto");
     } finally {
-      setSubmitting(false);
+      setSubmitting(null);
     }
   }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    submit("now");
+  }
+
+  // Minimo 2 minuti nel futuro (coerente col margine controllato dal server) per evitare che
+  // l'orologio del browser sia leggermente indietro rispetto a quello del server.
+  const minScheduledAt = new Date(Date.now() + 2 * 60 * 1000).toISOString().slice(0, 16);
 
   if (!open) {
     return (
@@ -115,15 +134,39 @@ export function PublishYoutubeButton({
         />
       </div>
 
+      <div>
+        <label className="mb-1 block text-xs text-zinc-500">Programma per (opzionale — lascia vuoto per pubblicare subito)</label>
+        <input
+          type="datetime-local"
+          value={scheduledAt}
+          min={minScheduledAt}
+          onChange={(e) => setScheduledAt(e.target.value)}
+          className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-white outline-none focus:border-brand-400 [color-scheme:dark]"
+        />
+        <p className="mt-1 text-xs text-zinc-600">
+          Il file viene caricato subito (serve il worker acceso ora), ma resta privato — è YouTube a renderlo pubblico da sola
+          all&apos;orario scelto. Dopo l&apos;upload puoi spegnere tutto.
+        </p>
+      </div>
+
       {error && <p className="text-xs text-red-400">{error}</p>}
 
-      <div className="flex gap-2 pt-1">
+      <div className="flex flex-wrap gap-2 pt-1">
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting !== null}
           className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
         >
-          {submitting ? "Pubblicazione..." : "Conferma e pubblica"}
+          {submitting === "now" ? "Pubblicazione..." : "Pubblica subito"}
+        </button>
+        <button
+          type="button"
+          disabled={submitting !== null || !scheduledAt}
+          onClick={() => submit("scheduled")}
+          className="rounded-lg border border-brand-400 px-3 py-1.5 text-xs font-medium text-brand-200 hover:bg-brand-500/10 disabled:opacity-50"
+          title={!scheduledAt ? "Scegli prima data e ora sopra" : undefined}
+        >
+          {submitting === "scheduled" ? "Programmazione..." : "Programma"}
         </button>
         <button
           type="button"

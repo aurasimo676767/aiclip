@@ -402,6 +402,7 @@ export interface Database {
           started_at: string | null;
           completed_at: string | null;
           created_at: string;
+          publish_at: string | null;
         };
         Insert: {
           id?: string;
@@ -420,6 +421,7 @@ export interface Database {
           started_at?: string | null;
           completed_at?: string | null;
           created_at?: string;
+          publish_at?: string | null;
         };
         Update: {
           id?: string;
@@ -438,6 +440,7 @@ export interface Database {
           started_at?: string | null;
           completed_at?: string | null;
           created_at?: string;
+          publish_at?: string | null;
         };
         Relationships: [];
       };

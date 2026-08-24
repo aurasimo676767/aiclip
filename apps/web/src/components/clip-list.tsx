@@ -20,6 +20,7 @@ export interface ClipViewModel {
   youtubePublishStatus: string | null;
   youtubeUrl: string | null;
   youtubeError: string | null;
+  youtubePublishAt: string | null;
 }
 
 export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; youtubeConnected: boolean }) {
@@ -175,6 +176,7 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                             status={clip.youtubePublishStatus}
                             youtubeUrl={clip.youtubeUrl}
                             youtubeError={clip.youtubeError}
+                            youtubePublishAt={clip.youtubePublishAt}
                           />
                         </div>
                       ) : (

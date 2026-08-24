@@ -7,6 +7,13 @@ const bodySchema = z.object({
   description: z.string().trim().max(5000).default(""),
   tags: z.array(z.string().trim().min(1).max(30)).max(30).default([]),
   privacyStatus: z.enum(["public", "unlisted", "private"]).default("public"),
+  // ISO 8601, deve cadere nel futuro: YouTube rifiuta un publishAt nel passato o troppo vicino.
+  publishAt: z
+    .string()
+    .datetime()
+    .refine((v) => new Date(v).getTime() > Date.now() + 60_000, "La data di programmazione deve essere nel futuro")
+    .nullable()
+    .optional(),
 });
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -37,14 +44,17 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ error: "Collega prima un account YouTube dalle Impostazioni" }, { status: 409 });
   }
 
-  const { title, description, tags, privacyStatus } = parsed.data;
+  const { title, description, tags, privacyStatus, publishAt } = parsed.data;
 
   const { error: insertError } = await supabase.from("youtube_publish_jobs").insert({
     clip_id: clip.id,
     title,
     description,
     tags,
-    privacy_status: privacyStatus,
+    // YouTube richiede "private" quando si programma: il worker lo forza comunque lato suo,
+    // ma teniamo coerente anche il valore salvato qui.
+    privacy_status: publishAt ? "private" : privacyStatus,
+    publish_at: publishAt ?? null,
   });
   if (insertError) {
     return NextResponse.json({ error: `Creazione job di pubblicazione fallita: ${insertError.message}` }, { status: 500 });
