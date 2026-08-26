@@ -1,72 +1,23 @@
 import { notFound } from "next/navigation";
-import type { ClipScores } from "@clipforge/shared";
 import { requireUser } from "@/lib/auth";
 import { StatusBadge, isProcessingStatus } from "@/components/status-badge";
 import { PollingRefresher } from "@/components/polling-refresher";
-import { ClipList, type ClipViewModel } from "@/components/clip-list";
+import { ClipList } from "@/components/clip-list";
+import { RetryProjectButton } from "@/components/retry-project-button";
+import { fetchProjectDetails, fetchYoutubeConnected } from "@/lib/data/clips";
 
 export default async function ProjectDetailPage({ params }: { params: { id: string } }) {
   const { supabase, user } = await requireUser();
 
-  const { data: project } = await supabase.from("projects").select("*").eq("id", params.id).single();
-  if (!project) {
+  const [details, youtubeConnected] = await Promise.all([
+    fetchProjectDetails(supabase, [params.id]),
+    fetchYoutubeConnected(supabase, user.id),
+  ]);
+  const detail = details.get(params.id);
+  if (!detail) {
     notFound();
   }
-
-  const { data: video } = await supabase.from("videos").select("*").eq("project_id", params.id).maybeSingle();
-  const { data: clipsRaw } = await supabase
-    .from("clips")
-    .select("id, title, hook, reason, duration, scores, status, error_message, hashtags, caption")
-    .eq("project_id", params.id);
-
-  const clipIds = (clipsRaw ?? []).map((c) => c.id);
-
-  const [{ data: youtubeConnection }, { data: publishJobsRaw }] = await Promise.all([
-    supabase.from("youtube_connections").select("channel_title").eq("user_id", user.id).maybeSingle(),
-    clipIds.length > 0
-      ? supabase
-          .from("youtube_publish_jobs")
-          .select("clip_id, status, youtube_url, error_message, created_at, publish_at")
-          .in("clip_id", clipIds)
-          .order("created_at", { ascending: false })
-      : Promise.resolve({ data: [] as never[] }),
-  ]);
-
-  // Solo il job di pubblicazione più recente per clip (l'array è già ordinato created_at desc).
-  const latestPublishByClip = new Map<
-    string,
-    { status: string; youtubeUrl: string | null; errorMessage: string | null; publishAt: string | null }
-  >();
-  for (const job of publishJobsRaw ?? []) {
-    if (!latestPublishByClip.has(job.clip_id)) {
-      latestPublishByClip.set(job.clip_id, {
-        status: job.status,
-        youtubeUrl: job.youtube_url,
-        errorMessage: job.error_message,
-        publishAt: job.publish_at,
-      });
-    }
-  }
-
-  const clips: ClipViewModel[] = (clipsRaw ?? []).map((c) => {
-    const publish = latestPublishByClip.get(c.id);
-    return {
-      id: c.id,
-      title: c.title,
-      hook: c.hook,
-      reason: c.reason,
-      duration: c.duration,
-      scores: c.scores as ClipScores,
-      status: c.status,
-      errorMessage: c.error_message,
-      hashtags: (c.hashtags as string[] | null) ?? [],
-      caption: c.caption ?? "",
-      youtubePublishStatus: publish?.status ?? null,
-      youtubeUrl: publish?.youtubeUrl ?? null,
-      youtubeError: publish?.errorMessage ?? null,
-      youtubePublishAt: publish?.publishAt ?? null,
-    };
-  });
+  const { project, video, clips } = detail;
 
   const projectProcessing = isProcessingStatus(project.status);
   const anyClipInFlight = clips.some((c) => c.status === "QUEUED" || c.status === "RENDERING");
@@ -92,30 +43,29 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
 
       {project.status === "FAILED" && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-          Elaborazione fallita: {project.error_message ?? video?.error_message ?? "errore sconosciuto"}
+          <p>Elaborazione fallita: {project.error_message ?? video?.error_message ?? "errore sconosciuto"}</p>
+          <RetryProjectButton projectId={project.id} />
         </div>
       )}
 
       {projectProcessing && clips.length === 0 && (
         <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-8">
           <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-brand-400" />
-          <p className="text-zinc-300">
-            {statusMessage(project.status)}
-          </p>
+          <p className="text-zinc-300">{statusMessage(project.status)}</p>
         </div>
       )}
 
       {clips.length > 0 && (
         <div className="space-y-4">
           <p className="text-sm text-zinc-400">Trovate {clips.length} clip potenziali</p>
-          <ClipList clips={clips} youtubeConnected={Boolean(youtubeConnection)} />
+          <ClipList clips={clips} youtubeConnected={youtubeConnected} />
         </div>
       )}
     </div>
   );
 }
 
-function statusMessage(status: string): string {
+export function statusMessage(status: string): string {
   switch (status) {
     case "UPLOADING":
     case "UPLOADED":
