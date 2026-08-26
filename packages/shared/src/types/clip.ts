@@ -4,6 +4,16 @@ import type { EditDecisionList } from "./edl.js";
 export const EDITING_STYLES = ["dynamic", "clean", "high_energy", "calm"] as const;
 export type EditingStyle = (typeof EDITING_STYLES)[number];
 
+/**
+ * Pattern virali riconosciuti esplicitamente dal passaggio di ranking (Claude Sonnet/Opus),
+ * calibrati su dati reali del canale (vedi SYSTEM_PROMPT in ranking.ts). Puramente informativi:
+ * una clip senza nessun badge resta comunque inclusa normalmente, non viene mai scartata solo
+ * per l'assenza di un pattern riconosciuto — l'utente ha chiesto esplicitamente un segnale IN
+ * PIÙ da vedere in dashboard, non un filtro che nasconde clip.
+ */
+export const CLIP_BADGES = ["gotcha", "cliffhanger", "controversial", "relatable", "high_energy"] as const;
+export type ClipBadge = (typeof CLIP_BADGES)[number];
+
 export interface ClipScores {
   hook: number;
   retention: number;
@@ -42,6 +52,8 @@ export interface RankedClip {
   edl: EditDecisionList;
   /** Hashtag suggeriti per la pubblicazione (senza #), generati nello stesso passaggio di ranking. */
   hashtags: string[];
+  /** Pattern virali riconosciuti (vedi CLIP_BADGES): additivi, mai usati per scartare una clip. */
+  badges: ClipBadge[];
   /**
    * Didascalia pronta per la pubblicazione (YouTube/TikTok): breve, divertente, in linguaggio
    * naturale/slang, pensata per essere letta dal pubblico. Diversa da `reason`, che è invece

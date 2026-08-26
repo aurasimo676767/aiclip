@@ -53,6 +53,7 @@ async function main() {
     editing_style: "dynamic",
     hashtags: ["shorts", "smoketest"],
     caption: "Test di render, ignora questa caption",
+    badges: [],
     edl: {
       template: "PODCAST_DYNAMIC",
       events: [

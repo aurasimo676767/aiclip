@@ -42,6 +42,7 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
       edl: clipRow.edl as RankedClip["edl"],
       hashtags: (clipRow.hashtags as string[] | null) ?? [],
       caption: clipRow.caption,
+      badges: (clipRow.badges as RankedClip["badges"] | null) ?? [],
     };
 
     await updateRenderJobStatus(job.id, "RENDERING", { stage: "rendering", progress: 20 });

@@ -211,6 +211,7 @@ export interface Database {
           edl: unknown;
           hashtags: unknown;
           caption: string;
+          badges: unknown;
           status: ClipStatus;
           output_video_path: string | null;
           thumbnail_path: string | null;
@@ -234,6 +235,7 @@ export interface Database {
           edl: unknown;
           hashtags?: unknown;
           caption?: string;
+          badges?: unknown;
           status?: ClipStatus;
           output_video_path?: string | null;
           thumbnail_path?: string | null;
@@ -257,6 +259,7 @@ export interface Database {
           edl?: unknown;
           hashtags?: unknown;
           caption?: string;
+          badges?: unknown;
           status?: ClipStatus;
           output_video_path?: string | null;
           thumbnail_path?: string | null;

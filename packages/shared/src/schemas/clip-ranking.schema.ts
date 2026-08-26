@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EDITING_STYLES } from "../types/clip.js";
+import { EDITING_STYLES, CLIP_BADGES } from "../types/clip.js";
 import { editDecisionListSchema } from "./edl.schema.js";
 
 const scoreValue = z.number().int().min(0).max(100);
@@ -30,6 +30,7 @@ export const rankedClipSchema = z.object({
   edl: editDecisionListSchema,
   hashtags: z.array(z.string().min(1).max(30)).max(10).default([]),
   caption: z.string().min(1).max(300),
+  badges: z.array(z.enum(CLIP_BADGES)).max(5).default([]),
 });
 
 export const rankedClipsResponseSchema = z.object({

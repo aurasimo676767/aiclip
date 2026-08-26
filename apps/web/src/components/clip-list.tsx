@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { overallScore, type ClipScores } from "@clipforge/shared";
+import { overallScore, type ClipScores, type ClipBadge } from "@clipforge/shared";
 import { StatusBadge } from "./status-badge";
 import { PublishYoutubeButton } from "./publish-youtube-button";
 import { TrimClipButton } from "./trim-clip-button";
@@ -22,7 +22,16 @@ export interface ClipViewModel {
   youtubeUrl: string | null;
   youtubeError: string | null;
   youtubePublishAt: string | null;
+  badges: ClipBadge[];
 }
+
+const BADGE_LABELS: Record<ClipBadge, string> = {
+  gotcha: "🎯 Gotcha",
+  cliffhanger: "⏳ Cliffhanger",
+  controversial: "🔥 Controverso",
+  relatable: "🙃 Relatable",
+  high_energy: "⚡ Energia alta",
+};
 
 export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; youtubeConnected: boolean }) {
   const router = useRouter();
@@ -31,6 +40,7 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryingClipId, setRetryingClipId] = useState<string | null>(null);
 
   const sorted = useMemo(
     () => [...clips].sort((a, b) => overallScore(b.scores) - overallScore(a.scores)),
@@ -64,6 +74,25 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
       setError(err instanceof Error ? err.message : "Errore imprevisto");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function retryClip(clipId: string) {
+    setRetryingClipId(clipId);
+    setError(null);
+    try {
+      const res = await fetch("/api/clips/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clipIds: [clipId] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Riprova fallita");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore imprevisto");
+    } finally {
+      setRetryingClipId(null);
     }
   }
 
@@ -135,10 +164,33 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                     {Math.round(clip.duration)}s — Hook: &ldquo;{clip.hook}&rdquo;
                   </p>
                   <p className="text-sm text-zinc-500">{clip.reason}</p>
+                  {clip.badges.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {clip.badges.map((badge) => (
+                        <span
+                          key={badge}
+                          className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-medium text-zinc-200"
+                        >
+                          {BADGE_LABELS[badge]}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {clip.hashtags.length > 0 && (
                     <p className="text-xs text-brand-300/80">{clip.hashtags.map((h) => `#${h}`).join(" ")}</p>
                   )}
-                  {clip.errorMessage && <p className="text-sm text-red-400">Errore: {clip.errorMessage}</p>}
+                  {clip.errorMessage && (
+                    <div className="space-y-1">
+                      <p className="text-sm text-red-400">Errore: {clip.errorMessage}</p>
+                      <button
+                        onClick={() => retryClip(clip.id)}
+                        disabled={retryingClipId === clip.id}
+                        className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-200 hover:border-red-400 disabled:opacity-50"
+                      >
+                        {retryingClipId === clip.id ? "Rimetto in coda..." : "Riprova"}
+                      </button>
+                    </div>
+                  )}
 
                   <ScoreBreakdown scores={clip.scores} />
 

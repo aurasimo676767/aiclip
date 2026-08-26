@@ -1,5 +1,5 @@
 import type { TranscriptSegment, ClipCandidateWindow, RankedClip } from "@clipforge/shared";
-import { rankedClipsResponseSchema, TEMPLATE_NAMES, EDITING_STYLES } from "@clipforge/shared";
+import { rankedClipsResponseSchema, TEMPLATE_NAMES, EDITING_STYLES, CLIP_BADGES } from "@clipforge/shared";
 import { getAnthropicClient } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
 import { extractCandidateFrameJpegs } from "./frame-sampler.js";
@@ -101,8 +101,28 @@ const RANKING_TOOL_SCHEMA = {
               description:
                 "Didascalia pronta per la pubblicazione (YouTube Shorts/TikTok), da mostrare al pubblico. 1-2 frasi brevi, in italiano colloquiale/slang naturale (quello che si usa davvero nei titoli/descrizioni di Shorts), DIVERTENTE o ad effetto, MAI cringe o forzata. NON deve spiegare o analizzare la clip (quello è il campo 'reason', che resta interno) — deve essere il testo che leggerebbe un utente reale sotto il video, tipo hook/teaser, non un riassunto.",
             },
+            badges: {
+              type: "array",
+              maxItems: 5,
+              items: { type: "string", enum: [...CLIP_BADGES] },
+              description:
+                "Pattern virali riconosciuti in QUESTA clip specifica, tra quelli elencati nel prompt di sistema. Array vuoto se non ne riconosci nessuno — è normale e non penalizza la clip: i badge sono un segnale IN PIÙ mostrato in dashboard, mai un motivo per scartare o abbassare i punteggi.",
+            },
           },
-          required: ["start", "end", "duration", "hook", "title", "reason", "scores", "editing_style", "edl", "hashtags", "caption"],
+          required: [
+            "start",
+            "end",
+            "duration",
+            "hook",
+            "title",
+            "reason",
+            "scores",
+            "editing_style",
+            "edl",
+            "hashtags",
+            "caption",
+            "badges",
+          ],
         },
       },
     },
@@ -124,6 +144,9 @@ const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il pri
 5. Generare una Edit Decision List (EDL) con eventi "zoom" (sui momenti di enfasi), "highlight_word" (sulle 2-5 parole chiave più importanti della clip), "speaker_switch" (se cambia chi parla) e opzionalmente "punch_in" su un climax. I timestamp degli eventi devono cadere DENTRO l'intervallo [start, end] della clip e sono relativi al video originale (stessa timeline del transcript), non relativi all'inizio della clip.
 6. Generare 5-8 hashtag pertinenti per la pubblicazione su YouTube Shorts (senza #, minuscolo, senza spazi: es. "podcast", "funnymoments", non "Funny Moments"). Mescola hashtag generici ad alto volume di ricerca (es. "shorts", "viral") con 2-3 specifici al contenuto della clip.
 7. Scrivere una caption pubblica: 1-2 frasi brevi in italiano colloquiale/slang naturale (il linguaggio vero usato nei titoli/descrizioni di Shorts/TikTok italiani), divertente o ad effetto, MAI cringe, MAI un riassunto o una spiegazione — è il testo che un utente reale legge sotto il video, non l'analisi della clip.
+8. Assegnare (opzionalmente) uno o più badge tra: "gotcha" (un'affermazione viene fatta e poi smentita/corretta in diretta — es. "a volte le aragoste perdono le zampe da sole" seguito da "questa l'hai inventata"/"gliele hai staccate tu": funziona perché crea un momento di giudizio/rivincita, non solo un fatto curioso), "cliffhanger" (la clip si chiude su una domanda aperta o una svolta non risolta), "controversial" (un'opinione netta e divisiva, il tipo di cosa che genera commenti "vero"/"falso"), "relatable" (una situazione/dolore quotidiano riconoscibile, non un fatto astratto), "high_energy" (reazione fisica/vocale molto marcata, non solo parlato normale). Un candidato può avere zero badge: è normale, NON è un difetto e non deve influenzare i punteggi al ribasso — i badge sono un segnale aggiuntivo per la dashboard, mai un filtro. Non forzare un badge se non calza davvero: meglio nessun badge che uno finto.
+
+Calibrazione: non premiare automaticamente contenuto "corretto ma piatto" (spiegazioni fluide, tono pacato, fatti ordinati) solo perché è ben espresso — su questo formato vince quasi sempre il momento di attrito reale (un gotcha, una reazione fisica forte, un'opinione netta), non la clip più "educata". Se stai esitando tra una clip pulita ma poco mordente e una più caotica/diretta che genera davvero una reazione, preferisci la seconda.
 
 Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
