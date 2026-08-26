@@ -25,6 +25,7 @@ const SINGLE_CROP_SMOOTHING_ALPHA = 0.4; // solo per il layout "schermo intero" 
 const SMOOTHING_CUT_HEIGHT_RATIO = 1.6; // se l'altezza raw del segmento cambia di più di questo fattore rispetto allo smoothed corrente, non è rumore da smussare ma un vero cambio di inquadratura (es. l'OBS della sorgente passa da una webcam piccola in un angolo a una grande centrale) — verificato su un caso reale dove un volto minuscolo nei primi 2 segmenti faceva impiegare 8 segmenti (16s, più di metà clip) all'EMA per raggiungere l'inquadratura vera, dando la sensazione di uno zoom che continua ad "aggiustarsi" invece di un taglio netto
 const SMOOTHING_CUT_CENTER_RATIO = 0.25; // idem per lo spostamento del centro, come frazione della diagonale del frame sorgente
 const MIN_CONSECUTIVE_MISSES_TO_SWITCH = 2; // segmenti di fila SENZA un'ancora webcam genuina (non riusata da un vicino) prima di considerare la scena sorgente davvero cambiata invece di un semplice miss isolato del detector — verificato su un caso reale (streamer che passa da "webcam piccola + TikTok reagito" a "solo webcam a schermo intero" e poi a un layout diverso ancora dentro la STESSA clip): un singolo segmento perso viene ancora riusato dal vicino più vicino (comportamento invariato), ma 2+ di fila passano al layout "mixed" invece di forzare uno split_vertical ormai senza senso in quel tratto
+const BACKGROUND_FILL_ASPECT = 1; // quadrato: quando il volto non riempie bene un crop 9:16 (Layout.backgroundFill), meglio centrare l'inquadratura NATURALE della webcam (tipicamente più larga di un ritratto 9:16, es. quadrata) invece di forzare comunque un crop stretto in verticale — un crop 9:16 troppo vincolato dal bound di centratura (maxSymmetricCropHeight) finiva per zoomare su un dettaglio (es. il cappello) invece di inquadrare la persona; l'utente ha chiesto esplicitamente che ai LATI non si veda il contenuto, solo sopra/sotto — richiede quindi un'inquadratura a piena larghezza, non più stretta e centrata con bordi su tutti i lati
 
 interface DetectionEntry {
   box: FaceBox;
@@ -47,7 +48,11 @@ interface SegmentDecision {
   endSeconds: number;
   webcamCrop: CropWindow | null;
   singleCrop: CropWindow; // sempre disponibile: face-centrato se trovato un volto, altrimenti centro geometrico
+  /** Come singleCrop ma ad aspect quadrato — usato al posto di singleCrop SOLO quando backgroundFill è true (vedi BACKGROUND_FILL_ASPECT). */
+  singleCropSquare: CropWindow;
   singleCropNeedsFill: boolean; // vedi SegmentDetections.singleCropNeedsFill
+  /** False se in questo segmento NON è stato trovato nessun volto (singleCrop/singleCropSquare sono un centro cieco) — vedi uso in buildSingleCrops. */
+  primaryFound: boolean;
 }
 
 /** Risultato grezzo di un segmento, prima della selezione dell'ancora cross-segmento. */
@@ -56,6 +61,7 @@ interface SegmentDetections {
   endSeconds: number;
   webcamCandidates: ClusterMeta[]; // tutti i volti "webcam-like" trovati in QUESTO segmento, non ancora filtrati
   singleCrop: CropWindow;
+  singleCropSquare: CropWindow;
   /**
    * True se il volto scelto per singleCrop era troppo grande/decentrato per un crop centrato
    * "a piena inquadratura" (il padding desiderato eccedeva l'altezza sorgente) — segnale che il
@@ -63,6 +69,13 @@ interface SegmentDetections {
    * crop fino ai bordi sorgente (vedi Layout.backgroundFill in face-tracker.ts).
    */
   singleCropNeedsFill: boolean;
+  /**
+   * False se non è stato trovato NESSUN volto in questo segmento: singleCrop/singleCropSquare
+   * sono allora un centro geometrico "alla cieca" del frame intero, che può mostrare stanza
+   * vuota/cielo se la webcam reale non è al centro (es. co-host posizionati ai lati) — in quel
+   * caso conviene riusare l'ultima posizione valida (vedi nearestFoundCrop) invece del centro.
+   */
+  primaryFound: boolean;
 }
 
 const MIN_ANCHOR_SEGMENT_COVERAGE_RATIO = 0.4; // un volto deve ricomparire in almeno questa frazione dei segmenti per essere considerato "la webcam reale" e non un volto di passaggio nel contenuto reagito
@@ -127,7 +140,9 @@ export class ReactionCamFaceTracker implements FaceTracker {
           endSeconds: segEnd,
           webcamCandidates: [],
           singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect),
+          singleCropSquare: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, BACKGROUND_FILL_ASPECT),
           singleCropNeedsFill: false,
+          primaryFound: false,
         });
       }
     }
@@ -139,17 +154,23 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
 
     const buildSingleCrops = (): { crops: TimedCrop[]; backgroundFill: boolean } => {
-      const smoothedCrops = smoothCropSequence(
-        decisions.map((d) => d.singleCrop),
-        targetAspect,
-        sourceWidth,
-        sourceHeight,
-      );
       // Maggioranza dei segmenti, non "almeno uno": un singolo segmento atipico (es. un volto
       // minuscolo per un paio di secondi a inizio clip, prima che inquadratura si stabilizzi)
       // non deve trascinare l'intera clip in modalità sfondo sfocato se per il resto della
       // durata il volto è ragionevolmente centrato e il crop a piena canvas va già bene.
       const backgroundFill = decisions.filter((d) => d.singleCropNeedsFill).length > decisions.length / 2;
+      // Segmenti senza NESSUN volto rilevato (primaryFound=false) hanno solo un centro
+      // geometrico "alla cieca" del frame intero — se la webcam reale non è al centro (es.
+      // co-host posizionati ai lati), questo mostra stanza vuota/cielo invece della persona.
+      // Riusiamo la posizione valida più vicina, stesso principio di nearestWebcamCrop per lo
+      // split_vertical, PRIMA di applicare lo smoothing.
+      const found = decisions.map((d) => d.primaryFound);
+      const rawCrops = backgroundFill
+        ? fillMissingWithNearest(decisions.map((d) => d.singleCropSquare), found)
+        : fillMissingWithNearest(decisions.map((d) => d.singleCrop), found);
+      // In backgroundFill usiamo il crop QUADRATO (inquadratura naturale della webcam, piena
+      // larghezza) invece di quello 9:16 — vedi BACKGROUND_FILL_ASPECT.
+      const smoothedCrops = smoothCropSequence(rawCrops, backgroundFill ? BACKGROUND_FILL_ASPECT : targetAspect, sourceWidth, sourceHeight);
       return {
         crops: decisions.map((d, i) => ({ startSeconds: d.startSeconds, endSeconds: d.endSeconds, crop: smoothedCrops[i]! })),
         backgroundFill,
@@ -233,7 +254,13 @@ export class ReactionCamFaceTracker implements FaceTracker {
     sourceHeight: number,
     absStart: number,
     absEnd: number,
-  ): Promise<{ webcamCandidates: ClusterMeta[]; singleCrop: CropWindow; singleCropNeedsFill: boolean }> {
+  ): Promise<{
+    webcamCandidates: ClusterMeta[];
+    singleCrop: CropWindow;
+    singleCropSquare: CropWindow;
+    singleCropNeedsFill: boolean;
+    primaryFound: boolean;
+  }> {
     const duration = Math.max(0.1, absEnd - absStart);
     const timestamps: number[] = [];
     for (let i = 1; i <= SAMPLES_PER_SEGMENT; i++) {
@@ -270,7 +297,9 @@ export class ReactionCamFaceTracker implements FaceTracker {
       return {
         webcamCandidates: [],
         singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect),
+        singleCropSquare: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, BACKGROUND_FILL_ASPECT),
         singleCropNeedsFill: false,
+        primaryFound: false,
       };
     }
 
@@ -282,7 +311,9 @@ export class ReactionCamFaceTracker implements FaceTracker {
       return {
         webcamCandidates: [],
         singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect),
+        singleCropSquare: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, BACKGROUND_FILL_ASPECT),
         singleCropNeedsFill: false,
+        primaryFound: false,
       };
     }
 
@@ -300,6 +331,13 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const singleCrop = primary
       ? subjectCentricCrop(primary.avg, sourceWidth, sourceHeight, targetAspect, SINGLE_FACE_PADDING_FACTOR)
       : centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect);
+    // Stessa logica di singleCrop ma ad aspect quadrato: usata al posto del crop 9:16 quando il
+    // layout finisce in backgroundFill, per mostrare l'inquadratura naturale della webcam a
+    // piena LARGHEZZA (niente bordi laterali, solo sopra/sotto) invece di un ritratto stretto
+    // che spesso finiva zoomato su un dettaglio (es. il cappello) pur di restare centrato.
+    const singleCropSquare = primary
+      ? subjectCentricCrop(primary.avg, sourceWidth, sourceHeight, BACKGROUND_FILL_ASPECT, SINGLE_FACE_PADDING_FACTOR)
+      : centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, BACKGROUND_FILL_ASPECT);
     // Sfondo sfocato solo se il volto è DAVVERO decentrato verticalmente (non ogni volta che è
     // semplicemente grande): un volto vicino al centro verticale non perde quasi nulla restando
     // centrato (maxSymmetricCropHeight ≈ sourceHeight), mentre uno vicino al bordo (webcam
@@ -310,7 +348,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
 
     const webcamCandidates = withMeta.filter((m) => isWebcamLike(m.avg, sourceWidth, sourceHeight));
 
-    return { webcamCandidates, singleCrop, singleCropNeedsFill };
+    return { webcamCandidates, singleCrop, singleCropSquare, singleCropNeedsFill, primaryFound: Boolean(primary) };
   }
 
   /**
@@ -367,7 +405,9 @@ export class ReactionCamFaceTracker implements FaceTracker {
         endSeconds: seg.endSeconds,
         webcamCrop: chosen ? subjectCentricCrop(chosen.anchor.avg, sourceWidth, sourceHeight, topAspect, WEBCAM_PADDING_FACTOR) : null,
         singleCrop: seg.singleCrop,
+        singleCropSquare: seg.singleCropSquare,
         singleCropNeedsFill: seg.singleCropNeedsFill,
+        primaryFound: seg.primaryFound,
       };
     });
 
@@ -414,6 +454,24 @@ function smoothEligibility(genuineMatch: boolean[]): boolean[] {
     i = j;
   }
   return result;
+}
+
+/**
+ * Sostituisce ogni valore in `values` il cui segmento corrispondente ha `found[i]===false` con
+ * il valore valido più vicino (stesso principio di nearestWebcamCrop, ma generico: usato sia
+ * per singleCrop che per singleCropSquare). Se NESSUN segmento ha trovato un volto, i valori
+ * restano invariati (già un centro geometrico, non c'è nulla di meglio da riusare).
+ */
+function fillMissingWithNearest<T>(values: T[], found: boolean[]): T[] {
+  if (!found.some(Boolean)) return values;
+  return values.map((value, i) => {
+    if (found[i]) return value;
+    for (let offset = 1; offset < values.length; offset++) {
+      if (found[i - offset]) return values[i - offset]!;
+      if (found[i + offset]) return values[i + offset]!;
+    }
+    return value;
+  });
 }
 
 /** Trova il crop webcam del segmento valido più vicino (prima prova indietro, poi avanti). */
