@@ -29,6 +29,13 @@ const envSchema = z.object({
   // -> nessun conflitto di risorse a farne girare più di uno insieme. Default 2, verificato con
   // l'utente su un i7-12700F (12 core/20 thread): reggerebbe anche di più, ma partiamo prudenti.
   RENDER_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  // Video in analisi (download+trascrizione+AI) in parallelo: risolve un video bloccato in
+  // retry automatico che altrimenti, restando in testa alla coda, blocca anche gli altri video
+  // dello stesso batch dietro di lui. La trascrizione locale (whisper, GPU) resta comunque
+  // serializzata al suo interno (vedi LocalFasterWhisperProvider) indipendentemente da questo
+  // valore, quindi aumentarlo non rischia OOM sulla GPU — parallelizza solo le altre fasi
+  // (download, ranking AI, scritture DB).
+  VIDEO_CONCURRENCY: z.coerce.number().int().positive().default(2),
 });
 
 const parsed = envSchema.safeParse(process.env);

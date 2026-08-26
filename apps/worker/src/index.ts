@@ -92,10 +92,12 @@ logger.info("ClipForge worker avviato", {
   workerId: WORKER_ID,
   pollIntervalMs: env.QUEUE_POLL_INTERVAL_MS,
   renderConcurrency: env.RENDER_CONCURRENCY,
+  videoConcurrency: env.VIDEO_CONCURRENCY,
 });
 
-// Più copie dello stesso loop di render in parallelo: claim_next_render_job usa già
-// FOR UPDATE SKIP LOCKED, quindi due (o più) copie non si contendono mai lo stesso job.
+// Più copie degli stessi loop in parallelo: claim_next_video/claim_next_render_job usano già
+// FOR UPDATE SKIP LOCKED, quindi più copie non si contendono mai lo stesso job.
+const videoLoops = Array.from({ length: env.VIDEO_CONCURRENCY }, () => videoQueueLoop());
 const renderLoops = Array.from({ length: env.RENDER_CONCURRENCY }, () => renderQueueLoop());
 
-await Promise.all([videoQueueLoop(), ...renderLoops, publishQueueLoop(), statsRefreshLoop()]);
+await Promise.all([...videoLoops, ...renderLoops, publishQueueLoop(), statsRefreshLoop()]);

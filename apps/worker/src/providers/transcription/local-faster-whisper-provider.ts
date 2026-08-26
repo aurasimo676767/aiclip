@@ -7,6 +7,15 @@ import { probeVideo } from "../../lib/ffmpeg.js";
 import { logger } from "../../lib/logger.js";
 import { splitAudioIntoChunks } from "./audio-chunker.js";
 import type { TranscriptionProvider } from "./transcription-provider.js";
+import { Mutex } from "../../lib/mutex.js";
+
+// Se più video vengono processati in parallelo (VIDEO_CONCURRENCY > 1), NON deve arrivare più
+// di una richiesta di trascrizione alla volta al server Whisper locale: gira su un'unica GPU
+// con VRAM già limitata (verificato: una 3060 Ti 8GB è già al limite con un solo large-v3 in
+// int8_float16) — due trascrizioni contemporanee rischiano OOM o un rallentamento severo
+// invece di un vero guadagno di velocità. Le altre fasi della pipeline (download, ranking AI,
+// scritture DB) restano comunque parallele tra i job: solo questa chiamata è serializzata.
+const gpuMutex = new Mutex();
 
 // Trascrivere un audio lungo su una GPU eventualmente condivisa con altri carichi (es. un
 // gioco) può richiedere più dei ~5 minuti di timeout di default del fetch nativo di Node.
@@ -50,6 +59,10 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
   ) {}
 
   async transcribe(audioFilePath: string): Promise<Transcript> {
+    return gpuMutex.run(() => this.transcribeLocked(audioFilePath));
+  }
+
+  private async transcribeLocked(audioFilePath: string): Promise<Transcript> {
     const fullDuration = (await probeVideo(audioFilePath)).durationSeconds;
     const chunks = await splitAudioIntoChunks(audioFilePath, this.tmpDir);
 
