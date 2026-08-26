@@ -24,6 +24,7 @@ const BACKGROUND_FILL_TRIGGER_RATIO = 0.55; // sotto questa frazione di sourceHe
 const SINGLE_CROP_SMOOTHING_ALPHA = 0.4; // solo per il layout "schermo intero" (una persona zoomata): quanto peso dare al nuovo segmento vs quello smussato precedente — basso = più morbido ma più lento a inseguire un movimento reale, alto = più reattivo ma più "a scatti"
 const SMOOTHING_CUT_HEIGHT_RATIO = 1.6; // se l'altezza raw del segmento cambia di più di questo fattore rispetto allo smoothed corrente, non è rumore da smussare ma un vero cambio di inquadratura (es. l'OBS della sorgente passa da una webcam piccola in un angolo a una grande centrale) — verificato su un caso reale dove un volto minuscolo nei primi 2 segmenti faceva impiegare 8 segmenti (16s, più di metà clip) all'EMA per raggiungere l'inquadratura vera, dando la sensazione di uno zoom che continua ad "aggiustarsi" invece di un taglio netto
 const SMOOTHING_CUT_CENTER_RATIO = 0.25; // idem per lo spostamento del centro, come frazione della diagonale del frame sorgente
+const MIN_CONSECUTIVE_MISSES_TO_SWITCH = 2; // segmenti di fila SENZA un'ancora webcam genuina (non riusata da un vicino) prima di considerare la scena sorgente davvero cambiata invece di un semplice miss isolato del detector — verificato su un caso reale (streamer che passa da "webcam piccola + TikTok reagito" a "solo webcam a schermo intero" e poi a un layout diverso ancora dentro la STESSA clip): un singolo segmento perso viene ancora riusato dal vicino più vicino (comportamento invariato), ma 2+ di fila passano al layout "mixed" invece di forzare uno split_vertical ormai senza senso in quel tratto
 
 interface DetectionEntry {
   box: FaceBox;
@@ -135,10 +136,9 @@ export class ReactionCamFaceTracker implements FaceTracker {
 
     const anyWebcam = decisions.some((d) => d.webcamCrop !== null);
 
-    if (!anyWebcam) {
-      const anyFaceFound = decisions.some((d) => d.singleCrop);
-      if (!anyFaceFound) return this.fallback.computeLayout(params);
-      const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
+    const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
+
+    const buildSingleCrops = (): { crops: TimedCrop[]; backgroundFill: boolean } => {
       const smoothedCrops = smoothCropSequence(
         decisions.map((d) => d.singleCrop),
         targetAspect,
@@ -151,36 +151,74 @@ export class ReactionCamFaceTracker implements FaceTracker {
       // durata il volto è ragionevolmente centrato e il crop a piena canvas va già bene.
       const backgroundFill = decisions.filter((d) => d.singleCropNeedsFill).length > decisions.length / 2;
       return {
-        type: "single",
         crops: decisions.map((d, i) => ({ startSeconds: d.startSeconds, endSeconds: d.endSeconds, crop: smoothedCrops[i]! })),
         backgroundFill,
       };
+    };
+
+    if (!anyWebcam) {
+      const anyFaceFound = decisions.some((d) => d.singleCrop);
+      if (!anyFaceFound) return this.fallback.computeLayout(params);
+      const { crops, backgroundFill } = buildSingleCrops();
+      return { type: "single", crops, backgroundFill };
     }
 
-    // Segmenti senza webcam rilevata: riusano la posizione del segmento valido più vicino,
-    // così la webcam non "sparisce" per un tratto in cui il rilevamento è fallito per caso.
-    const topCrops: TimedCrop[] = decisions.map((d, i) => ({
-      startSeconds: d.startSeconds,
-      endSeconds: d.endSeconds,
-      crop: d.webcamCrop ?? nearestWebcamCrop(decisions, i),
-    }));
+    // Un'ancora è valida per l'intera clip (webcamCrop non-null da resolveWebcamAnchors), ma
+    // qui distinguiamo un match GENUINO per QUESTO segmento specifico (il detector ha trovato
+    // davvero quell'ancora in quel tratto) da un semplice buco riempito riusando il vicino più
+    // vicino — 2+ buchi genuini di fila non sono più "rumore del detector", sono il segnale che
+    // la scena sorgente è cambiata (vedi MIN_CONSECUTIVE_MISSES_TO_SWITCH).
+    const genuineMatch = decisions.map((d) => d.webcamCrop !== null);
+    const splitEligible = smoothEligibility(genuineMatch);
+    const anyEligible = splitEligible.some(Boolean);
+    const allEligible = splitEligible.every(Boolean);
 
     const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - TOP_RATIO));
     const bottom = centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
-
     // Ogni ancora valida è, per definizione, un overlay webcam fisso nel frame sorgente — e
     // il pannello "contenuto" sotto è un crop dell'INTERO frame sorgente, quindi la mostra
     // di nuovo, piccola (e spesso tagliata dal bordo del crop). Sfochiamo quelle zone nel
     // rendering invece di lasciarle visibili due volte.
     const blurRegions: CropWindow[] = anchorGroups.map((g) => subjectCentricCrop(g.avg, sourceWidth, sourceHeight, 1, BLUR_REGION_PADDING_FACTOR));
 
-    logger.info("Layout reaction-cam (dinamico) rilevato", {
+    if (!anyEligible) {
+      // Ogni match trovato era un miss isolato circondato da buchi sostenuti (es. un'ancora
+      // vista solo per un paio di segmenti su tutta la clip): non è un vero pattern reaction-cam
+      // sostenuto, meglio trattare l'intera clip come "single".
+      const { crops, backgroundFill } = buildSingleCrops();
+      logger.info("Layout reaction-cam: pattern webcam non sostenuto, uso single per l'intera clip", { segments: segmentCount });
+      return { type: "single", crops, backgroundFill };
+    }
+
+    // Segmenti senza webcam rilevata (ma "eligible", cioè miss isolato): riusano la posizione
+    // del segmento valido più vicino, così la webcam non "sparisce" per un tratto in cui il
+    // rilevamento è fallito per caso.
+    const topCrops: TimedCrop[] = decisions.map((d, i) => ({
+      startSeconds: d.startSeconds,
+      endSeconds: d.endSeconds,
+      crop: d.webcamCrop ?? nearestWebcamCrop(decisions, i),
+    }));
+
+    if (allEligible) {
+      logger.info("Layout reaction-cam (dinamico) rilevato", {
+        segments: segmentCount,
+        withWebcam: decisions.filter((d) => d.webcamCrop).length,
+        blurRegions: blurRegions.length,
+      });
+      return { type: "split_vertical", topCrops, bottom, topRatio: TOP_RATIO, blurRegions };
+    }
+
+    // Mix: la scena sorgente cambia dentro la stessa clip. Base "single" per l'intera durata,
+    // split_vertical sovrapposto SOLO nelle finestre effettivamente eligible (vedi
+    // Layout.type "mixed" e build-video-filter.ts per come viene composto in render).
+    const { crops: singleCrops, backgroundFill } = buildSingleCrops();
+    const splitCrops = topCrops.filter((_, i) => splitEligible[i]);
+    logger.info("Layout reaction-cam: scena mista rilevata (webcam + single in tratti diversi)", {
       segments: segmentCount,
-      withWebcam: decisions.filter((d) => d.webcamCrop).length,
+      splitSegments: splitCrops.length,
       blurRegions: blurRegions.length,
     });
-
-    return { type: "split_vertical", topCrops, bottom, topRatio: TOP_RATIO, blurRegions };
+    return { type: "mixed", singleCrops, backgroundFill, splitCrops, bottom, topRatio: TOP_RATIO, blurRegions };
   }
 
   /**
@@ -344,6 +382,31 @@ function selectBest(list: ClusterMeta[], filter?: (m: ClusterMeta) => boolean): 
     return [...candidates].sort((a, b) => b.motion - a.motion || b.count - a.count)[0];
   }
   return [...candidates].sort((a, b) => b.count - a.count || b.avg.width * b.avg.height - a.avg.width * a.avg.height)[0];
+}
+
+/**
+ * Distingue un miss isolato del detector (ancora comunque valida, verrà riusata dal vicino) da
+ * un buco sostenuto che segnala un vero cambio di scena sorgente: un run di `false` più corto
+ * di MIN_CONSECUTIVE_MISSES_TO_SWITCH viene "promosso" a true (resta eligible per lo split),
+ * un run più lungo resta false (quel tratto passa alla base "single" nel layout "mixed").
+ */
+function smoothEligibility(genuineMatch: boolean[]): boolean[] {
+  const result = [...genuineMatch];
+  let i = 0;
+  while (i < result.length) {
+    if (genuineMatch[i]) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < result.length && !genuineMatch[j]) j++;
+    const runLength = j - i;
+    if (runLength < MIN_CONSECUTIVE_MISSES_TO_SWITCH) {
+      for (let k = i; k < j; k++) result[k] = true;
+    }
+    i = j;
+  }
+  return result;
 }
 
 /** Trova il crop webcam del segmento valido più vicino (prima prova indietro, poi avanti). */

@@ -12,20 +12,22 @@ export interface VideoFilterParams {
 
 /**
  * Costruisce la catena di filtri video ffmpeg per una clip:
- * crop 9:16 che segue nel tempo lo speaker/webcam (face tracking, singolo o split_vertical
- * per layout "reaction cam") -> crop dinamico per lo zoom/punch-in (EDL) -> scale finale ->
- * sottotitoli bruciati (ASS) -> progress bar opzionale.
+ * crop 9:16 che segue nel tempo lo speaker/webcam (face tracking, singolo, split_vertical o
+ * "mixed" per layout reaction-cam con cambio scena a metà clip) -> crop dinamico per lo
+ * zoom/punch-in (EDL) -> scale finale -> sottotitoli bruciati (ASS) -> progress bar opzionale.
  * Ritorna la stringa da passare a `-filter_complex`, con output finale su label `[vout]`.
  */
 export function buildVideoFilterComplex(params: VideoFilterParams): string {
   const { layout, zoomExpression, assSubtitlesPath, showProgressBar, clipDurationSeconds } = params;
 
-  const steps: string[] =
-    layout.type === "single"
-      ? layout.backgroundFill
-        ? buildSingleWithBackgroundSteps(layout.crops, zoomExpression)
-        : buildSingleCropSteps(layout.crops, zoomExpression)
-      : buildSplitVerticalSteps(layout, zoomExpression);
+  let steps: string[];
+  if (layout.type === "single") {
+    steps = layout.backgroundFill ? buildSingleWithBackgroundSteps(layout.crops, zoomExpression) : buildSingleCropSteps(layout.crops, zoomExpression);
+  } else if (layout.type === "split_vertical") {
+    steps = buildSplitVerticalSteps(layout, zoomExpression);
+  } else {
+    steps = buildMixedSteps(layout, zoomExpression);
+  }
 
   const subtitlesFilterPath = toFfmpegFilterPath(assSubtitlesPath);
   const lastLabel = "subbed";
@@ -43,16 +45,16 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
   return steps.join(";\n");
 }
 
-function buildSingleCropSteps(crops: TimedCrop[], zoomExpression: string): string[] {
+function buildSingleCropSteps(crops: TimedCrop[], zoomExpression: string, prefix = ""): string[] {
   const xExpr = piecewiseExpr(crops, (c) => c.x);
   const yExpr = piecewiseExpr(crops, (c) => c.y);
   const wExpr = piecewiseExpr(crops, (c) => c.width);
   const hExpr = piecewiseExpr(crops, (c) => c.height);
 
   return [
-    `[0:v]crop=w='${wExpr}':h='${hExpr}':x='${xExpr}':y='${yExpr}'[base]`,
-    `[base]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[zoomed]`,
-    `[zoomed]scale=${OUTPUT_RESOLUTION.width}:${OUTPUT_RESOLUTION.height}:flags=lanczos,setsar=1[scaled]`,
+    `[0:v]crop=w='${wExpr}':h='${hExpr}':x='${xExpr}':y='${yExpr}'[${prefix}base]`,
+    `[${prefix}base]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[${prefix}zoomed]`,
+    `[${prefix}zoomed]scale=${OUTPUT_RESOLUTION.width}:${OUTPUT_RESOLUTION.height}:flags=lanczos,setsar=1[${prefix}scaled]`,
   ];
 }
 
@@ -71,7 +73,7 @@ const BACKGROUND_FILL_FOREGROUND_WIDTH_RATIO = 0.82;
  * invisibile quando il volto occupa tutto lo schermo. Sfondo NITIDO, non sfocato: l'utente lo
  * vuole visibile chiaramente, non solo come ambiente sfumato sullo sfondo.
  */
-function buildSingleWithBackgroundSteps(crops: TimedCrop[], zoomExpression: string): string[] {
+function buildSingleWithBackgroundSteps(crops: TimedCrop[], zoomExpression: string, prefix = ""): string[] {
   const xExpr = piecewiseExpr(crops, (c) => c.x);
   const yExpr = piecewiseExpr(crops, (c) => c.y);
   const wExpr = piecewiseExpr(crops, (c) => c.width);
@@ -84,19 +86,20 @@ function buildSingleWithBackgroundSteps(crops: TimedCrop[], zoomExpression: stri
     // Sfondo: l'intero frame sorgente scalato "a copertura" della canvas (un lato combacia,
     // l'altro sfora) poi tagliato al centro alle dimensioni esatte — sempre uguale per tutta
     // la clip (non segue il volto), lasciato nitido.
-    `[0:v]scale=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}:force_original_aspect_ratio=increase,crop=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}[bg]`,
+    `[0:v]scale=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}:force_original_aspect_ratio=increase,crop=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}[${prefix}bg]`,
     // Primo piano: stesso crop/zoom del volto di buildSingleCropSteps, ma scalato a una
     // dimensione fissa più piccola invece che stirato a piena canvas.
-    `[0:v]crop=w='${wExpr}':h='${hExpr}':x='${xExpr}':y='${yExpr}'[fg_base]`,
-    `[fg_base]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[fg_zoomed]`,
-    `[fg_zoomed]scale=${fgWidth}:${fgHeight}:flags=lanczos,setsar=1[fg]`,
-    `[bg][fg]overlay=x='(W-w)/2':y='(H-h)/2',setsar=1[scaled]`,
+    `[0:v]crop=w='${wExpr}':h='${hExpr}':x='${xExpr}':y='${yExpr}'[${prefix}fg_base]`,
+    `[${prefix}fg_base]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[${prefix}fg_zoomed]`,
+    `[${prefix}fg_zoomed]scale=${fgWidth}:${fgHeight}:flags=lanczos,setsar=1[${prefix}fg]`,
+    `[${prefix}bg][${prefix}fg]overlay=x='(W-w)/2':y='(H-h)/2',setsar=1[${prefix}scaled]`,
   ];
 }
 
 function buildSplitVerticalSteps(
   layout: Extract<Layout, { type: "split_vertical" }>,
   zoomExpression: string,
+  prefix = "",
 ): string[] {
   const topHeight = evenRound(OUTPUT_RESOLUTION.height * layout.topRatio);
   const bottomHeight = OUTPUT_RESOLUTION.height - topHeight;
@@ -109,9 +112,9 @@ function buildSplitVerticalSteps(
 
   const steps = [
     // Webcam: crop che segue nel tempo il segmento attivo, nessuno zoom EDL (l'area è già ravvicinata di suo).
-    `[0:v]crop=w='${topWExpr}':h='${topHExpr}':x='${topXExpr}':y='${topYExpr}',scale=${OUTPUT_RESOLUTION.width}:${topHeight}:flags=lanczos,setsar=1[top]`,
+    `[0:v]crop=w='${topWExpr}':h='${topHExpr}':x='${topXExpr}':y='${topYExpr}',scale=${OUTPUT_RESOLUTION.width}:${topHeight}:flags=lanczos,setsar=1[${prefix}top]`,
     // Contenuto principale: crop statico centrato dell'intero frame sorgente.
-    `[0:v]crop=w=${bottom.width}:h=${bottom.height}:x=${bottom.x}:y=${bottom.y}[bmain]`,
+    `[0:v]crop=w=${bottom.width}:h=${bottom.height}:x=${bottom.x}:y=${bottom.y}[${prefix}bmain]`,
   ];
 
   // Il crop "contenuto" sopra è dell'INTERO frame sorgente, quindi mostra di nuovo (piccola,
@@ -121,10 +124,10 @@ function buildSplitVerticalSteps(
     .map((region) => intersectCropWithBottom(region, bottom))
     .filter((r): r is CropWindow => r !== null);
 
-  let lastLabel = "bmain";
+  let lastLabel = `${prefix}bmain`;
   localRegions.forEach((region, i) => {
-    const patchLabel = `bpatch${i}`;
-    const nextLabel = `bmain${i}`;
+    const patchLabel = `${prefix}bpatch${i}`;
+    const nextLabel = `${prefix}bmain${i}`;
     steps.push(`[${lastLabel}]split=2[${lastLabel}_keep][${lastLabel}_src]`);
     steps.push(`[${lastLabel}_src]crop=w=${region.width}:h=${region.height}:x=${region.x}:y=${region.y},boxblur=24:3[${patchLabel}]`);
     steps.push(`[${lastLabel}_keep][${patchLabel}]overlay=${region.x}:${region.y}[${nextLabel}]`);
@@ -132,12 +135,39 @@ function buildSplitVerticalSteps(
   });
 
   steps.push(
-    `[${lastLabel}]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[bzoomed]`,
-    `[bzoomed]scale=${OUTPUT_RESOLUTION.width}:${bottomHeight}:flags=lanczos,setsar=1[bottom]`,
-    `[top][bottom]vstack=inputs=2[scaled]`,
+    `[${lastLabel}]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[${prefix}bzoomed]`,
+    `[${prefix}bzoomed]scale=${OUTPUT_RESOLUTION.width}:${bottomHeight}:flags=lanczos,setsar=1[${prefix}bottom]`,
+    `[${prefix}top][${prefix}bottom]vstack=inputs=2[${prefix}scaled]`,
   );
 
   return steps;
+}
+
+/**
+ * Layout "mixed" (vedi face-tracker.ts): la scena sorgente cambia dentro la stessa clip, quindi
+ * un unico layout fisso per tutta la durata romperebbe i tratti dove non vale più. Costruisce
+ * ENTRAMBE le composizioni per l'intera durata (base "single" + split_vertical, con label
+ * separate per non collidere) e sovrappone lo split SOLO nelle finestre `splitCrops` — fuori da
+ * quelle finestre resta visibile la base. Costa il doppio in calcoli ffmpeg rispetto a un
+ * layout puro, accettabile per la correttezza del risultato.
+ */
+function buildMixedSteps(layout: Extract<Layout, { type: "mixed" }>, zoomExpression: string): string[] {
+  const baseSteps = layout.backgroundFill
+    ? buildSingleWithBackgroundSteps(layout.singleCrops, zoomExpression, "base_")
+    : buildSingleCropSteps(layout.singleCrops, zoomExpression, "base_");
+
+  const splitLayout: Extract<Layout, { type: "split_vertical" }> = {
+    type: "split_vertical",
+    topCrops: layout.splitCrops,
+    bottom: layout.bottom,
+    topRatio: layout.topRatio,
+    blurRegions: layout.blurRegions,
+  };
+  const splitSteps = buildSplitVerticalSteps(splitLayout, zoomExpression, "sv_");
+
+  const enableExpr = layout.splitCrops.map((c) => `between(t,${c.startSeconds.toFixed(3)},${c.endSeconds.toFixed(3)})`).join("+");
+
+  return [...baseSteps, ...splitSteps, `[base_scaled][sv_scaled]overlay=x=0:y=0:enable='${enableExpr}'[scaled]`];
 }
 
 // Sotto questa soglia (px) una regione da sfocare viene scartata invece di generare un crop
@@ -167,7 +197,10 @@ function intersectCropWithBottom(region: CropWindow, bottom: CropWindow): CropWi
  * Costruisce un'espressione ffmpeg a tratti: `if(lt(t,fine1),val1,if(lt(t,fine2),val2,...,valN))`.
  * Usata per far "scattare" crop x/y/w/h da un segmento temporale al successivo (es. la webcam
  * che cambia posizione a metà clip), riusando lo stesso meccanismo di espressioni dipendenti da
- * `t` già usato per il pulse di zoom.
+ * `t` già usato per il pulse di zoom. I segmenti non devono essere contigui (vedi Layout "mixed":
+ * `splitCrops` può avere buchi) — per i tempi fuori da qualunque intervallo elencato l'espressione
+ * risolve comunque a un valore qualsiasi tra quelli forniti, il che va bene perché quei tratti non
+ * sono comunque visibili (mai `enable`-ati nel layer sovrapposto).
  */
 function piecewiseExpr(crops: TimedCrop[], pick: (crop: TimedCrop["crop"]) => number): string {
   if (crops.length === 0) {

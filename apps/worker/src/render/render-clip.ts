@@ -142,7 +142,24 @@ function remapLayout(layout: Layout, timeRemap: (t: number) => number, finalDura
   if (layout.type === "single") {
     return { type: "single", crops: remapTimedCrops(layout.crops, timeRemap, finalDuration), backgroundFill: layout.backgroundFill };
   }
-  return { ...layout, topCrops: remapTimedCrops(layout.topCrops, timeRemap, finalDuration) };
+  if (layout.type === "split_vertical") {
+    return { ...layout, topCrops: remapTimedCrops(layout.topCrops, timeRemap, finalDuration) };
+  }
+
+  // "mixed": singleCrops copre sempre l'intera durata (stesso trattamento di "single"), ma
+  // splitCrops è volutamente sparso — se il taglio dei silenzi fa collassare TUTTE le sue
+  // finestre, non ha senso forzarne una a coprire l'intera clip (comportamento pensato per
+  // singleCrops/topCrops, che coprono sempre tutto): la clip risultante non ha più bisogno del
+  // layer split_vertical, la base "single" basta da sola.
+  const singleCrops = remapTimedCrops(layout.singleCrops, timeRemap, finalDuration);
+  const splitCrops = layout.splitCrops
+    .map((c) => ({ startSeconds: timeRemap(c.startSeconds), endSeconds: timeRemap(c.endSeconds), crop: c.crop }))
+    .filter((c) => c.endSeconds > c.startSeconds + 0.01);
+
+  if (splitCrops.length === 0) {
+    return { type: "single", crops: singleCrops, backgroundFill: layout.backgroundFill };
+  }
+  return { ...layout, singleCrops, splitCrops };
 }
 
 function remapTimedCrops(crops: TimedCrop[], timeRemap: (t: number) => number, finalDuration: number): TimedCrop[] {

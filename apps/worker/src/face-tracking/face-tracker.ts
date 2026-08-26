@@ -34,10 +34,28 @@ export interface TimedCrop {
  *   centrato dell'INTERO frame sorgente, quindi senza sfocarle mostrerebbe due volte la
  *   stessa webcam — una volta ravvicinata in alto, una volta piccola (e spesso tagliata) in
  *   basso, dentro l'area "contenuto".
+ * - "mixed": la sorgente cambia scena OBS dentro la STESSA clip (es. da "webcam piccola +
+ *   contenuto" a "webcam a schermo intero" e viceversa) — un singolo layout fisso per tutta la
+ *   clip produrrebbe fotogrammi rotti nei tratti dove l'assunzione non vale più (visto in un
+ *   caso reale: metà "content" pane che mostrava un pezzo casuale di volto zoomato invece del
+ *   contenuto reagito). `singleCrops`+`backgroundFill` coprono l'INTERA durata come base (stessa
+ *   logica del tipo "single"); `splitCrops` copre SOLO le finestre temporali in cui è stato
+ *   trovato un vero pattern reaction-cam per QUEL segmento specifico (non riusato da un vicino
+ *   oltre un singolo miss isolato) — il render sovrappone lo split_vertical sopra la base solo
+ *   durante quelle finestre, lasciando vedere la base altrove. Vedi build-video-filter.ts.
  */
 export type Layout =
   | { type: "single"; crops: TimedCrop[]; backgroundFill: boolean }
-  | { type: "split_vertical"; topCrops: TimedCrop[]; bottom: CropWindow; topRatio: number; blurRegions: CropWindow[] };
+  | { type: "split_vertical"; topCrops: TimedCrop[]; bottom: CropWindow; topRatio: number; blurRegions: CropWindow[] }
+  | {
+      type: "mixed";
+      singleCrops: TimedCrop[];
+      backgroundFill: boolean;
+      splitCrops: TimedCrop[];
+      bottom: CropWindow;
+      topRatio: number;
+      blurRegions: CropWindow[];
+    };
 
 /**
  * Astrazione sul tracking di volto/speaker usato per decidere il layout del crop verticale.
