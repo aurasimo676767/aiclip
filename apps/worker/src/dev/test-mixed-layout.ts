@@ -14,10 +14,6 @@ async function main() {
   const tracker = new ReactionCamFaceTracker();
   const layout = await tracker.computeLayout({ sourceVideoPath: videoPath, sourceWidth: 1920, sourceHeight: 1080, startSeconds, endSeconds });
   console.log("Layout type:", layout.type);
-  if (layout.type !== "mixed") {
-    console.log("Non è mixed, niente da testare qui con questo intervallo.");
-    return;
-  }
 
   const filterComplex = buildVideoFilterComplex({
     layout,

@@ -336,7 +336,14 @@ export class ReactionCamFaceTracker implements FaceTracker {
     });
 
     const minAnchorCoverage = segmentCount <= 2 ? 1 : Math.max(2, Math.ceil(segmentCount * MIN_ANCHOR_SEGMENT_COVERAGE_RATIO));
-    const anchorGroups = clusterByPosition(allCandidates).filter((g) => g.segIndices.size >= minAnchorCoverage);
+    // maxMotion > MOTION_NOISE_FLOOR: un'ancora valida deve aver mostrato un minimo di movimento
+    // reale della bocca in ALMENO una delle sue occorrenze — verificato su un caso reale dove
+    // un'immagine statica (una foto mostrata come contenuto) ricompariva nella stessa posizione
+    // in più segmenti (proprio perché non cambia mai) e passava il solo filtro di persistenza,
+    // rubando il posto al vero reactor in un segmento su sei.
+    const anchorGroups = clusterByPosition(allCandidates).filter(
+      (g) => g.segIndices.size >= minAnchorCoverage && g.maxMotion > MOTION_NOISE_FLOOR,
+    );
 
     const topAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * TOP_RATIO);
 
@@ -425,6 +432,15 @@ interface PositionGroup {
   avg: FaceBox;
   segIndices: Set<number>;
   entries: FaceBox[];
+  /**
+   * Massimo movimento della bocca registrato in QUALUNQUE occorrenza di questo gruppo — serve a
+   * scartare un'ancora che ricompare nella stessa posizione ma non è mai stata associata a un
+   * minimo di movimento reale (vedi filtro in resolveWebcamAnchors). Un'immagine statica
+   * mostrata come contenuto (es. una foto/meme) può ricomparire nella stessa posizione per più
+   * segmenti proprio perché non cambia mai — passando altrimenti il filtro di persistenza
+   * pensato per riconoscere un overlay webcam reale.
+   */
+  maxMotion: number;
 }
 
 /**
@@ -451,8 +467,9 @@ function clusterByPosition(items: Array<{ segIndex: number; meta: ClusterMeta }>
       bestGroup.entries.push(meta.avg);
       bestGroup.segIndices.add(segIndex);
       bestGroup.avg = averageBox(bestGroup.entries);
+      bestGroup.maxMotion = Math.max(bestGroup.maxMotion, meta.motion);
     } else {
-      groups.push({ avg: meta.avg, segIndices: new Set([segIndex]), entries: [meta.avg] });
+      groups.push({ avg: meta.avg, segIndices: new Set([segIndex]), entries: [meta.avg], maxMotion: meta.motion });
     }
   }
 
