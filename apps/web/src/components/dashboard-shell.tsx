@@ -7,6 +7,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", exact: true },
+  { href: "/dashboard/published", label: "Pubblicati" },
   { href: "/dashboard/settings", label: "Opzioni" },
 ];
 

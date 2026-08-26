@@ -41,6 +41,9 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryingClipId, setRetryingClipId] = useState<string | null>(null);
+  const [selectedForSchedule, setSelectedForSchedule] = useState<Set<string>>(new Set());
+  const [submittingSchedule, setSubmittingSchedule] = useState(false);
+  const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
 
   const sorted = useMemo(
     () => [...clips].sort((a, b) => overallScore(b.scores) - overallScore(a.scores)),
@@ -74,6 +77,48 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
       setError(err instanceof Error ? err.message : "Errore imprevisto");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function toggleSchedule(id: string) {
+    setSelectedForSchedule((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleScheduleBatch() {
+    if (selectedForSchedule.size === 0) return;
+    setSubmittingSchedule(true);
+    setError(null);
+    setScheduleMessage(null);
+    try {
+      const res = await fetch("/api/clips/schedule-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clipIds: [...selectedForSchedule] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Programmazione fallita");
+      const scheduled = data.scheduled as Array<{ clipId: string; publishAt: string }>;
+      const errors = data.errors as Array<{ clipId: string; error: string }>;
+      if (scheduled.length > 0) {
+        const last = scheduled[scheduled.length - 1]!;
+        setScheduleMessage(
+          `${scheduled.length} clip programmate, l'ultima per il ${new Date(last.publishAt).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "short" })}` +
+            (errors.length > 0 ? ` (${errors.length} saltate: ${errors[0]!.error})` : ""),
+        );
+      } else if (errors.length > 0) {
+        setError(errors[0]!.error);
+      }
+      setSelectedForSchedule(new Set());
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore imprevisto");
+    } finally {
+      setSubmittingSchedule(false);
     }
   }
 
@@ -112,10 +157,14 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
   }
 
   const selectableCount = sorted.filter((c) => c.status === "SUGGESTED" || c.status === "FAILED").length;
+  const schedulableCount = youtubeConnected
+    ? sorted.filter((c) => c.status === "COMPLETED" && c.youtubePublishStatus === null).length
+    : 0;
 
   return (
     <div className="space-y-4">
       {error && <p className="text-sm text-red-400">{error}</p>}
+      {scheduleMessage && <p className="text-sm text-emerald-400">{scheduleMessage}</p>}
 
       {selectableCount > 0 && (
         <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3">
@@ -130,10 +179,24 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
         </div>
       )}
 
+      {schedulableCount > 0 && (
+        <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3">
+          <p className="text-sm text-zinc-400">{selectedForSchedule.size} clip selezionate per la programmazione</p>
+          <button
+            onClick={handleScheduleBatch}
+            disabled={selectedForSchedule.size === 0 || submittingSchedule}
+            className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50"
+          >
+            {submittingSchedule ? "Programmazione..." : "Programma pubblicazione automatica"}
+          </button>
+        </div>
+      )}
+
       <ul className="space-y-3">
         {sorted.map((clip, index) => {
           const score = overallScore(clip.scores);
           const canSelect = clip.status === "SUGGESTED" || clip.status === "FAILED";
+          const canSchedule = youtubeConnected && clip.status === "COMPLETED" && clip.youtubePublishStatus === null;
           const canPreview = clip.status === "COMPLETED";
           const previewUrl = previewUrls[clip.id];
 
@@ -145,6 +208,15 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                     type="checkbox"
                     checked={selected.has(clip.id)}
                     onChange={() => toggle(clip.id)}
+                    className="mt-1.5 h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-brand-500"
+                  />
+                )}
+                {canSchedule && (
+                  <input
+                    type="checkbox"
+                    checked={selectedForSchedule.has(clip.id)}
+                    onChange={() => toggleSchedule(clip.id)}
+                    title="Seleziona per la programmazione automatica"
                     className="mt-1.5 h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-brand-500"
                   />
                 )}
