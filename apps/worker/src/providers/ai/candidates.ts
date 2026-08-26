@@ -1,9 +1,15 @@
+import { z } from "zod";
 import type { TranscriptSegment } from "@clipforge/shared";
-import { clipCandidatesResponseSchema, type ClipCandidatesResponse } from "@clipforge/shared";
+import { clipCandidateSchema, type ClipCandidatesResponse } from "@clipforge/shared";
 import { CANDIDATE_CHUNK_OVERLAP_SECONDS, CANDIDATE_CHUNK_WINDOW_SECONDS } from "@clipforge/shared";
 import { getAnthropicClient } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
 import { logger } from "../../lib/logger.js";
+
+// Estrae solo l'array grezzo (senza validare ancora ogni candidato): serve a distinguere un
+// output strutturalmente sbagliato (niente "candidates", o non è un array — lì la finestra va
+// scartata per intero) da un array valido i cui singoli elementi vanno controllati uno per uno.
+const candidatesContainerSchema = z.object({ candidates: z.array(z.unknown()).max(50) });
 
 const TOOL_NAME = "return_clip_candidates";
 
@@ -96,16 +102,33 @@ ${formatSegments(windowSegments)}`;
       continue;
     }
 
-    const validation = clipCandidatesResponseSchema.safeParse(parsed);
-    if (!validation.success) {
+    // Validato in DUE fasi: prima il contenitore (struttura macroscopica), poi ogni candidato
+    // singolarmente — un solo campo fuori schema (es. hook/reason troppo lungo) non deve più
+    // buttare via TUTTI i candidati validi della finestra insieme a quello incriminato. Prima
+    // della fix, un singolo candidato invalido su una finestra intera (fino a 8) faceva
+    // scartare l'intera finestra, e se questo capitava su TUTTE le finestre la pipeline falliva
+    // del tutto ("L'AI non ha prodotto nessuna clip valida"), triggerando un retry automatico
+    // che ripete anche la trascrizione (il passaggio più lento) — osservato in pratica.
+    const containerValidation = candidatesContainerSchema.safeParse(parsed);
+    if (!containerValidation.success) {
       logger.warn("Output candidati non valido secondo lo schema, finestra saltata", {
         window,
-        issues: validation.error.issues,
+        issues: containerValidation.error.issues,
       });
       continue;
     }
 
-    allCandidates.push(...validation.data.candidates);
+    for (const rawCandidate of containerValidation.data.candidates) {
+      const candidateValidation = clipCandidateSchema.safeParse(rawCandidate);
+      if (!candidateValidation.success) {
+        logger.warn("Candidato singolo non valido, scartato (gli altri della finestra restano validi)", {
+          window,
+          issues: candidateValidation.error.issues,
+        });
+        continue;
+      }
+      allCandidates.push(candidateValidation.data);
+    }
   }
 
   return dedupeCandidates(allCandidates);

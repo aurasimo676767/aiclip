@@ -8,8 +8,8 @@ import { z } from "zod";
 export const clipCandidateSchema = z.object({
   start: z.number().nonnegative(),
   end: z.number().positive(),
-  hook: z.string().min(1).max(200),
-  reason: z.string().min(1).max(300),
+  hook: z.string().min(1).max(250),
+  reason: z.string().min(1).max(400),
 });
 
 export const clipCandidatesResponseSchema = z.object({
