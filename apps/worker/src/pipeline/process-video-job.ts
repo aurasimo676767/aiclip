@@ -13,10 +13,26 @@ import { rankAndBuildEdl } from "../providers/ai/ranking.js";
 import { updateVideoStatus } from "../queue/video-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
 
+// Tentativi automatici prima di arrendersi e marcare FAILED (serve poi il pulsante "Riprova"
+// manuale): stesso numero di default usato da claim_next_video per lo stale-reclaim, così i due
+// meccanismi (retry automatico e stale-reclaim) si esauriscono in modo coerente.
+const MAX_AUTO_RETRY_ATTEMPTS = 3;
+
 /** Esegue l'intera pipeline di analisi per un video appena claimato: audio -> transcript -> AI -> clip suggerite. */
 export async function processVideoJob(video: VideoRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `video-${video.id}`);
   await fsp.mkdir(jobDir, { recursive: true });
+
+  const { data: project, error: projectFetchError } = await supabase
+    .from("projects")
+    .select("id, user_id, auto_generate_clips")
+    .eq("id", video.project_id)
+    .single();
+  if (projectFetchError || !project) {
+    logger.error("Impossibile recuperare il progetto per il video", { videoId: video.id, error: projectFetchError?.message });
+    await updateVideoStatus(video.id, "FAILED", { error_message: `Progetto non trovato: ${projectFetchError?.message}` });
+    return;
+  }
 
   try {
     let localVideoPath: string;
@@ -35,15 +51,6 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       const downloaded = await downloadYoutubeVideo(video.source_url, jobDir);
       localVideoPath = downloaded.filePath;
       videoTitle = downloaded.title;
-
-      const { data: project, error: projectFetchError } = await supabase
-        .from("projects")
-        .select("user_id")
-        .eq("id", video.project_id)
-        .single();
-      if (projectFetchError || !project) {
-        throw new Error(`Impossibile recuperare il progetto per l'import YouTube: ${projectFetchError?.message}`);
-      }
 
       const storagePath = `videos/${project.user_id}/${video.id}/source.mp4`;
       await storageProvider.uploadFile(localVideoPath, storagePath, "video/mp4");
@@ -138,12 +145,33 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       throw new Error("L'AI non ha prodotto nessuna clip valida per questo video");
     }
 
-    const { error: insertError } = await withNetworkRetry(
-      () => supabase.from("clips").insert(clipsToInsert),
+    const { data: insertedClips, error: insertError } = await withNetworkRetry(
+      () => supabase.from("clips").insert(clipsToInsert).select("id"),
       "Inserimento clip",
     );
     if (insertError) {
       throw new Error(`Inserimento clip fallito: ${insertError.message}`);
+    }
+
+    // "Genera più video": nessuna selezione manuale, si mette subito in render tutto ciò che
+    // l'AI ha suggerito (vedi il flag impostato in /api/projects/youtube/bulk).
+    if (project.auto_generate_clips && insertedClips && insertedClips.length > 0) {
+      const newClipIds = insertedClips.map((c) => c.id);
+      const { error: renderJobsError } = await withNetworkRetry(
+        () => supabase.from("render_jobs").insert(newClipIds.map((clip_id) => ({ clip_id }))),
+        "Inserimento render job (auto-generate)",
+      );
+      if (renderJobsError) {
+        logger.warn("Auto-generate: creazione render job fallita", { videoId: video.id, error: renderJobsError.message });
+      } else {
+        const { error: statusError } = await withNetworkRetry(
+          () => supabase.from("clips").update({ status: "QUEUED" }).in("id", newClipIds),
+          "Aggiornamento status clip (auto-generate)",
+        );
+        if (statusError) {
+          logger.warn("Auto-generate: aggiornamento status clip fallito", { videoId: video.id, error: statusError.message });
+        }
+      }
     }
 
     logger.info("Pipeline video completata", {
@@ -165,8 +193,20 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     await updateVideoStatus(video.id, "READY");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.error("Pipeline video fallita", { videoId: video.id, error: message });
-    await updateVideoStatus(video.id, "FAILED", { error_message: message });
+    logger.error("Pipeline video fallita", { videoId: video.id, error: message, attempts: video.attempts });
+
+    // video.attempts è già stato incrementato dal claim (claim_next_video): se non abbiamo
+    // ancora esaurito i tentativi automatici, rimettiamo il video in coda da solo (status
+    // UPLOADED, claim azzerato) invece di marcare FAILED e aspettare un click manuale — un
+    // blip transitorio (rete, API) si risolve così senza intervento. Solo dopo
+    // MAX_AUTO_RETRY_ATTEMPTS tentativi resta FAILED (il pulsante "Riprova" azzera gli attempts
+    // per altri 3 tentativi freschi).
+    if (video.attempts < MAX_AUTO_RETRY_ATTEMPTS) {
+      logger.warn("Rimetto in coda automaticamente per un nuovo tentativo", { videoId: video.id, attempts: video.attempts });
+      await updateVideoStatus(video.id, "UPLOADED", { error_message: message, claimed_by: null, claimed_at: null });
+    } else {
+      await updateVideoStatus(video.id, "FAILED", { error_message: message });
+    }
   } finally {
     await fsp.rm(jobDir, { recursive: true, force: true }).catch(() => undefined);
   }

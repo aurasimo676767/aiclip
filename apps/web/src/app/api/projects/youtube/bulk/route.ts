@@ -44,7 +44,15 @@ export async function POST(request: Request) {
 
     const { data: project, error: projectError } = await supabase
       .from("projects")
-      .insert({ user_id: user.id, title: "Importazione da YouTube...", source_type: "youtube_url", status: "UPLOADED" })
+      .insert({
+        user_id: user.id,
+        title: "Importazione da YouTube...",
+        source_type: "youtube_url",
+        status: "UPLOADED",
+        // Genera più video: le clip suggerite vengono messe in render subito, senza selezione
+        // manuale (vedi process-video-job.ts) — a differenza dell'import singolo.
+        auto_generate_clips: true,
+      })
       .select()
       .single();
     if (projectError || !project) {

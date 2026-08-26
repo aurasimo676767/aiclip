@@ -79,6 +79,7 @@ export interface Database {
           status: ProjectStatus;
           source_type: "upload" | "youtube_url";
           error_message: string | null;
+          auto_generate_clips: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -89,6 +90,7 @@ export interface Database {
           status?: ProjectStatus;
           source_type: "upload" | "youtube_url";
           error_message?: string | null;
+          auto_generate_clips?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -99,6 +101,7 @@ export interface Database {
           status?: ProjectStatus;
           source_type?: "upload" | "youtube_url";
           error_message?: string | null;
+          auto_generate_clips?: boolean;
           created_at?: string;
           updated_at?: string;
         };
