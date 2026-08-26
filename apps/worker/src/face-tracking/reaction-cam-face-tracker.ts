@@ -5,6 +5,7 @@ import { detectFaces, type FaceBox } from "./onnx-face-detector.js";
 import { computeMouthMotion } from "./mouth-motion.js";
 import { centeredCrop, subjectCentricCrop, maxSymmetricCropHeight } from "./crop-geometry.js";
 import { CenterCropFaceTracker } from "./center-crop-face-tracker.js";
+import { detectSceneCuts } from "./scene-detect.js";
 import { logger } from "../lib/logger.js";
 
 const SEGMENT_LENGTH_SECONDS = 1; // prima 2 (prima ancora 6): l'utente ha esplicitamente richiesto reattività ("tutto al millisecondo") dopo aver visto passaggi a schermo intero percepiti come tardivi/persistenti — dimezzare la granularità dimezza anche il ritardo massimo di reazione (vedi anche MIN_CONSECUTIVE_MISSES_TO_SWITCH, alzato in proporzione per non perdere la tolleranza in secondi reali ai buchi isolati del detector)
@@ -27,6 +28,7 @@ const SMOOTHING_CUT_CENTER_RATIO = 0.25; // idem per lo spostamento del centro, 
 const MIN_CONSECUTIVE_MISSES_TO_SWITCH = 4; // segmenti di fila SENZA un'ancora webcam genuina (non riusata da un vicino) prima di considerare la scena sorgente davvero cambiata invece di un semplice miss isolato del detector — verificato su un caso reale (streamer che passa da "webcam piccola + TikTok reagito" a "solo webcam a schermo intero" e poi a un layout diverso ancora dentro la STESSA clip): un singolo segmento perso viene ancora riusato dal vicino più vicino (comportamento invariato), ma un run più lungo passa al layout "mixed" invece di forzare uno split_vertical ormai senza senso in quel tratto. Prima 2 (con SEGMENT_LENGTH_SECONDS=2, quindi ~4s reali di tolleranza) — alzato a 4 quando SEGMENT_LENGTH_SECONDS è stato dimezzato a 1, per mantenere la STESSA tolleranza in secondi reali: altrimenti, a parità di soglia in segmenti, la tolleranza si sarebbe dimezzata a ~2s, troppo poco per un detector che può mancare per qualche secondo un volto girato/con la mano davanti alla bocca senza che la scena sia davvero cambiata (osservato in pratica).
 const BACKGROUND_FILL_ASPECT = 1; // quadrato: quando il volto non riempie bene un crop 9:16 (Layout.backgroundFill), meglio centrare l'inquadratura NATURALE della webcam (tipicamente più larga di un ritratto 9:16, es. quadrata) invece di forzare comunque un crop stretto in verticale — un crop 9:16 troppo vincolato dal bound di centratura (maxSymmetricCropHeight) finiva per zoomare su un dettaglio (es. il cappello) invece di inquadrare la persona; l'utente ha chiesto esplicitamente che ai LATI non si veda il contenuto, solo sopra/sotto — richiede quindi un'inquadratura a piena larghezza, non più stretta e centrata con bordi su tutti i lati
 const EMPHASIS_MOTION_THRESHOLD = 40; // sopra questa soglia di movimento medio della bocca, il reactor sta reagendo/parlando con forza (non solo conversazione normale): passiamo a schermo intero anche se il segmento sarebbe split-eligible, imitando lo stile di editing visto in Shorts di reaction reali (webcam piccola di default, schermo intero nei momenti di reazione più marcata). Prima approssimazione, quasi certamente da tarare con altri esempi reali — non c'è ancora un caso empirico preciso alle spalle come per le altre soglie in questo file
+const MIN_SEGMENT_SECONDS = 0.3; // un taglio di scena troppo vicino al confine della griglia (o a un altro taglio) verrebbe scartato invece di creare un segmento degenere: sotto questa durata SAMPLES_PER_SEGMENT frame ravvicinatissimi non danno una stima affidabile
 
 interface DetectionEntry {
   box: FaceBox;
@@ -123,13 +125,34 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const { sourceVideoPath, sourceWidth, sourceHeight, startSeconds, endSeconds } = params;
     const clipDuration = Math.max(0.1, endSeconds - startSeconds);
 
-    const segmentCount = Math.min(MAX_SEGMENTS, Math.max(1, Math.round(clipDuration / SEGMENT_LENGTH_SECONDS)));
-    const segmentLength = clipDuration / segmentCount;
+    const gridCount = Math.min(MAX_SEGMENTS, Math.max(1, Math.round(clipDuration / SEGMENT_LENGTH_SECONDS)));
+    const gridLength = clipDuration / gridCount;
+    const gridBoundaries = Array.from({ length: gridCount + 1 }, (_, i) => i * gridLength);
+
+    // Un editor che monta reaction/gameplay può tagliare da "reactor schermo intero" a
+    // "contenuto schermo intero" (e viceversa) in una frazione di secondo — più veloce di
+    // qualunque griglia fissa, anche a 1s. Se un taglio del genere cade A METÀ di un segmento
+    // della griglia, quel segmento finisce per campionare DUE inquadrature diverse e produce un
+    // crop "medio" sbagliato per entrambe (verificato su un caso reale: crop centrato a metà tra
+    // il volto del reactor e un elemento del gioco, mal posizionato su entrambi). Allineare i
+    // confini dei segmenti ai tagli REALI (rilevati via diff pixel, non ML — economico) risolve
+    // il problema alla radice per QUALUNQUE clip con questo stile di montaggio, non solo quella
+    // in cui è stato osservato per la prima volta.
+    let cutTimes: number[] = [];
+    try {
+      cutTimes = await detectSceneCuts(sourceVideoPath, startSeconds, clipDuration);
+    } catch (err) {
+      logger.warn("Rilevamento tagli di scena fallito, uso solo la griglia temporale fissa", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    const boundaries = mergeSegmentBoundaries(gridBoundaries, cutTimes, clipDuration);
+    const segmentCount = boundaries.length - 1;
 
     const rawSegments: SegmentDetections[] = [];
     for (let i = 0; i < segmentCount; i++) {
-      const segStart = i * segmentLength;
-      const segEnd = (i + 1) * segmentLength;
+      const segStart = boundaries[i]!;
+      const segEnd = boundaries[i + 1]!;
       try {
         const detections = await this.detectSegment(sourceVideoPath, sourceWidth, sourceHeight, startSeconds + segStart, startSeconds + segEnd);
         rawSegments.push({ startSeconds: segStart, endSeconds: segEnd, ...detections });
@@ -486,6 +509,31 @@ function selectBest(list: ClusterMeta[], filter?: (m: ClusterMeta) => boolean): 
     return [...candidates].sort((a, b) => b.motion - a.motion || b.count - a.count)[0];
   }
   return [...candidates].sort((a, b) => b.count - a.count || b.avg.width * b.avg.height - a.avg.width * a.avg.height)[0];
+}
+
+/**
+ * Unisce la griglia temporale fissa (`grid`, punti equidistanti) con i tagli di scena reali
+ * rilevati (`cuts`, clip-relativi): il risultato sono i confini dei segmenti da usare per la
+ * face detection, MAI più fitti di MIN_SEGMENT_SECONDS (un taglio troppo vicino a un confine
+ * già presente viene scartato invece di creare un segmento degenere). `grid` e `clipDuration`
+ * garantiscono che il primo/ultimo confine siano sempre 0 e clipDuration.
+ */
+function mergeSegmentBoundaries(grid: number[], cuts: number[], clipDuration: number): number[] {
+  const candidates = [...grid, ...cuts.filter((c) => c > 0 && c < clipDuration)].sort((a, b) => a - b);
+
+  const merged: number[] = [0];
+  for (const t of candidates) {
+    const last = merged[merged.length - 1]!;
+    if (t - last >= MIN_SEGMENT_SECONDS) merged.push(t);
+  }
+
+  const last = merged[merged.length - 1]!;
+  if (clipDuration - last >= MIN_SEGMENT_SECONDS) {
+    merged.push(clipDuration);
+  } else {
+    merged[merged.length - 1] = clipDuration;
+  }
+  return merged;
 }
 
 /**

@@ -22,11 +22,13 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
 
   let steps: string[];
   if (layout.type === "single") {
-    steps = layout.backgroundFill ? buildSingleWithBackgroundSteps(layout.crops, zoomExpression) : buildSingleCropSteps(layout.crops, zoomExpression);
+    steps = layout.backgroundFill
+      ? buildSingleWithBackgroundSteps(layout.crops, zoomExpression, clipDurationSeconds)
+      : buildSingleCropSteps(layout.crops, zoomExpression, clipDurationSeconds);
   } else if (layout.type === "split_vertical") {
-    steps = buildSplitVerticalSteps(layout, zoomExpression);
+    steps = buildSplitVerticalSteps(layout, zoomExpression, clipDurationSeconds);
   } else {
-    steps = buildMixedSteps(layout, zoomExpression);
+    steps = buildMixedSteps(layout, zoomExpression, clipDurationSeconds);
   }
 
   const subtitlesFilterPath = toFfmpegFilterPath(assSubtitlesPath);
@@ -45,14 +47,11 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
   return steps.join(";\n");
 }
 
-function buildSingleCropSteps(crops: TimedCrop[], zoomExpression: string, prefix = ""): string[] {
-  const xExpr = piecewiseExpr(crops, (c) => c.x);
-  const yExpr = piecewiseExpr(crops, (c) => c.y);
-  const wExpr = piecewiseExpr(crops, (c) => c.width);
-  const hExpr = piecewiseExpr(crops, (c) => c.height);
+function buildSingleCropSteps(crops: TimedCrop[], zoomExpression: string, totalDuration: number, prefix = ""): string[] {
+  const cropSteps = buildCroppedSteps(crops, totalDuration, OUTPUT_RESOLUTION.width, OUTPUT_RESOLUTION.height, `${prefix}base`);
 
   return [
-    `[0:v]crop=w='${wExpr}':h='${hExpr}':x='${xExpr}':y='${yExpr}'[${prefix}base]`,
+    ...cropSteps,
     `[${prefix}base]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[${prefix}zoomed]`,
     `[${prefix}zoomed]scale=${OUTPUT_RESOLUTION.width}:${OUTPUT_RESOLUTION.height}:flags=lanczos,setsar=1[${prefix}scaled]`,
   ];
@@ -67,16 +66,13 @@ function buildSingleCropSteps(crops: TimedCrop[], zoomExpression: string, prefix
  * spesso è proprio lo schermo/gioco reagito, normalmente invisibile quando il volto occupa
  * tutto lo schermo. Sfondo NITIDO, non sfocato: l'utente lo vuole visibile chiaramente.
  */
-function buildSingleWithBackgroundSteps(crops: TimedCrop[], zoomExpression: string, prefix = ""): string[] {
-  const xExpr = piecewiseExpr(crops, (c) => c.x);
-  const yExpr = piecewiseExpr(crops, (c) => c.y);
-  const wExpr = piecewiseExpr(crops, (c) => c.width);
-  const hExpr = piecewiseExpr(crops, (c) => c.height);
-
+function buildSingleWithBackgroundSteps(crops: TimedCrop[], zoomExpression: string, totalDuration: number, prefix = ""): string[] {
   // Piena larghezza: i crop in ingresso sono quadrati, quindi altezza=larghezza mantiene
   // l'aspect e lascia il resto della canvas (sopra/sotto) allo sfondo — mai bordi laterali.
   const fgWidth = OUTPUT_RESOLUTION.width;
   const fgHeight = OUTPUT_RESOLUTION.width;
+
+  const cropSteps = buildCroppedSteps(crops, totalDuration, fgWidth, fgHeight, `${prefix}fg_base`);
 
   return [
     // Sfondo: l'intero frame sorgente scalato "a copertura" della canvas (un lato combacia,
@@ -85,7 +81,7 @@ function buildSingleWithBackgroundSteps(crops: TimedCrop[], zoomExpression: stri
     `[0:v]scale=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}:force_original_aspect_ratio=increase,crop=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}[${prefix}bg]`,
     // Primo piano: stesso crop/zoom del volto di buildSingleCropSteps, ma scalato a piena
     // larghezza invece che sull'intera canvas verticale.
-    `[0:v]crop=w='${wExpr}':h='${hExpr}':x='${xExpr}':y='${yExpr}'[${prefix}fg_base]`,
+    ...cropSteps,
     `[${prefix}fg_base]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[${prefix}fg_zoomed]`,
     `[${prefix}fg_zoomed]scale=${fgWidth}:${fgHeight}:flags=lanczos,setsar=1[${prefix}fg]`,
     `[${prefix}bg][${prefix}fg]overlay=x='(W-w)/2':y='(H-h)/2',setsar=1[${prefix}scaled]`,
@@ -95,20 +91,18 @@ function buildSingleWithBackgroundSteps(crops: TimedCrop[], zoomExpression: stri
 function buildSplitVerticalSteps(
   layout: Extract<Layout, { type: "split_vertical" }>,
   zoomExpression: string,
+  totalDuration: number,
   prefix = "",
 ): string[] {
   const topHeight = evenRound(OUTPUT_RESOLUTION.height * layout.topRatio);
   const bottomHeight = OUTPUT_RESOLUTION.height - topHeight;
   const { topCrops, bottom, blurRegions } = layout;
 
-  const topXExpr = piecewiseExpr(topCrops, (c) => c.x);
-  const topYExpr = piecewiseExpr(topCrops, (c) => c.y);
-  const topWExpr = piecewiseExpr(topCrops, (c) => c.width);
-  const topHExpr = piecewiseExpr(topCrops, (c) => c.height);
+  const topSteps = buildCroppedSteps(topCrops, totalDuration, OUTPUT_RESOLUTION.width, topHeight, `${prefix}top`);
 
   const steps = [
     // Webcam: crop che segue nel tempo il segmento attivo, nessuno zoom EDL (l'area è già ravvicinata di suo).
-    `[0:v]crop=w='${topWExpr}':h='${topHExpr}':x='${topXExpr}':y='${topYExpr}',scale=${OUTPUT_RESOLUTION.width}:${topHeight}:flags=lanczos,setsar=1[${prefix}top]`,
+    ...topSteps,
     // Contenuto principale: crop statico centrato dell'intero frame sorgente.
     `[0:v]crop=w=${bottom.width}:h=${bottom.height}:x=${bottom.x}:y=${bottom.y}[${prefix}bmain]`,
   ];
@@ -147,10 +141,10 @@ function buildSplitVerticalSteps(
  * quelle finestre resta visibile la base. Costa il doppio in calcoli ffmpeg rispetto a un
  * layout puro, accettabile per la correttezza del risultato.
  */
-function buildMixedSteps(layout: Extract<Layout, { type: "mixed" }>, zoomExpression: string): string[] {
+function buildMixedSteps(layout: Extract<Layout, { type: "mixed" }>, zoomExpression: string, totalDuration: number): string[] {
   const baseSteps = layout.backgroundFill
-    ? buildSingleWithBackgroundSteps(layout.singleCrops, zoomExpression, "base_")
-    : buildSingleCropSteps(layout.singleCrops, zoomExpression, "base_");
+    ? buildSingleWithBackgroundSteps(layout.singleCrops, zoomExpression, totalDuration, "base_")
+    : buildSingleCropSteps(layout.singleCrops, zoomExpression, totalDuration, "base_");
 
   const splitLayout: Extract<Layout, { type: "split_vertical" }> = {
     type: "split_vertical",
@@ -159,7 +153,7 @@ function buildMixedSteps(layout: Extract<Layout, { type: "mixed" }>, zoomExpress
     topRatio: layout.topRatio,
     blurRegions: layout.blurRegions,
   };
-  const splitSteps = buildSplitVerticalSteps(splitLayout, zoomExpression, "sv_");
+  const splitSteps = buildSplitVerticalSteps(splitLayout, zoomExpression, totalDuration, "sv_");
 
   const enableExpr = layout.splitCrops.map((c) => `between(t,${c.startSeconds.toFixed(3)},${c.endSeconds.toFixed(3)})`).join("+");
 
@@ -189,29 +183,110 @@ function intersectCropWithBottom(region: CropWindow, bottom: CropWindow): CropWi
   return { x: x0 - bottom.x, y: y0 - bottom.y, width, height };
 }
 
+// Un frame di margine (secondi) usato per considerare "coperta" una clip il cui ultimo/primo
+// crop non arriva esattamente a 0/totalDuration per il solo arrotondamento in virgola mobile.
+const GAP_EPSILON_SECONDS = 0.01;
+
 /**
- * Costruisce un'espressione ffmpeg a tratti: `if(lt(t,fine1),val1,if(lt(t,fine2),val2,...,valN))`.
- * Usata per far "scattare" crop x/y/w/h da un segmento temporale al successivo (es. la webcam
- * che cambia posizione a metà clip), riusando lo stesso meccanismo di espressioni dipendenti da
- * `t` già usato per il pulse di zoom. I segmenti non devono essere contigui (vedi Layout "mixed":
- * `splitCrops` può avere buchi) — per i tempi fuori da qualunque intervallo elencato l'espressione
- * risolve comunque a un valore qualsiasi tra quelli forniti, il che va bene perché quei tratti non
- * sono comunque visibili (mai `enable`-ati nel layer sovrapposto).
+ * Costruisce gli step ffmpeg per un crop che varia nel tempo (`crops`), usando trim+crop+scale
+ * PER SEGMENTO seguito da un `concat`, invece di un'unica espressione ffmpeg "a tratti" (tipo
+ * `if(lt(t,...),...)`) valutata da un solo filtro `crop` per l'intera durata.
+ *
+ * NECESSARIO, non solo uno stile diverso: verificato empiricamente (vedi debug di sessione,
+ * root-caused isolando lo stesso filtro fuori dalla pipeline completa) che il parser di
+ * espressioni di ffmpeg per i parametri w/h/x/y del filtro `crop`, quando l'espressione ha più
+ * di ~3-4 diramazioni annidate E convive nello stesso grafo con un'altra espressione complessa
+ * (qui: lo zoom EDL), può valutare SILENZIOSAMENTE MALE alcuni rami — nessun errore/warning,
+ * solo un crop finito nel posto sbagliato del frame. La soglia esatta si è rivelata instabile e
+ * dipendente da fattori non completamente isolati (persino il valore di un ramo MAI raggiunto
+ * per il tempo testato cambiava l'esito), quindi non esiste un limite "sicuro" affidabile da
+ * imporre lato nostro: trim+crop+concat usa SOLO numeri costanti nei parametri del filtro crop
+ * (zero espressioni), quindi non può incappare in questo bug qualunque sia il numero di
+ * segmenti — lo zoom resta un'unica espressione applicata DOPO il concat, sulla timeline
+ * continua ricostruita (concat riallinea i PTS in modo che `t` coincida di nuovo con quello
+ * della clip originale).
  */
-function piecewiseExpr(crops: TimedCrop[], pick: (crop: TimedCrop["crop"]) => number): string {
-  if (crops.length === 0) {
-    throw new Error("piecewiseExpr: nessun segmento di crop fornito");
-  }
-  if (crops.length === 1) {
-    return String(pick(crops[0]!.crop));
+function buildCroppedSteps(
+  crops: TimedCrop[],
+  totalDuration: number,
+  outputWidth: number,
+  outputHeight: number,
+  label: string,
+): string[] {
+  const filled = fillCropGaps(crops, totalDuration);
+  const collapsed = collapseIdenticalCrops(filled);
+
+  if (collapsed.length === 1) {
+    const c = collapsed[0]!.crop;
+    return [`[0:v]crop=w=${c.width}:h=${c.height}:x=${c.x}:y=${c.y},scale=${outputWidth}:${outputHeight}:flags=lanczos,setsar=1[${label}]`];
   }
 
-  let expr = String(pick(crops[crops.length - 1]!.crop));
-  for (let i = crops.length - 2; i >= 0; i--) {
-    const segment = crops[i]!;
-    expr = `if(lt(t,${segment.endSeconds.toFixed(3)}),${pick(segment.crop)},${expr})`;
+  const steps: string[] = [];
+  const segLabels: string[] = [];
+  collapsed.forEach((seg, i) => {
+    const segLabel = `${label}seg${i}`;
+    const c = seg.crop;
+    steps.push(
+      `[0:v]trim=start=${seg.startSeconds.toFixed(3)}:end=${seg.endSeconds.toFixed(3)},setpts=PTS-STARTPTS,` +
+        `crop=w=${c.width}:h=${c.height}:x=${c.x}:y=${c.y},scale=${outputWidth}:${outputHeight}:flags=lanczos,setsar=1[${segLabel}]`,
+    );
+    segLabels.push(`[${segLabel}]`);
+  });
+  steps.push(`${segLabels.join("")}concat=n=${collapsed.length}:v=1:a=0[${label}]`);
+  return steps;
+}
+
+/**
+ * Riempie eventuali buchi in `crops` (es. Layout "mixed": `splitCrops` copre solo le finestre
+ * eligible) in modo che l'array copra [0, totalDuration] SENZA buchi, riusando il crop più
+ * vicino per riempire — necessario per trim+concat (serve una sequenza contigua), il valore
+ * usato nel buco non è comunque mai visibile (quelle finestre non vengono sovrapposte nel
+ * render, vedi Layout "mixed").
+ */
+function fillCropGaps(crops: TimedCrop[], totalDuration: number): TimedCrop[] {
+  if (crops.length === 0) {
+    throw new Error("fillCropGaps: nessun segmento di crop fornito");
   }
-  return expr;
+  const sorted = [...crops].sort((a, b) => a.startSeconds - b.startSeconds);
+  const filled: TimedCrop[] = [];
+  let cursor = 0;
+
+  for (const c of sorted) {
+    if (c.startSeconds > cursor + GAP_EPSILON_SECONDS) {
+      filled.push({ startSeconds: cursor, endSeconds: c.startSeconds, crop: c.crop });
+    }
+    const start = Math.max(cursor, c.startSeconds);
+    if (c.endSeconds > start + GAP_EPSILON_SECONDS) {
+      filled.push({ startSeconds: start, endSeconds: c.endSeconds, crop: c.crop });
+    }
+    cursor = Math.max(cursor, c.endSeconds);
+  }
+  if (cursor < totalDuration - GAP_EPSILON_SECONDS) {
+    filled.push({ startSeconds: cursor, endSeconds: totalDuration, crop: sorted[sorted.length - 1]!.crop });
+  }
+  // L'ultimo segmento deve combaciare ESATTAMENTE con totalDuration (trim non deve lasciare un
+  // ultimo frammento scoperto per un residuo di arrotondamento).
+  const last = filled[filled.length - 1];
+  if (last) filled[filled.length - 1] = { ...last, endSeconds: totalDuration };
+  return filled;
+}
+
+/** Unisce segmenti consecutivi con lo STESSO CropWindow (x,y,width,height) in un solo blocco. */
+function collapseIdenticalCrops(crops: TimedCrop[]): TimedCrop[] {
+  const result: TimedCrop[] = [];
+  for (const c of crops) {
+    const last = result[result.length - 1];
+    if (last && cropsEqual(last.crop, c.crop)) {
+      result[result.length - 1] = { ...last, endSeconds: c.endSeconds };
+    } else {
+      result.push(c);
+    }
+  }
+  return result;
+}
+
+function cropsEqual(a: CropWindow, b: CropWindow): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
 function evenRound(value: number): number {
