@@ -7,15 +7,15 @@ import { centeredCrop, subjectCentricCrop, maxSymmetricCropHeight } from "./crop
 import { CenterCropFaceTracker } from "./center-crop-face-tracker.js";
 import { logger } from "../lib/logger.js";
 
-const SEGMENT_LENGTH_SECONDS = 2; // prima 6: un editor umano cambia inquadratura ogni 1-2s, non ogni 6
-const MAX_SEGMENTS = 30; // alzato in proporzione: senza questo, per clip di 20-60s il cap dominava comunque e SEGMENT_LENGTH_SECONDS più basso non aveva alcun effetto reale
+const SEGMENT_LENGTH_SECONDS = 1; // prima 2 (prima ancora 6): l'utente ha esplicitamente richiesto reattività ("tutto al millisecondo") dopo aver visto passaggi a schermo intero percepiti come tardivi/persistenti — dimezzare la granularità dimezza anche il ritardo massimo di reazione (vedi anche MIN_CONSECUTIVE_MISSES_TO_SWITCH, alzato in proporzione per non perdere la tolleranza in secondi reali ai buchi isolati del detector)
+const MAX_SEGMENTS = 60; // alzato in proporzione a SEGMENT_LENGTH_SECONDS dimezzato: senza questo, per clip di 30-60s il cap tornava a dominare vanificando il guadagno di granularità
 const SAMPLES_PER_SEGMENT = 5; // prima 3: verificato su un video reale (4 persone in call) che le webcam più piccole/meno nitide dei partecipanti minori venivano rilevate in una minoranza dei campioni, sparendo dai candidati di interi segmenti anche se stavano parlando
 const MOTION_FRAME_DELAY_SECONDS = 0.15; // distanza tra i due frame usati per stimare il movimento della bocca
 
 const MIN_STABLE_RATIO = 0.5; // il cluster deve comparire in almeno metà dei sample (del segmento) con un volto
 const WEBCAM_MAX_AREA_RATIO = 0.05; // il volto occupa <5% dell'area del frame
 const WEBCAM_CENTER_MARGIN = 0.3; // centro del volto fuori dal 30%-70% centrale (orizz. o vert.)
-const WEBCAM_PADDING_FACTOR = 2.6; // quanto "allargare" il crop attorno al volto — basso = primo piano stretto, meno sfondo/gioco visibile
+const WEBCAM_PADDING_FACTOR = 3.5; // quanto "allargare" il crop attorno al volto — basso = primo piano stretto, meno sfondo/gioco visibile. Prima 2.6: su un caso reale (webcam ~90px di larghezza rilevata) dava un crop di soli ~230px poi scalato a piena larghezza canvas (1080px, ~4.7x) — visibilmente "zoomato" sul volto invece di mostrare l'inquadratura naturale della webcam. Alzato finché resta comunque più stretto di SINGLE_FACE_PADDING_FACTOR (schermo intero) e non arriva a includere il gioco ai lati per una webcam tipica in un angolo.
 const SINGLE_FACE_PADDING_FACTOR = 7; // idem, ma per il layout "schermo intero": più margine (testa+spalle+contesto), non un primissimo piano
 const TOP_RATIO = 0.35; // frazione di altezza dedicata alla webcam nel layout split
 const MOTION_NOISE_FLOOR = 4; // sotto questa soglia il "movimento" è rumore/compressione, non parlato reale
@@ -24,7 +24,7 @@ const BACKGROUND_FILL_TRIGGER_RATIO = 0.55; // sotto questa frazione di sourceHe
 const SINGLE_CROP_SMOOTHING_ALPHA = 0.4; // solo per il layout "schermo intero" (una persona zoomata): quanto peso dare al nuovo segmento vs quello smussato precedente — basso = più morbido ma più lento a inseguire un movimento reale, alto = più reattivo ma più "a scatti"
 const SMOOTHING_CUT_HEIGHT_RATIO = 1.6; // se l'altezza raw del segmento cambia di più di questo fattore rispetto allo smoothed corrente, non è rumore da smussare ma un vero cambio di inquadratura (es. l'OBS della sorgente passa da una webcam piccola in un angolo a una grande centrale) — verificato su un caso reale dove un volto minuscolo nei primi 2 segmenti faceva impiegare 8 segmenti (16s, più di metà clip) all'EMA per raggiungere l'inquadratura vera, dando la sensazione di uno zoom che continua ad "aggiustarsi" invece di un taglio netto
 const SMOOTHING_CUT_CENTER_RATIO = 0.25; // idem per lo spostamento del centro, come frazione della diagonale del frame sorgente
-const MIN_CONSECUTIVE_MISSES_TO_SWITCH = 2; // segmenti di fila SENZA un'ancora webcam genuina (non riusata da un vicino) prima di considerare la scena sorgente davvero cambiata invece di un semplice miss isolato del detector — verificato su un caso reale (streamer che passa da "webcam piccola + TikTok reagito" a "solo webcam a schermo intero" e poi a un layout diverso ancora dentro la STESSA clip): un singolo segmento perso viene ancora riusato dal vicino più vicino (comportamento invariato), ma 2+ di fila passano al layout "mixed" invece di forzare uno split_vertical ormai senza senso in quel tratto
+const MIN_CONSECUTIVE_MISSES_TO_SWITCH = 4; // segmenti di fila SENZA un'ancora webcam genuina (non riusata da un vicino) prima di considerare la scena sorgente davvero cambiata invece di un semplice miss isolato del detector — verificato su un caso reale (streamer che passa da "webcam piccola + TikTok reagito" a "solo webcam a schermo intero" e poi a un layout diverso ancora dentro la STESSA clip): un singolo segmento perso viene ancora riusato dal vicino più vicino (comportamento invariato), ma un run più lungo passa al layout "mixed" invece di forzare uno split_vertical ormai senza senso in quel tratto. Prima 2 (con SEGMENT_LENGTH_SECONDS=2, quindi ~4s reali di tolleranza) — alzato a 4 quando SEGMENT_LENGTH_SECONDS è stato dimezzato a 1, per mantenere la STESSA tolleranza in secondi reali: altrimenti, a parità di soglia in segmenti, la tolleranza si sarebbe dimezzata a ~2s, troppo poco per un detector che può mancare per qualche secondo un volto girato/con la mano davanti alla bocca senza che la scena sia davvero cambiata (osservato in pratica).
 const BACKGROUND_FILL_ASPECT = 1; // quadrato: quando il volto non riempie bene un crop 9:16 (Layout.backgroundFill), meglio centrare l'inquadratura NATURALE della webcam (tipicamente più larga di un ritratto 9:16, es. quadrata) invece di forzare comunque un crop stretto in verticale — un crop 9:16 troppo vincolato dal bound di centratura (maxSymmetricCropHeight) finiva per zoomare su un dettaglio (es. il cappello) invece di inquadrare la persona; l'utente ha chiesto esplicitamente che ai LATI non si veda il contenuto, solo sopra/sotto — richiede quindi un'inquadratura a piena larghezza, non più stretta e centrata con bordi su tutti i lati
 const EMPHASIS_MOTION_THRESHOLD = 40; // sopra questa soglia di movimento medio della bocca, il reactor sta reagendo/parlando con forza (non solo conversazione normale): passiamo a schermo intero anche se il segmento sarebbe split-eligible, imitando lo stile di editing visto in Shorts di reaction reali (webcam piccola di default, schermo intero nei momenti di reazione più marcata). Prima approssimazione, quasi certamente da tarare con altri esempi reali — non c'è ancora un caso empirico preciso alle spalle come per le altre soglie in questo file
 
@@ -246,6 +246,13 @@ export class ReactionCamFaceTracker implements FaceTracker {
       segments: segmentCount,
       splitSegments: splitCrops.length,
       blurRegions: blurRegions.length,
+      perSegment: decisions.map((d, i) => ({
+        t: `${d.startSeconds.toFixed(1)}-${d.endSeconds.toFixed(1)}`,
+        genuineMatch: genuineMatch[i],
+        eligibleByMatch: eligibleByMatch[i],
+        chosenMotion: d.chosenMotion,
+        splitEligible: splitEligible[i],
+      })),
     });
     return { type: "mixed", singleCrops, backgroundFill, splitCrops, bottom, topRatio: TOP_RATIO, blurRegions };
   }
@@ -392,7 +399,9 @@ export class ReactionCamFaceTracker implements FaceTracker {
     );
 
     const topAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * TOP_RATIO);
+    const singleAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
 
+    const hasOwnAnchor: boolean[] = [];
     const decisions = rawSegments.map((seg) => {
       // Per ogni candidato di questo segmento, risali all'ancora (identità) stabile a cui
       // appartiene. Il movimento (per capire chi parla ORA) è un dato per-segmento reale e va
@@ -407,18 +416,57 @@ export class ReactionCamFaceTracker implements FaceTracker {
 
       const chosenMeta = selectBest(anchoredHere.map((c) => c.meta));
       const chosen = anchoredHere.find((c) => c.meta === chosenMeta);
+      hasOwnAnchor.push(Boolean(chosen));
+
+      // Se l'ancora reaction-cam è stata trovata anche in QUESTO segmento, il crop "schermo
+      // intero" deve centrarsi su di lei, non sul volto più prominente rilevato in isolamento
+      // nel segmento (seg.singleCrop, calcolato PRIMA che le ancore esistessero, su TUTTI i
+      // volti senza filtro di posizione) — altrimenti un volto del contenuto reagito (spesso
+      // più grande/mobile della webcam in un angolo) ruba il posto per un segmento isolato,
+      // con un salto vistoso del crop verso un'altra parte del frame. Verificato su due clip
+      // reali: la webcam era SEMPRE visibile nel sorgente in quei punti, il detector aveva solo
+      // mancato quel segmento specifico come "webcam-like" pur avendo rilevato (correttamente
+      // o meno) un altro volto più prominente nello stesso frame.
+      const anchorSingleCrop = chosen
+        ? subjectCentricCrop(chosen.anchor.avg, sourceWidth, sourceHeight, singleAspect, SINGLE_FACE_PADDING_FACTOR)
+        : null;
+      const anchorSingleCropSquare = chosen
+        ? subjectCentricCrop(chosen.anchor.avg, sourceWidth, sourceHeight, BACKGROUND_FILL_ASPECT, SINGLE_FACE_PADDING_FACTOR)
+        : null;
 
       return {
         startSeconds: seg.startSeconds,
         endSeconds: seg.endSeconds,
         webcamCrop: chosen ? subjectCentricCrop(chosen.anchor.avg, sourceWidth, sourceHeight, topAspect, WEBCAM_PADDING_FACTOR) : null,
-        singleCrop: seg.singleCrop,
-        singleCropSquare: seg.singleCropSquare,
+        singleCrop: anchorSingleCrop ?? seg.singleCrop,
+        singleCropSquare: anchorSingleCropSquare ?? seg.singleCropSquare,
         singleCropNeedsFill: seg.singleCropNeedsFill,
         primaryFound: seg.primaryFound,
         chosenMotion: chosen ? chosen.meta.motion : null,
       };
     });
+
+    // Segmenti senza l'ancora in QUESTO tratto specifico: un run ISOLATO (corto, vedi
+    // smoothEligibility/MIN_CONSECUTIVE_MISSES_TO_SWITCH) riusa il crop "schermo intero"
+    // ancorato del segmento valido più vicino (stesso principio di nearestWebcamCrop) — quasi
+    // certamente un miss del detector sulla STESSA inquadratura (volto girato, mano davanti
+    // alla bocca), non un vero cambio scena. Un run PIÙ LUNGO invece resta con il crop "cieco"
+    // per-segmento (seg.singleCrop, calcolato senza filtro di posizione): verificato su un caso
+    // reale che un run lungo può corrispondere a un vero cambio di inquadratura sorgente (l'OBS
+    // passa a una ripresa a schermo intero della STESSA persona, non più webcam in un angolo) —
+    // lì forzare la vecchia posizione dell'ancora (calcolata su un piccolo overlay in un angolo)
+    // darebbe un crop sbagliato (es. solo l'orecchio invece del volto), mentre il volto rilevato
+    // alla cieca in quel segmento è quasi certamente proprio la persona nella nuova inquadratura.
+    const isolatedMiss = smoothEligibility(hasOwnAnchor);
+    if (hasOwnAnchor.some(Boolean)) {
+      const filledCrops = fillMissingWithNearest(decisions.map((d) => d.singleCrop), hasOwnAnchor);
+      const filledSquares = fillMissingWithNearest(decisions.map((d) => d.singleCropSquare), hasOwnAnchor);
+      decisions.forEach((d, i) => {
+        if (hasOwnAnchor[i] || !isolatedMiss[i]) return;
+        d.singleCrop = filledCrops[i]!;
+        d.singleCropSquare = filledSquares[i]!;
+      });
+    }
 
     return { decisions, anchorGroups };
   }
