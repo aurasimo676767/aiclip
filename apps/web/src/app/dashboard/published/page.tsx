@@ -1,6 +1,10 @@
 import { requireUser } from "@/lib/auth";
 import { PollingRefresher } from "@/components/polling-refresher";
 
+// Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
+// cachati anche col polling attivo.
+export const dynamic = "force-dynamic";
+
 interface PublishJobRow {
   id: string;
   clip_id: string;

@@ -6,6 +6,10 @@ import { ClipList } from "@/components/clip-list";
 import { RetryProjectButton } from "@/components/retry-project-button";
 import { fetchProjectDetails, fetchYoutubeConnected } from "@/lib/data/clips";
 
+// Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
+// cachati anche col polling attivo.
+export const dynamic = "force-dynamic";
+
 export default async function ProjectDetailPage({ params }: { params: { id: string } }) {
   const { supabase, user } = await requireUser();
 

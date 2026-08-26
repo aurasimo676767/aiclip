@@ -2,6 +2,10 @@ import { requireUser } from "@/lib/auth";
 import { YoutubeConnectionPanel } from "@/components/youtube-connection-panel";
 import { FollowedChannelsPanel } from "@/components/followed-channels-panel";
 
+// Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
+// cachati anche col polling attivo.
+export const dynamic = "force-dynamic";
+
 export default async function SettingsPage({
   searchParams,
 }: {

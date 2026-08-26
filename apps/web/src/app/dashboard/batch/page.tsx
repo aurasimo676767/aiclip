@@ -5,6 +5,13 @@ import { PollingRefresher } from "@/components/polling-refresher";
 import { ClipList } from "@/components/clip-list";
 import { RetryProjectButton } from "@/components/retry-project-button";
 import { fetchProjectDetails, fetchYoutubeConnected } from "@/lib/data/clips";
+
+// Senza questo, su Vercel (produzione) Next.js può servire dati Supabase cachati anche col
+// polling attivo lato client (router.refresh() non basta a bypassare la Data Cache di fetch()
+// per le richieste interne di supabase-js) — la pagina sembrava "non aggiornarsi mai" pur
+// avendo il worker che completava job in continuazione. In `next dev` questo non si nota perché
+// il dev server ha semantiche di cache diverse.
+export const dynamic = "force-dynamic";
 import { statusMessage } from "@/app/dashboard/projects/[id]/page";
 
 export default async function BatchReviewPage({ searchParams }: { searchParams: { ids?: string } }) {
