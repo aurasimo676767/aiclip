@@ -61,10 +61,6 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
       .map((e) => e.word.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase()),
   );
 
-  const assContent = buildAssSubtitles(clipRelativeSegments, template.captionStyle, { highlightWords });
-  const assPath = path.join(workDir, "captions.ass");
-  await fsp.writeFile(assPath, assContent, "utf-8");
-
   const remappedEvents = clip.edl.events
     .map((event) => ({ ...event, time: timeRemap(event.time - clip.start) }))
     .filter((event) => event.time >= 0 && event.time <= finalDuration);
@@ -79,6 +75,12 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
     endSeconds: clip.end,
   });
   const layout = remapLayout(rawLayout, timeRemap, finalDuration);
+
+  // Il layout serve QUI (position "smart" segue il confine webcam/contenuto quando presente),
+  // per questo viene calcolato prima delle caption invece che dopo come in origine.
+  const assContent = buildAssSubtitles(clipRelativeSegments, template.captionStyle, { highlightWords, layout });
+  const assPath = path.join(workDir, "captions.ass");
+  await fsp.writeFile(assPath, assContent, "utf-8");
 
   const filterComplex = buildVideoFilterComplex({
     layout,

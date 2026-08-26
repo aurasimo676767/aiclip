@@ -26,6 +26,7 @@ const SMOOTHING_CUT_HEIGHT_RATIO = 1.6; // se l'altezza raw del segmento cambia 
 const SMOOTHING_CUT_CENTER_RATIO = 0.25; // idem per lo spostamento del centro, come frazione della diagonale del frame sorgente
 const MIN_CONSECUTIVE_MISSES_TO_SWITCH = 2; // segmenti di fila SENZA un'ancora webcam genuina (non riusata da un vicino) prima di considerare la scena sorgente davvero cambiata invece di un semplice miss isolato del detector — verificato su un caso reale (streamer che passa da "webcam piccola + TikTok reagito" a "solo webcam a schermo intero" e poi a un layout diverso ancora dentro la STESSA clip): un singolo segmento perso viene ancora riusato dal vicino più vicino (comportamento invariato), ma 2+ di fila passano al layout "mixed" invece di forzare uno split_vertical ormai senza senso in quel tratto
 const BACKGROUND_FILL_ASPECT = 1; // quadrato: quando il volto non riempie bene un crop 9:16 (Layout.backgroundFill), meglio centrare l'inquadratura NATURALE della webcam (tipicamente più larga di un ritratto 9:16, es. quadrata) invece di forzare comunque un crop stretto in verticale — un crop 9:16 troppo vincolato dal bound di centratura (maxSymmetricCropHeight) finiva per zoomare su un dettaglio (es. il cappello) invece di inquadrare la persona; l'utente ha chiesto esplicitamente che ai LATI non si veda il contenuto, solo sopra/sotto — richiede quindi un'inquadratura a piena larghezza, non più stretta e centrata con bordi su tutti i lati
+const EMPHASIS_MOTION_THRESHOLD = 40; // sopra questa soglia di movimento medio della bocca, il reactor sta reagendo/parlando con forza (non solo conversazione normale): passiamo a schermo intero anche se il segmento sarebbe split-eligible, imitando lo stile di editing visto in Shorts di reaction reali (webcam piccola di default, schermo intero nei momenti di reazione più marcata). Prima approssimazione, quasi certamente da tarare con altri esempi reali — non c'è ancora un caso empirico preciso alle spalle come per le altre soglie in questo file
 
 interface DetectionEntry {
   box: FaceBox;
@@ -53,6 +54,8 @@ interface SegmentDecision {
   singleCropNeedsFill: boolean; // vedi SegmentDetections.singleCropNeedsFill
   /** False se in questo segmento NON è stato trovato nessun volto (singleCrop/singleCropSquare sono un centro cieco) — vedi uso in buildSingleCrops. */
   primaryFound: boolean;
+  /** Movimento della bocca dell'ancora scelta in questo segmento (null se nessuna ancora scelta) — vedi EMPHASIS_MOTION_THRESHOLD. */
+  chosenMotion: number | null;
 }
 
 /** Risultato grezzo di un segmento, prima della selezione dell'ancora cross-segmento. */
@@ -190,7 +193,12 @@ export class ReactionCamFaceTracker implements FaceTracker {
     // vicino — 2+ buchi genuini di fila non sono più "rumore del detector", sono il segnale che
     // la scena sorgente è cambiata (vedi MIN_CONSECUTIVE_MISSES_TO_SWITCH).
     const genuineMatch = decisions.map((d) => d.webcamCrop !== null);
-    const splitEligible = smoothEligibility(genuineMatch);
+    const eligibleByMatch = smoothEligibility(genuineMatch);
+    // Anche con un'ancora genuina, un segmento dove il reactor sta reagendo/parlando con forza
+    // (EMPHASIS_MOTION_THRESHOLD) passa a schermo intero invece di restare in split — imita lo
+    // stile "webcam piccola di default, schermo intero nei momenti di reazione" visto in Shorts
+    // di reaction reali, invece di restare sempre in split per l'intera clip.
+    const splitEligible = eligibleByMatch.map((eligible, i) => eligible && (decisions[i]!.chosenMotion ?? 0) <= EMPHASIS_MOTION_THRESHOLD);
     const anyEligible = splitEligible.some(Boolean);
     const allEligible = splitEligible.every(Boolean);
 
@@ -408,6 +416,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
         singleCropSquare: seg.singleCropSquare,
         singleCropNeedsFill: seg.singleCropNeedsFill,
         primaryFound: seg.primaryFound,
+        chosenMotion: chosen ? chosen.meta.motion : null,
       };
     });
 

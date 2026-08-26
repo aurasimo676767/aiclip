@@ -1,5 +1,6 @@
 import type { CaptionStyleConfig, TranscriptSegment, TranscriptWord } from "@clipforge/shared";
 import { OUTPUT_RESOLUTION } from "@clipforge/shared";
+import type { Layout } from "../face-tracking/face-tracker.js";
 
 interface WordChunk {
   words: TranscriptWord[];
@@ -16,9 +17,13 @@ const MAX_CHUNK_DURATION_SECONDS = 4;
  * con timestamp clip-relativi (0 = inizio clip) e già rimappati per l'eventuale rimozione
  * dei silenzi (vedi silence.ts).
  *
- * - wordByWord=true (template dinamici): una riga per "chunk" di poche parole, con tag
- *   karaoke \k per l'effetto di evidenziazione progressiva parola-per-parola.
+ * - wordByWord=true (template dinamici): una riga per "chunk" di poche parole (o una singola
+ *   parola se oneWordAtATime), con tag karaoke \k per l'effetto di evidenziazione.
  * - wordByWord=false (template puliti): una riga per segmento/frase, colore statico.
+ * - position="smart" (richiede `layout`): invece di stare sempre nella stessa fascia, ogni riga
+ *   viene posizionata in base al layout ATTIVO in quel momento — vicino al confine tra webcam
+ *   e contenuto durante uno split_vertical (dove ha più senso, come visto in Shorts di
+ *   riferimento reali), altrimenti nella posizione di default (basso).
  *
  * `highlightWords` (dall'EDL, evento highlight_word) forza un colore di evidenziazione
  * statico sulle parole corrispondenti, indipendentemente dal karaoke sweep.
@@ -26,15 +31,18 @@ const MAX_CHUNK_DURATION_SECONDS = 4;
 export function buildAssSubtitles(
   segments: TranscriptSegment[],
   style: CaptionStyleConfig,
-  options: { highlightWords?: Set<string> } = {},
+  options: { highlightWords?: Set<string>; layout?: Layout } = {},
 ): string {
   const highlightWords = options.highlightWords ?? new Set<string>();
+  // "smart" non ha un allineamento fisso per l'intera clip: l'header definisce solo il
+  // fallback (basso) usato quando una riga non cade in una finestra split_vertical — ogni riga
+  // in quella finestra riceve invece un override \pos esplicito (vedi resolveSmartOverride).
   const alignment = style.position === "top" ? 8 : style.position === "center" ? 5 : 2;
   const marginV = style.position === "center" ? 0 : 120;
 
   const header = buildHeader(style, alignment, marginV);
   const events = style.wordByWord
-    ? buildKaraokeEvents(segments, style, highlightWords)
+    ? buildKaraokeEvents(segments, style, highlightWords, options.layout)
     : buildPlainEvents(segments, style);
 
   return `${header}\n${events.join("\n")}\n`;
@@ -72,8 +80,10 @@ function buildKaraokeEvents(
   segments: TranscriptSegment[],
   style: CaptionStyleConfig,
   highlightWords: Set<string>,
+  layout: Layout | undefined,
 ): string[] {
-  const chunks = segments.flatMap((seg) => chunkWords(seg.words));
+  const maxWords = style.oneWordAtATime ? 1 : MAX_WORDS_PER_CHUNK;
+  const chunks = segments.flatMap((seg) => chunkWords(seg.words, maxWords));
   return chunks.map((chunk) => {
     const parts = chunk.words.map((word) => {
       const durationCentis = Math.max(1, Math.round((word.end - word.start) * 100));
@@ -83,16 +93,38 @@ function buildKaraokeEvents(
       const escaped = escapeAssText(text);
       return isHighlighted ? `{\\k${durationCentis}}{\\c${hexToAssColor(style.highlightColor)}}${escaped}{\\r} ` : `{\\k${durationCentis}}${escaped} `;
     });
-    return `Dialogue: 0,${formatAssTime(chunk.start)},${formatAssTime(chunk.end)},Default,,0,0,0,,${parts.join("")}`;
+    const override = style.position === "smart" ? resolveSmartOverride(chunk.start, layout) : "";
+    return `Dialogue: 0,${formatAssTime(chunk.start)},${formatAssTime(chunk.end)},Default,,0,0,0,,${override}${parts.join("")}`;
   });
 }
 
-function chunkWords(words: TranscriptWord[]): WordChunk[] {
+/**
+ * Override \an+\pos per una singola riga quando position="smart": se in questo istante è
+ * attivo un pannello split_vertical (webcam sopra/contenuto sotto), centra la riga esattamente
+ * sul confine tra i due pannelli — è dove ha più senso stare (leggibile su entrambi, non copre
+ * né il volto né il contenuto), come visto in Shorts di riferimento reali. Altrimenti nessun
+ * override: resta il fallback (basso) definito nell'header.
+ */
+function resolveSmartOverride(timeSeconds: number, layout: Layout | undefined): string {
+  if (!layout || layout.type === "single") return "";
+
+  const isSplitActive =
+    layout.type === "split_vertical"
+      ? true
+      : layout.splitCrops.some((c) => timeSeconds >= c.startSeconds && timeSeconds < c.endSeconds);
+  if (!isSplitActive) return "";
+
+  const x = Math.round(OUTPUT_RESOLUTION.width / 2);
+  const y = Math.round(OUTPUT_RESOLUTION.height * layout.topRatio);
+  return `{\\an5\\pos(${x},${y})}`;
+}
+
+function chunkWords(words: TranscriptWord[], maxWords: number): WordChunk[] {
   const chunks: WordChunk[] = [];
   let current: TranscriptWord[] = [];
 
   for (const word of words) {
-    const wouldExceedCount = current.length + 1 > MAX_WORDS_PER_CHUNK;
+    const wouldExceedCount = current.length + 1 > maxWords;
     const first = current[0];
     const wouldExceedDuration = first ? word.end - first.start > MAX_CHUNK_DURATION_SECONDS : false;
 

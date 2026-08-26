@@ -8,7 +8,11 @@ export const TEMPLATE_NAMES = [
 
 export type TemplateName = (typeof TEMPLATE_NAMES)[number];
 
-export type CaptionPosition = "top" | "center" | "bottom";
+// "smart": non una posizione fissa — il renderer sceglie riga per riga in base al layout del
+// momento (vicino al confine webcam/contenuto durante uno split_vertical, altrimenti la
+// posizione di default) invece di stare sempre nella stessa fascia per tutta la clip. Vedi
+// apps/worker/src/render/captions.ts.
+export type CaptionPosition = "top" | "center" | "bottom" | "smart";
 
 export interface CaptionStyleConfig {
   fontFamily: string;
@@ -22,6 +26,12 @@ export interface CaptionStyleConfig {
   outlineColor: string;
   /** Mostra le parole una alla volta (karaoke) invece di intere frasi. */
   wordByWord: boolean;
+  /**
+   * Una SOLA parola visibile alla volta (sostituita dalla successiva), invece di un gruppo di
+   * più parole con sweep karaoke — stile "TikTok/reaction" richiesto esplicitamente dopo aver
+   * visto due Shorts di riferimento. Ha effetto solo se wordByWord è true.
+   */
+  oneWordAtATime: boolean;
   uppercase: boolean;
 }
 
@@ -46,11 +56,12 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     captionStyle: {
       fontFamily: "Montserrat ExtraBold",
       fontSize: 72,
-      position: "bottom",
+      position: "smart",
       textColor: "#FFFFFF",
       highlightColor: "#FFD400",
       outlineColor: "#000000",
       wordByWord: true,
+      oneWordAtATime: true,
       uppercase: true,
     },
     zoomIntensity: 1.2,
@@ -69,6 +80,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
       highlightColor: "#FFFFFF",
       outlineColor: "#000000",
       wordByWord: false,
+      oneWordAtATime: false,
       uppercase: false,
     },
     zoomIntensity: 0.4,
@@ -82,11 +94,12 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     captionStyle: {
       fontFamily: "Poppins Black",
       fontSize: 78,
-      position: "bottom",
+      position: "smart",
       textColor: "#FFFFFF",
       highlightColor: "#00E5FF",
       outlineColor: "#000000",
       wordByWord: true,
+      oneWordAtATime: true,
       uppercase: true,
     },
     zoomIntensity: 1.5,
@@ -105,6 +118,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
       highlightColor: "#FFD400",
       outlineColor: "#000000",
       wordByWord: false,
+      oneWordAtATime: false,
       uppercase: false,
     },
     zoomIntensity: 0.6,
@@ -123,6 +137,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
       highlightColor: "#FF3B30",
       outlineColor: "#000000",
       wordByWord: true,
+      oneWordAtATime: false,
       uppercase: true,
     },
     zoomIntensity: 1.3,
