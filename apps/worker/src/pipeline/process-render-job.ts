@@ -9,10 +9,19 @@ import { storageProvider, faceTracker } from "../lib/providers.js";
 import { renderClip } from "../render/render-clip.js";
 import { runFfmpeg } from "../lib/ffmpeg.js";
 import { updateRenderJobStatus } from "../queue/render-queue.js";
+import { withNetworkRetry } from "../lib/retry.js";
 
 export async function processRenderJob(job: RenderJobRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `render-${job.id}`);
   await fsp.mkdir(jobDir, { recursive: true });
+
+  // Diventa true SOLO dopo che la clip è stata marcata COMPLETED con successo: se un errore
+  // arriva DOPO (es. il bookkeeping del render_job fallisce per un blip di rete), la clip è
+  // comunque già pronta e renderizzata — non va ributtata su FAILED, altrimenti si perde una
+  // clip riuscita per un problema puramente di scrittura successiva (bug reale osservato:
+  // "Aggiornamento status render_job fallito: TypeError: fetch failed" dopo un render andato
+  // a buon fine).
+  let clipMarkedCompleted = false;
 
   try {
     await updateRenderJobStatus(job.id, "RENDERING", { stage: "loading" });
@@ -68,26 +77,45 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
     await storageProvider.uploadFile(outputPath, clipStoragePath, "video/mp4");
     await storageProvider.uploadFile(thumbnailPath, thumbStoragePath, "image/jpeg");
 
-    const { error: updateError } = await supabase
-      .from("clips")
-      .update({
-        status: "COMPLETED",
-        output_video_path: clipStoragePath,
-        thumbnail_path: thumbStoragePath,
-        error_message: null,
-      })
-      .eq("id", clipRow.id);
+    const { error: updateError } = await withNetworkRetry(
+      () =>
+        supabase
+          .from("clips")
+          .update({
+            status: "COMPLETED",
+            output_video_path: clipStoragePath,
+            thumbnail_path: thumbStoragePath,
+            error_message: null,
+          })
+          .eq("id", clipRow.id),
+      "Aggiornamento clip a COMPLETED",
+    );
     if (updateError) {
       throw new Error(`Aggiornamento clip fallito: ${updateError.message}`);
     }
+    clipMarkedCompleted = true;
 
     await updateRenderJobStatus(job.id, "COMPLETED", { stage: "done", progress: 100, completed_at: new Date().toISOString() });
     logger.info("Render clip completato", { clipId: clipRow.id, jobId: job.id });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.error("Render clip fallito", { jobId: job.id, error: message });
-    await updateRenderJobStatus(job.id, "FAILED", { error_message: message, completed_at: new Date().toISOString() });
-    await setClipStatus(job.clip_id, "FAILED", message);
+    logger.error("Render clip fallito", { jobId: job.id, error: message, clipMarkedCompleted });
+
+    await updateRenderJobStatus(job.id, "FAILED", { error_message: message, completed_at: new Date().toISOString() }).catch((e) => {
+      logger.warn("Anche l'aggiornamento a FAILED del render_job è fallito, proseguo comunque", {
+        jobId: job.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    });
+
+    if (clipMarkedCompleted) {
+      logger.warn("Clip già completata con successo: non la rimetto su FAILED nonostante l'errore successivo", {
+        clipId: job.clip_id,
+        error: message,
+      });
+    } else {
+      await setClipStatus(job.clip_id, "FAILED", message);
+    }
   } finally {
     await fsp.rm(jobDir, { recursive: true, force: true }).catch(() => undefined);
   }

@@ -88,6 +88,14 @@ function handleShutdown(signal: string): void {
 process.on("SIGINT", () => handleShutdown("SIGINT"));
 process.on("SIGTERM", () => handleShutdown("SIGTERM"));
 
-logger.info("ClipForge worker avviato", { workerId: WORKER_ID, pollIntervalMs: env.QUEUE_POLL_INTERVAL_MS });
+logger.info("ClipForge worker avviato", {
+  workerId: WORKER_ID,
+  pollIntervalMs: env.QUEUE_POLL_INTERVAL_MS,
+  renderConcurrency: env.RENDER_CONCURRENCY,
+});
 
-await Promise.all([videoQueueLoop(), renderQueueLoop(), publishQueueLoop(), statsRefreshLoop()]);
+// Più copie dello stesso loop di render in parallelo: claim_next_render_job usa già
+// FOR UPDATE SKIP LOCKED, quindi due (o più) copie non si contendono mai lo stesso job.
+const renderLoops = Array.from({ length: env.RENDER_CONCURRENCY }, () => renderQueueLoop());
+
+await Promise.all([videoQueueLoop(), ...renderLoops, publishQueueLoop(), statsRefreshLoop()]);

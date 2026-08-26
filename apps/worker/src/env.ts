@@ -25,6 +25,10 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   WORKER_TMP_DIR: z.string().default("./tmp"),
   QUEUE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
+  // Render (face-tracking ONNX + ffmpeg) è CPU-only, non tocca la GPU (quella la usa solo whisper)
+  // -> nessun conflitto di risorse a farne girare più di uno insieme. Default 2, verificato con
+  // l'utente su un i7-12700F (12 core/20 thread): reggerebbe anche di più, ma partiamo prudenti.
+  RENDER_CONCURRENCY: z.coerce.number().int().positive().default(2),
 });
 
 const parsed = envSchema.safeParse(process.env);
