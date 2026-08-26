@@ -3,7 +3,7 @@ import type { CropWindow, FaceTracker, Layout, TimedCrop } from "./face-tracker.
 import { extractRawFrameBGR } from "./frame-extractor.js";
 import { detectFaces, type FaceBox } from "./onnx-face-detector.js";
 import { computeMouthMotion } from "./mouth-motion.js";
-import { centeredCrop, subjectCentricCrop } from "./crop-geometry.js";
+import { centeredCrop, subjectCentricCrop, maxSymmetricCropHeight } from "./crop-geometry.js";
 import { CenterCropFaceTracker } from "./center-crop-face-tracker.js";
 import { logger } from "../lib/logger.js";
 
@@ -20,7 +20,10 @@ const SINGLE_FACE_PADDING_FACTOR = 7; // idem, ma per il layout "schermo intero"
 const TOP_RATIO = 0.35; // frazione di altezza dedicata alla webcam nel layout split
 const MOTION_NOISE_FLOOR = 4; // sotto questa soglia il "movimento" è rumore/compressione, non parlato reale
 const BLUR_REGION_PADDING_FACTOR = 4; // margine generoso: l'overlay webcam reale è quasi sempre più grande del solo riquadro del volto rilevato, meglio sfocare un po' di più che lasciare una fetta visibile
+const BACKGROUND_FILL_TRIGGER_RATIO = 0.55; // sotto questa frazione di sourceHeight, il volto è DAVVERO spostato verso un bordo (non solo leggermente sopra/sotto il centro): verificato su un video reale con inquadratura moderatamente decentrata (rapporto ~0.75, già validata come accettabile) che NON deve attivare lo sfondo — solo un decentramento più marcato (webcam grande ma vicina a un bordo, es. rapporto ~0.5) lo giustifica
 const SINGLE_CROP_SMOOTHING_ALPHA = 0.4; // solo per il layout "schermo intero" (una persona zoomata): quanto peso dare al nuovo segmento vs quello smussato precedente — basso = più morbido ma più lento a inseguire un movimento reale, alto = più reattivo ma più "a scatti"
+const SMOOTHING_CUT_HEIGHT_RATIO = 1.6; // se l'altezza raw del segmento cambia di più di questo fattore rispetto allo smoothed corrente, non è rumore da smussare ma un vero cambio di inquadratura (es. l'OBS della sorgente passa da una webcam piccola in un angolo a una grande centrale) — verificato su un caso reale dove un volto minuscolo nei primi 2 segmenti faceva impiegare 8 segmenti (16s, più di metà clip) all'EMA per raggiungere l'inquadratura vera, dando la sensazione di uno zoom che continua ad "aggiustarsi" invece di un taglio netto
+const SMOOTHING_CUT_CENTER_RATIO = 0.25; // idem per lo spostamento del centro, come frazione della diagonale del frame sorgente
 
 interface DetectionEntry {
   box: FaceBox;
@@ -43,6 +46,7 @@ interface SegmentDecision {
   endSeconds: number;
   webcamCrop: CropWindow | null;
   singleCrop: CropWindow; // sempre disponibile: face-centrato se trovato un volto, altrimenti centro geometrico
+  singleCropNeedsFill: boolean; // vedi SegmentDetections.singleCropNeedsFill
 }
 
 /** Risultato grezzo di un segmento, prima della selezione dell'ancora cross-segmento. */
@@ -51,6 +55,13 @@ interface SegmentDetections {
   endSeconds: number;
   webcamCandidates: ClusterMeta[]; // tutti i volti "webcam-like" trovati in QUESTO segmento, non ancora filtrati
   singleCrop: CropWindow;
+  /**
+   * True se il volto scelto per singleCrop era troppo grande/decentrato per un crop centrato
+   * "a piena inquadratura" (il padding desiderato eccedeva l'altezza sorgente) — segnale che il
+   * layout "single" per l'intera clip dovrebbe usare uno sfondo sfocato invece di stirare il
+   * crop fino ai bordi sorgente (vedi Layout.backgroundFill in face-tracker.ts).
+   */
+  singleCropNeedsFill: boolean;
 }
 
 const MIN_ANCHOR_SEGMENT_COVERAGE_RATIO = 0.4; // un volto deve ricomparire in almeno questa frazione dei segmenti per essere considerato "la webcam reale" e non un volto di passaggio nel contenuto reagito
@@ -115,6 +126,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
           endSeconds: segEnd,
           webcamCandidates: [],
           singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect),
+          singleCropNeedsFill: false,
         });
       }
     }
@@ -133,9 +145,15 @@ export class ReactionCamFaceTracker implements FaceTracker {
         sourceWidth,
         sourceHeight,
       );
+      // Maggioranza dei segmenti, non "almeno uno": un singolo segmento atipico (es. un volto
+      // minuscolo per un paio di secondi a inizio clip, prima che inquadratura si stabilizzi)
+      // non deve trascinare l'intera clip in modalità sfondo sfocato se per il resto della
+      // durata il volto è ragionevolmente centrato e il crop a piena canvas va già bene.
+      const backgroundFill = decisions.filter((d) => d.singleCropNeedsFill).length > decisions.length / 2;
       return {
         type: "single",
         crops: decisions.map((d, i) => ({ startSeconds: d.startSeconds, endSeconds: d.endSeconds, crop: smoothedCrops[i]! })),
+        backgroundFill,
       };
     }
 
@@ -177,7 +195,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     sourceHeight: number,
     absStart: number,
     absEnd: number,
-  ): Promise<{ webcamCandidates: ClusterMeta[]; singleCrop: CropWindow }> {
+  ): Promise<{ webcamCandidates: ClusterMeta[]; singleCrop: CropWindow; singleCropNeedsFill: boolean }> {
     const duration = Math.max(0.1, absEnd - absStart);
     const timestamps: number[] = [];
     for (let i = 1; i <= SAMPLES_PER_SEGMENT; i++) {
@@ -211,7 +229,11 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
     const framesWithDetection = samples.filter((s) => s.length > 0).length;
     if (framesWithDetection === 0) {
-      return { webcamCandidates: [], singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect) };
+      return {
+        webcamCandidates: [],
+        singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect),
+        singleCropNeedsFill: false,
+      };
     }
 
     const clusters = clusterDetections(samples);
@@ -219,7 +241,11 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const stable = clusters.filter((c) => c.sampleIndices.size >= minCount);
 
     if (stable.length === 0) {
-      return { webcamCandidates: [], singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect) };
+      return {
+        webcamCandidates: [],
+        singleCrop: centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect),
+        singleCropNeedsFill: false,
+      };
     }
 
     const withMeta: ClusterMeta[] = stable.map((c) => ({
@@ -236,10 +262,17 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const singleCrop = primary
       ? subjectCentricCrop(primary.avg, sourceWidth, sourceHeight, targetAspect, SINGLE_FACE_PADDING_FACTOR)
       : centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect);
+    // Sfondo sfocato solo se il volto è DAVVERO decentrato verticalmente (non ogni volta che è
+    // semplicemente grande): un volto vicino al centro verticale non perde quasi nulla restando
+    // centrato (maxSymmetricCropHeight ≈ sourceHeight), mentre uno vicino al bordo (webcam
+    // grande ma posizionata in basso/alto nel frame) costringerebbe subjectCentricCrop a un
+    // crop molto più piccolo del previsto pur di restare centrato — lì conviene mostrarlo più
+    // piccolo con lo sfondo dietro piuttosto che un crop striminzito a piena canvas.
+    const singleCropNeedsFill = primary ? maxSymmetricCropHeight(primary.avg, sourceHeight) < sourceHeight * BACKGROUND_FILL_TRIGGER_RATIO : false;
 
     const webcamCandidates = withMeta.filter((m) => isWebcamLike(m.avg, sourceWidth, sourceHeight));
 
-    return { webcamCandidates, singleCrop };
+    return { webcamCandidates, singleCrop, singleCropNeedsFill };
   }
 
   /**
@@ -289,6 +322,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
         endSeconds: seg.endSeconds,
         webcamCrop: chosen ? subjectCentricCrop(chosen.anchor.avg, sourceWidth, sourceHeight, topAspect, WEBCAM_PADDING_FACTOR) : null,
         singleCrop: seg.singleCrop,
+        singleCropNeedsFill: seg.singleCropNeedsFill,
       };
     });
 
@@ -462,6 +496,8 @@ function smoothCropSequence(crops: CropWindow[], targetAspect: number, sourceWid
     return { x, y, width: Math.round(width), height: Math.round(height) };
   };
 
+  const diag = Math.hypot(sourceWidth, sourceHeight);
+
   const first = crops[0]!;
   let smoothedCx = first.x + first.width / 2;
   let smoothedCy = first.y + first.height / 2;
@@ -472,9 +508,21 @@ function smoothCropSequence(crops: CropWindow[], targetAspect: number, sourceWid
     const cur = crops[i]!;
     const curCx = cur.x + cur.width / 2;
     const curCy = cur.y + cur.height / 2;
-    smoothedCx = SINGLE_CROP_SMOOTHING_ALPHA * curCx + (1 - SINGLE_CROP_SMOOTHING_ALPHA) * smoothedCx;
-    smoothedCy = SINGLE_CROP_SMOOTHING_ALPHA * curCy + (1 - SINGLE_CROP_SMOOTHING_ALPHA) * smoothedCy;
-    smoothedHeight = SINGLE_CROP_SMOOTHING_ALPHA * cur.height + (1 - SINGLE_CROP_SMOOTHING_ALPHA) * smoothedHeight;
+
+    const heightRatio = cur.height / smoothedHeight;
+    const centerDist = Math.hypot(curCx - smoothedCx, curCy - smoothedCy);
+    const isSceneChange =
+      heightRatio > SMOOTHING_CUT_HEIGHT_RATIO || heightRatio < 1 / SMOOTHING_CUT_HEIGHT_RATIO || centerDist > SMOOTHING_CUT_CENTER_RATIO * diag;
+
+    if (isSceneChange) {
+      smoothedCx = curCx;
+      smoothedCy = curCy;
+      smoothedHeight = cur.height;
+    } else {
+      smoothedCx = SINGLE_CROP_SMOOTHING_ALPHA * curCx + (1 - SINGLE_CROP_SMOOTHING_ALPHA) * smoothedCx;
+      smoothedCy = SINGLE_CROP_SMOOTHING_ALPHA * curCy + (1 - SINGLE_CROP_SMOOTHING_ALPHA) * smoothedCy;
+      smoothedHeight = SINGLE_CROP_SMOOTHING_ALPHA * cur.height + (1 - SINGLE_CROP_SMOOTHING_ALPHA) * smoothedHeight;
+    }
     result.push(rebuild(smoothedCx, smoothedCy, smoothedHeight));
   }
 

@@ -41,6 +41,19 @@ export function centeredCrop(
 // maggiore del padding va sopra.
 const VERTICAL_ANCHOR_RATIO = 0.35; // frazione dall'alto del riquadro volto usata come "centro" verticale
 
+/**
+ * Quanta altezza (px) può avere, al massimo, un crop centrato simmetricamente sul "centro
+ * verticale" (vedi VERTICAL_ANCHOR_RATIO) di `subject` restando dentro i bound sorgente. Se il
+ * volto è vicino al bordo verticale (in alto o in basso), questo valore è molto più piccolo di
+ * sourceHeight — usato sia per limitare subjectCentricCrop sia (in reaction-cam-face-tracker.ts)
+ * per decidere se un crop "a piena inquadratura" resterebbe troppo poco centrato e serve invece
+ * uno sfondo sfocato dietro un crop più piccolo (Layout.backgroundFill).
+ */
+export function maxSymmetricCropHeight(subject: { y: number; height: number }, sourceHeight: number): number {
+  const cy = subject.y + subject.height * VERTICAL_ANCHOR_RATIO;
+  return 2 * Math.min(cy, sourceHeight - cy);
+}
+
 export function subjectCentricCrop(
   subject: { x: number; y: number; width: number; height: number },
   sourceWidth: number,
@@ -51,7 +64,14 @@ export function subjectCentricCrop(
   const cx = subject.x + subject.width / 2;
   const cy = subject.y + subject.height * VERTICAL_ANCHOR_RATIO;
 
-  let height = Math.min(sourceHeight, subject.height * paddingFactor);
+  // Se il padding desiderato supera l'altezza sorgente, non possiamo centrare PERFETTAMENTE su
+  // cy e insieme usare tutta l'altezza disponibile: usare comunque sourceHeight forzerebbe
+  // sempre y=0 (l'unico modo di stare nei bound quando height==sourceHeight), mostrando sopra
+  // il volto qualunque cosa stia in cima al frame sorgente invece di restare centrato — bug
+  // reale osservato con webcam grandi ma posizionate in basso nel frame sorgente. Limitiamo
+  // quindi l'altezza al massimo che può stare simmetricamente intorno a cy dentro i bound.
+  const maxSymmetricHeight = maxSymmetricCropHeight(subject, sourceHeight);
+  let height = Math.min(sourceHeight, subject.height * paddingFactor, maxSymmetricHeight > 0 ? maxSymmetricHeight : sourceHeight);
   let width = height * targetAspect;
   if (width > sourceWidth) {
     width = sourceWidth;

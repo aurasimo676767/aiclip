@@ -15,6 +15,7 @@ export class CenterCropFaceTracker implements FaceTracker {
     return {
       type: "single",
       crops: [{ startSeconds: 0, endSeconds: params.endSeconds - params.startSeconds, crop }],
+      backgroundFill: false,
     };
   }
 }

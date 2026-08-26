@@ -21,7 +21,11 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
   const { layout, zoomExpression, assSubtitlesPath, showProgressBar, clipDurationSeconds } = params;
 
   const steps: string[] =
-    layout.type === "single" ? buildSingleCropSteps(layout.crops, zoomExpression) : buildSplitVerticalSteps(layout, zoomExpression);
+    layout.type === "single"
+      ? layout.backgroundFill
+        ? buildSingleWithBackgroundSteps(layout.crops, zoomExpression)
+        : buildSingleCropSteps(layout.crops, zoomExpression)
+      : buildSplitVerticalSteps(layout, zoomExpression);
 
   const subtitlesFilterPath = toFfmpegFilterPath(assSubtitlesPath);
   const lastLabel = "subbed";
@@ -49,6 +53,44 @@ function buildSingleCropSteps(crops: TimedCrop[], zoomExpression: string): strin
     `[0:v]crop=w='${wExpr}':h='${hExpr}':x='${xExpr}':y='${yExpr}'[base]`,
     `[base]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[zoomed]`,
     `[zoomed]scale=${OUTPUT_RESOLUTION.width}:${OUTPUT_RESOLUTION.height}:flags=lanczos,setsar=1[scaled]`,
+  ];
+}
+
+// Quando il volto non riempie abbastanza il frame sorgente da restare centrato a piena canvas
+// (Layout.backgroundFill, vedi face-tracker.ts), il riquadro del volto viene mostrato più
+// piccolo — questa frazione della larghezza canvas — invece di stirato ai bordi, per lasciare
+// spazio allo sfondo sfocato intorno.
+const BACKGROUND_FILL_FOREGROUND_WIDTH_RATIO = 0.82;
+
+/**
+ * Come buildSingleCropSteps, ma per i casi in cui il volto non riempie bene un crop 9:16 a
+ * piena canvas (Layout.backgroundFill): il crop del volto (già a rapporto 9:16, quindi la sua
+ * dimensione IN PIXEL sorgente può variare ma la sua forma resta sempre verticale) viene
+ * mostrato a una dimensione fissa e ridotta, centrato su uno sfondo ricavato dall'INTERO frame
+ * sorgente scalato "a copertura" — spesso è proprio lo schermo/gioco reagito, normalmente
+ * invisibile quando il volto occupa tutto lo schermo. Sfondo NITIDO, non sfocato: l'utente lo
+ * vuole visibile chiaramente, non solo come ambiente sfumato sullo sfondo.
+ */
+function buildSingleWithBackgroundSteps(crops: TimedCrop[], zoomExpression: string): string[] {
+  const xExpr = piecewiseExpr(crops, (c) => c.x);
+  const yExpr = piecewiseExpr(crops, (c) => c.y);
+  const wExpr = piecewiseExpr(crops, (c) => c.width);
+  const hExpr = piecewiseExpr(crops, (c) => c.height);
+
+  const fgWidth = evenRound(OUTPUT_RESOLUTION.width * BACKGROUND_FILL_FOREGROUND_WIDTH_RATIO);
+  const fgHeight = evenRound(fgWidth * (OUTPUT_RESOLUTION.height / OUTPUT_RESOLUTION.width));
+
+  return [
+    // Sfondo: l'intero frame sorgente scalato "a copertura" della canvas (un lato combacia,
+    // l'altro sfora) poi tagliato al centro alle dimensioni esatte — sempre uguale per tutta
+    // la clip (non segue il volto), lasciato nitido.
+    `[0:v]scale=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}:force_original_aspect_ratio=increase,crop=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}[bg]`,
+    // Primo piano: stesso crop/zoom del volto di buildSingleCropSteps, ma scalato a una
+    // dimensione fissa più piccola invece che stirato a piena canvas.
+    `[0:v]crop=w='${wExpr}':h='${hExpr}':x='${xExpr}':y='${yExpr}'[fg_base]`,
+    `[fg_base]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[fg_zoomed]`,
+    `[fg_zoomed]scale=${fgWidth}:${fgHeight}:flags=lanczos,setsar=1[fg]`,
+    `[bg][fg]overlay=x='(W-w)/2':y='(H-h)/2',setsar=1[scaled]`,
   ];
 }
 

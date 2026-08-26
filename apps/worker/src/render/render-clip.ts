@@ -140,7 +140,7 @@ function segmentIsShorterThanClip(segment: TimeSegment, clipDuration: number): b
  */
 function remapLayout(layout: Layout, timeRemap: (t: number) => number, finalDuration: number): Layout {
   if (layout.type === "single") {
-    return { type: "single", crops: remapTimedCrops(layout.crops, timeRemap, finalDuration) };
+    return { type: "single", crops: remapTimedCrops(layout.crops, timeRemap, finalDuration), backgroundFill: layout.backgroundFill };
   }
   return { ...layout, topCrops: remapTimedCrops(layout.topCrops, timeRemap, finalDuration) };
 }

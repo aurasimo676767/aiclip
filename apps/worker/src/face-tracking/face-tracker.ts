@@ -19,7 +19,14 @@ export interface TimedCrop {
  * clip (es. il feed attivo passa da una persona all'altra), il crop la segue invece di
  * restare fisso su dove si trovava all'inizio.
  *
- * - "single": crop 9:16 che segue nel tempo lo speaker/soggetto principale.
+ * - "single": crop 9:16 che segue nel tempo lo speaker/soggetto principale. Se il volto non
+ *   riempie abbastanza il frame sorgente da poter restare centrato senza sforare i bordi (es.
+ *   una webcam grande ma non centrata verticalmente: il crop "a piena inquadratura" finiva
+ *   forzato in alto, mostrando sopra il volto un pezzo qualunque — spesso un'altra webcam o
+ *   contenuto irrilevante — invece di restare centrato), `backgroundFill` è true: il crop del
+ *   volto va mostrato più piccolo e centrato, con il resto del canvas riempito da uno sfondo
+ *   NITIDO (non sfocato) ricavato dall'INTERO frame sorgente (spesso è proprio lo schermo/gioco
+ *   reagito, normalmente invisibile quando il volto occupa tutto lo schermo) — vedi build-video-filter.ts.
  * - "split_vertical": due fasce impilate — webcam in alto (segue nel tempo), contenuto
  *   principale in basso (sempre centrato sul frame intero, mai su un volto — vedi
  *   reaction-cam-face-tracker.ts per il perché). `blurRegions` (coordinate del video
@@ -29,7 +36,7 @@ export interface TimedCrop {
  *   basso, dentro l'area "contenuto".
  */
 export type Layout =
-  | { type: "single"; crops: TimedCrop[] }
+  | { type: "single"; crops: TimedCrop[]; backgroundFill: boolean }
   | { type: "split_vertical"; topCrops: TimedCrop[]; bottom: CropWindow; topRatio: number; blurRegions: CropWindow[] };
 
 /**
