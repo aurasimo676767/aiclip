@@ -9,10 +9,11 @@ import { logger } from "./logger.js";
 // PromiseLike, non Promise: i query builder di supabase-js sono "thenable" ma non vere
 // istanze Promise (mancano .catch/.finally) — un vincolo su Promise<T> li rifiuterebbe.
 export async function withNetworkRetry<T>(fn: () => PromiseLike<T>, label: string): Promise<T> {
-  // Prima 3 tentativi su ~7s totali: non bastava per i blip di rete più lunghi osservati
-  // in pratica (interruzioni WiFi/router di svariati secondi). Copriamo ora fino a ~1 minuto.
-  const attempts = 5;
-  const delaysMs = [2000, 5000, 10000, 20000];
+  // Prima 5 tentativi su ~37s totali: non bastava per un'interruzione di rete di un minuto
+  // abbondante (osservata in pratica alla fine di una pipeline lunga — trascrizione+AI già
+  // completate, persa solo per un blip alla scrittura finale dello stato). Copriamo ora ~1m30s.
+  const attempts = 6;
+  const delaysMs = [3000, 6000, 12000, 24000, 45000];
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
