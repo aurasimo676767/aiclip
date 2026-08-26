@@ -50,6 +50,7 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
    - `packages/db/migrations/0006_youtube_scheduled_publish.sql`
    - `packages/db/migrations/0007_followed_channels.sql`
    - `packages/db/migrations/0008_clip_badges.sql`
+   - `packages/db/migrations/0009_youtube_stats.sql`
 3. Vai su **Project Settings → API** e copia `URL` e `anon public key` (servono al frontend). Vai su **Project Settings → API → Service role** e copia anche quella (serve solo al worker).
 
 ### 2. Bucket Cloudflare R2

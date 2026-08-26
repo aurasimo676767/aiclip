@@ -7,6 +7,7 @@ import { claimNextPublishJob } from "./queue/publish-queue.js";
 import { processVideoJob } from "./pipeline/process-video-job.js";
 import { processRenderJob } from "./pipeline/process-render-job.js";
 import { processPublishJob } from "./pipeline/process-publish-job.js";
+import { refreshYoutubeStats } from "./pipeline/refresh-youtube-stats.js";
 
 let shuttingDown = false;
 
@@ -65,6 +66,20 @@ async function publishQueueLoop(): Promise<void> {
   }
 }
 
+const STATS_REFRESH_INTERVAL_MS = 20 * 60 * 1000; // ogni 20 minuti: sweep periodico, non una coda — non serve più frequente
+
+/** Sweep periodico (non una coda): aggiorna views/like/commenti dei video già pubblicati. */
+async function statsRefreshLoop(): Promise<void> {
+  while (!shuttingDown) {
+    try {
+      await refreshYoutubeStats();
+    } catch (err) {
+      logger.error("Errore nel loop di refresh statistiche YouTube", { error: err instanceof Error ? err.message : String(err) });
+    }
+    await sleep(STATS_REFRESH_INTERVAL_MS);
+  }
+}
+
 function handleShutdown(signal: string): void {
   logger.info(`Ricevuto ${signal}, arresto in corso dopo il job corrente...`);
   shuttingDown = true;
@@ -75,4 +90,4 @@ process.on("SIGTERM", () => handleShutdown("SIGTERM"));
 
 logger.info("ClipForge worker avviato", { workerId: WORKER_ID, pollIntervalMs: env.QUEUE_POLL_INTERVAL_MS });
 
-await Promise.all([videoQueueLoop(), renderQueueLoop(), publishQueueLoop()]);
+await Promise.all([videoQueueLoop(), renderQueueLoop(), publishQueueLoop(), statsRefreshLoop()]);

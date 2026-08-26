@@ -434,6 +434,10 @@ export interface Database {
           completed_at: string | null;
           created_at: string;
           publish_at: string | null;
+          view_count: number | null;
+          like_count: number | null;
+          comment_count: number | null;
+          stats_updated_at: string | null;
         };
         Insert: {
           id?: string;
@@ -453,6 +457,10 @@ export interface Database {
           completed_at?: string | null;
           created_at?: string;
           publish_at?: string | null;
+          view_count?: number | null;
+          like_count?: number | null;
+          comment_count?: number | null;
+          stats_updated_at?: string | null;
         };
         Update: {
           id?: string;
@@ -472,6 +480,10 @@ export interface Database {
           completed_at?: string | null;
           created_at?: string;
           publish_at?: string | null;
+          view_count?: number | null;
+          like_count?: number | null;
+          comment_count?: number | null;
+          stats_updated_at?: string | null;
         };
         Relationships: [];
       };
