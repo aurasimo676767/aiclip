@@ -29,6 +29,7 @@ const MIN_CONSECUTIVE_MISSES_TO_SWITCH = 4; // segmenti di fila SENZA un'ancora 
 const BACKGROUND_FILL_ASPECT = 1; // quadrato: quando il volto non riempie bene un crop 9:16 (Layout.backgroundFill), meglio centrare l'inquadratura NATURALE della webcam (tipicamente più larga di un ritratto 9:16, es. quadrata) invece di forzare comunque un crop stretto in verticale — un crop 9:16 troppo vincolato dal bound di centratura (maxSymmetricCropHeight) finiva per zoomare su un dettaglio (es. il cappello) invece di inquadrare la persona; l'utente ha chiesto esplicitamente che ai LATI non si veda il contenuto, solo sopra/sotto — richiede quindi un'inquadratura a piena larghezza, non più stretta e centrata con bordi su tutti i lati
 const EMPHASIS_MOTION_THRESHOLD = 40; // sopra questa soglia di movimento medio della bocca, il reactor sta reagendo/parlando con forza (non solo conversazione normale): passiamo a schermo intero anche se il segmento sarebbe split-eligible, imitando lo stile di editing visto in Shorts di reaction reali (webcam piccola di default, schermo intero nei momenti di reazione più marcata). Prima approssimazione, quasi certamente da tarare con altri esempi reali — non c'è ancora un caso empirico preciso alle spalle come per le altre soglie in questo file
 const MIN_SEGMENT_SECONDS = 0.3; // un taglio di scena troppo vicino al confine della griglia (o a un altro taglio) verrebbe scartato invece di creare un segmento degenere: sotto questa durata SAMPLES_PER_SEGMENT frame ravvicinatissimi non danno una stima affidabile
+const MIN_CONSECUTIVE_SEGMENTS_TO_SWITCH_SPEAKER = 2; // segmenti di fila in cui un'ANCORA DIVERSA da quella attualmente mostrata deve avere più movimento prima di "rubarle" il pannello — senza questo, con SEGMENT_LENGTH_SECONDS=1 basta UN secondo in cui un ascoltatore reagisce (ride, annuisce) più vistosamente di quanto il narratore stia muovendo la bocca in quell'istante per far sparire chi sta davvero parlando. Verificato su un caso reale: un solo narratore per un'intera clip di 22s, ma il pannello continuava a saltare tra 3 co-host diversi segmento per segmento. Il criterio resta comunque il movimento (non c'è vera diarizzazione audio), solo con un minimo di "inerzia" sullo speaker già in scena invece di ribaltare la scelta ad ogni singolo secondo.
 
 interface DetectionEntry {
   box: FaceBox;
@@ -425,6 +426,13 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const singleAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
 
     const hasOwnAnchor: boolean[] = [];
+    // Stato "sticky" dello speaker attualmente mostrato: portato avanti da un segmento al
+    // successivo (vedi MIN_CONSECUTIVE_SEGMENTS_TO_SWITCH_SPEAKER) — per questo il ciclo è un
+    // map con closure mutabile, non stateless come il resto del file.
+    let currentAnchor: PositionGroup | undefined;
+    let challengerAnchor: PositionGroup | undefined;
+    let challengerStreak = 0;
+
     const decisions = rawSegments.map((seg) => {
       // Per ogni candidato di questo segmento, risali all'ancora (identità) stabile a cui
       // appartiene. Il movimento (per capire chi parla ORA) è un dato per-segmento reale e va
@@ -437,8 +445,43 @@ export class ReactionCamFaceTracker implements FaceTracker {
         .map((m) => ({ meta: m, anchor: anchorGroups.find((g) => isNearBox(m.avg, g.avg)) }))
         .filter((c): c is { meta: ClusterMeta; anchor: PositionGroup } => c.anchor !== undefined);
 
-      const chosenMeta = selectBest(anchoredHere.map((c) => c.meta));
-      const chosen = anchoredHere.find((c) => c.meta === chosenMeta);
+      let chosen: { meta: ClusterMeta; anchor: PositionGroup } | undefined;
+      const currentHere = currentAnchor ? anchoredHere.find((c) => c.anchor === currentAnchor) : undefined;
+
+      if (currentHere) {
+        // Lo speaker già in scena è presente anche qui: gli resta il pannello a meno che
+        // un'ancora diversa non lo superi in movimento per MIN_CONSECUTIVE_SEGMENTS_TO_SWITCH_SPEAKER
+        // segmenti DI FILA (non basta un singolo secondo più vivace di un ascoltatore).
+        const others = anchoredHere.filter((c) => c.anchor !== currentAnchor);
+        const bestOtherMeta = others.length > 0 ? selectBest(others.map((c) => c.meta)) : undefined;
+        const bestOther = bestOtherMeta ? others.find((c) => c.meta === bestOtherMeta) : undefined;
+
+        if (bestOther && bestOther.meta.motion > currentHere.meta.motion) {
+          challengerStreak = challengerAnchor === bestOther.anchor ? challengerStreak + 1 : 1;
+          challengerAnchor = bestOther.anchor;
+          if (challengerStreak >= MIN_CONSECUTIVE_SEGMENTS_TO_SWITCH_SPEAKER) {
+            chosen = bestOther;
+            currentAnchor = bestOther.anchor;
+            challengerAnchor = undefined;
+            challengerStreak = 0;
+          } else {
+            chosen = currentHere;
+          }
+        } else {
+          chosen = currentHere;
+          challengerAnchor = undefined;
+          challengerStreak = 0;
+        }
+      } else {
+        // Lo speaker in scena non è presente qui (o non ne abbiamo ancora scelto uno): sceglie
+        // normalmente tra i candidati di questo segmento e lo adotta come nuovo "corrente".
+        const chosenMeta = selectBest(anchoredHere.map((c) => c.meta));
+        chosen = anchoredHere.find((c) => c.meta === chosenMeta);
+        currentAnchor = chosen?.anchor ?? currentAnchor;
+        challengerAnchor = undefined;
+        challengerStreak = 0;
+      }
+
       hasOwnAnchor.push(Boolean(chosen));
 
       // Se l'ancora reaction-cam è stata trovata anche in QUESTO segmento, il crop "schermo
