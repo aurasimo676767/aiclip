@@ -41,6 +41,7 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryingClipId, setRetryingClipId] = useState<string | null>(null);
+  const [cancellingClipId, setCancellingClipId] = useState<string | null>(null);
   const [selectedForSchedule, setSelectedForSchedule] = useState<Set<string>>(new Set());
   const [submittingSchedule, setSubmittingSchedule] = useState(false);
   const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
@@ -138,6 +139,22 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
       setError(err instanceof Error ? err.message : "Errore imprevisto");
     } finally {
       setRetryingClipId(null);
+    }
+  }
+
+  async function cancelRender(clipId: string) {
+    if (!window.confirm("Annullare il render di questa clip?")) return;
+    setCancellingClipId(clipId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/clips/${clipId}/cancel-render`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Annullamento fallito");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore imprevisto");
+    } finally {
+      setCancellingClipId(null);
     }
   }
 
@@ -251,6 +268,16 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                   {clip.hashtags.length > 0 && (
                     <p className="text-xs text-brand-300/80">{clip.hashtags.map((h) => `#${h}`).join(" ")}</p>
                   )}
+                  {(clip.status === "QUEUED" || clip.status === "RENDERING") && (
+                    <button
+                      onClick={() => cancelRender(clip.id)}
+                      disabled={cancellingClipId === clip.id}
+                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50"
+                    >
+                      {cancellingClipId === clip.id ? "Annullo..." : "Annulla render"}
+                    </button>
+                  )}
+
                   {clip.errorMessage && (
                     <div className="space-y-1">
                       <p className="text-sm text-red-400">Errore: {clip.errorMessage}</p>

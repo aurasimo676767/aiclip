@@ -12,6 +12,7 @@ import { detectClipCandidates } from "../providers/ai/candidates.js";
 import { rankAndBuildEdl } from "../providers/ai/ranking.js";
 import { updateVideoStatus } from "../queue/video-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
+import { isVideoCancelled } from "../lib/cancellation.js";
 
 // Tentativi automatici prima di arrendersi e marcare FAILED (serve poi il pulsante "Riprova"
 // manuale): stesso numero di default usato da claim_next_video per lo stale-reclaim, così i due
@@ -34,7 +35,20 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     return;
   }
 
+  // true se l'utente ha annullato: usato per uscire silenziosamente (status/error_message sono
+  // già stati impostati dal pulsante "Annulla" lato web, il worker deve solo smettere di
+  // lavorarci senza sovrascriverli né innescare il retry automatico del blocco catch).
+  async function cancelled(): Promise<boolean> {
+    const requested = await isVideoCancelled(video.id);
+    if (requested) {
+      logger.info("Video annullato dall'utente, interrompo la pipeline", { videoId: video.id });
+    }
+    return requested;
+  }
+
   try {
+    if (await cancelled()) return;
+
     let localVideoPath: string;
     let videoTitle = video.original_filename;
 
@@ -83,9 +97,11 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     }
 
     const audioPath = await extractAudio(localVideoPath, jobDir);
+    if (await cancelled()) return;
 
     await updateVideoStatus(video.id, "TRANSCRIBING");
     const transcript = await transcriptionProvider.transcribe(audioPath);
+    if (await cancelled()) return;
 
     const { error: transcriptError } = await supabase.from("transcripts").upsert(
       {
@@ -112,6 +128,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     });
 
     logger.info("Candidati individuati", { videoId: video.id, count: candidates.length });
+    if (await cancelled()) return;
 
     const rankedClips = await rankAndBuildEdl(candidates, transcript.segments, {
       apiKey: env.ANTHROPIC_API_KEY,

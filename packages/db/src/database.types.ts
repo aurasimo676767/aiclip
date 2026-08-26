@@ -123,6 +123,7 @@ export interface Database {
           claimed_by: string | null;
           claimed_at: string | null;
           attempts: number;
+          cancel_requested: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -140,6 +141,7 @@ export interface Database {
           claimed_by?: string | null;
           claimed_at?: string | null;
           attempts?: number;
+          cancel_requested?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -157,6 +159,7 @@ export interface Database {
           claimed_by?: string | null;
           claimed_at?: string | null;
           attempts?: number;
+          cancel_requested?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -286,6 +289,7 @@ export interface Database {
           claimed_at: string | null;
           started_at: string | null;
           completed_at: string | null;
+          cancel_requested: boolean;
           created_at: string;
         };
         Insert: {
@@ -300,6 +304,7 @@ export interface Database {
           claimed_at?: string | null;
           started_at?: string | null;
           completed_at?: string | null;
+          cancel_requested?: boolean;
           created_at?: string;
         };
         Update: {
@@ -314,6 +319,7 @@ export interface Database {
           claimed_at?: string | null;
           started_at?: string | null;
           completed_at?: string | null;
+          cancel_requested?: boolean;
           created_at?: string;
         };
         Relationships: [];

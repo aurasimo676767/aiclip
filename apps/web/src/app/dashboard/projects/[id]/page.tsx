@@ -4,6 +4,7 @@ import { StatusBadge, isProcessingStatus } from "@/components/status-badge";
 import { PollingRefresher } from "@/components/polling-refresher";
 import { ClipList } from "@/components/clip-list";
 import { RetryProjectButton } from "@/components/retry-project-button";
+import { CancelProjectButton } from "@/components/cancel-project-button";
 import { fetchProjectDetails, fetchYoutubeConnected } from "@/lib/data/clips";
 
 // Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
@@ -53,9 +54,12 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
       )}
 
       {projectProcessing && clips.length === 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-8">
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-brand-400" />
-          <p className="text-zinc-300">{statusMessage(project.status)}</p>
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-8">
+          <div className="flex items-center gap-3">
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-brand-400" />
+            <p className="text-zinc-300">{statusMessage(project.status)}</p>
+          </div>
+          <CancelProjectButton projectId={project.id} compact />
         </div>
       )}
 

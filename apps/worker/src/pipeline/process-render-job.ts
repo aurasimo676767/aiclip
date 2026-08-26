@@ -10,6 +10,7 @@ import { renderClip } from "../render/render-clip.js";
 import { runFfmpeg } from "../lib/ffmpeg.js";
 import { updateRenderJobStatus } from "../queue/render-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
+import { isRenderJobCancelled } from "../lib/cancellation.js";
 
 export async function processRenderJob(job: RenderJobRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `render-${job.id}`);
@@ -23,6 +24,17 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
   // a buon fine).
   let clipMarkedCompleted = false;
 
+  // true se l'utente ha annullato: render_jobs/clips sono già stati marcati FAILED dal
+  // pulsante "Annulla" lato web, il worker deve solo smettere di lavorarci senza
+  // sovrascriverli (né tentare di marcarli COMPLETED se il render nel frattempo è finito).
+  async function cancelled(): Promise<boolean> {
+    const requested = await isRenderJobCancelled(job.id);
+    if (requested) {
+      logger.info("Render annullato dall'utente, interrompo", { jobId: job.id });
+    }
+    return requested;
+  }
+
   try {
     await updateRenderJobStatus(job.id, "RENDERING", { stage: "loading" });
     await setClipStatus(job.clip_id, "RENDERING");
@@ -35,8 +47,11 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
       throw new Error("Il video sorgente non ha uno storage_path valido");
     }
 
+    if (await cancelled()) return;
+
     const localSourcePath = path.join(jobDir, `source${path.extname(videoRow.storage_path)}`);
     await storageProvider.downloadToFile(videoRow.storage_path, localSourcePath);
+    if (await cancelled()) return;
 
     const template = DEFAULT_TEMPLATES[(clipRow.template as TemplateName) in DEFAULT_TEMPLATES ? (clipRow.template as TemplateName) : "PODCAST_CLEAN"];
     const rankedClip: RankedClip = {
@@ -67,6 +82,8 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
       outputPath,
     });
 
+    if (await cancelled()) return;
+
     await updateRenderJobStatus(job.id, "RENDERING", { stage: "uploading", progress: 80 });
 
     const thumbnailPath = path.join(jobDir, "thumbnail.jpg");
@@ -76,6 +93,8 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
     const thumbStoragePath = `thumbnails/${clipRow.project_id}/${clipRow.id}.jpg`;
     await storageProvider.uploadFile(outputPath, clipStoragePath, "video/mp4");
     await storageProvider.uploadFile(thumbnailPath, thumbStoragePath, "image/jpeg");
+
+    if (await cancelled()) return;
 
     const { error: updateError } = await withNetworkRetry(
       () =>

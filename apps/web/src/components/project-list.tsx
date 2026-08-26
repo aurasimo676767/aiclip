@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ProjectSummary } from "@/lib/data/projects";
-import { StatusBadge } from "./status-badge";
+import { StatusBadge, isProcessingStatus } from "./status-badge";
+import { CancelProjectButton } from "./cancel-project-button";
 
 export function ProjectList({ summaries, emptyMessage }: { summaries: ProjectSummary[]; emptyMessage: string }) {
   if (summaries.length === 0) {
@@ -45,6 +46,7 @@ export function ProjectList({ summaries, emptyMessage }: { summaries: ProjectSum
               <dd className="text-zinc-300">{new Date(project.created_at).toLocaleDateString("it-IT")}</dd>
             </div>
           </dl>
+          {isProcessingStatus(project.status) && <CancelProjectButton projectId={project.id} compact />}
         </Link>
       ))}
     </div>

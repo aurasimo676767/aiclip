@@ -4,6 +4,7 @@ import { StatusBadge, isProcessingStatus } from "@/components/status-badge";
 import { PollingRefresher } from "@/components/polling-refresher";
 import { ClipList } from "@/components/clip-list";
 import { RetryProjectButton } from "@/components/retry-project-button";
+import { CancelProjectButton } from "@/components/cancel-project-button";
 import { fetchProjectDetails, fetchYoutubeConnected } from "@/lib/data/clips";
 
 // Senza questo, su Vercel (produzione) Next.js può servire dati Supabase cachati anche col
@@ -93,9 +94,12 @@ export default async function BatchReviewPage({ searchParams }: { searchParams: 
               )}
 
               {processing && clips.length === 0 && (
-                <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-brand-400" />
-                  <p className="text-xs text-zinc-400">{statusMessage(project.status)}</p>
+                <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-brand-400" />
+                    <p className="text-xs text-zinc-400">{statusMessage(project.status)}</p>
+                  </div>
+                  <CancelProjectButton projectId={project.id} compact />
                 </div>
               )}
 
