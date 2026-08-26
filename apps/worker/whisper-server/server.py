@@ -31,7 +31,7 @@ from flask import Flask, jsonify, request
 
 MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "large-v3")
 DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
-COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "float16")
+COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "int8_float16")
 PORT = int(os.environ.get("WHISPER_SERVER_PORT", "8765"))
 
 app = Flask(__name__)

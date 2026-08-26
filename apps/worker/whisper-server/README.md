@@ -69,5 +69,7 @@ riavvia — nessun altro cambio.
 - `WHISPER_MODEL_SIZE` (default `large-v3`) — modelli più piccoli (`medium`, `small`,
   `base`) sono più veloci e usano meno VRAM ma sono meno precisi.
 - `WHISPER_DEVICE` (default `cuda`) — `cpu` se non hai una GPU NVIDIA (molto più lento).
-- `WHISPER_COMPUTE_TYPE` (default `float16`) — `int8_float16` se hai poca VRAM.
+- `WHISPER_COMPUTE_TYPE` (default `int8_float16`, quantizzato — più veloce, quasi stessa
+  qualità di `float16` su GPU con VRAM limitata come una 8GB) — `float16` per la precisione
+  numerica piena se hai una GPU con più VRAM e vuoi il massimo della qualità.
 - `WHISPER_SERVER_PORT` (default `8765`).
