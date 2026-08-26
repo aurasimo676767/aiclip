@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { YoutubeImportForm } from "./youtube-import-form";
 import { UploadForm } from "./upload-form";
+import { BulkYoutubeImportForm } from "./bulk-youtube-import-form";
 
-type Tab = "youtube" | "upload";
+type Tab = "youtube" | "upload" | "bulk";
 
 export function CreateProjectPanel() {
   const [tab, setTab] = useState<Tab>("youtube");
@@ -28,9 +29,19 @@ export function CreateProjectPanel() {
         >
           Carica file
         </button>
+        <button
+          onClick={() => setTab("bulk")}
+          className={`flex-1 rounded-md px-3 py-1.5 font-medium transition ${
+            tab === "bulk" ? "bg-brand-500 text-white" : "text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          Genera più video
+        </button>
       </div>
 
-      {tab === "youtube" ? <YoutubeImportForm /> : <UploadForm />}
+      {tab === "youtube" && <YoutubeImportForm />}
+      {tab === "upload" && <UploadForm />}
+      {tab === "bulk" && <BulkYoutubeImportForm />}
     </div>
   );
 }
