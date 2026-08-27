@@ -13,10 +13,30 @@ function randomIntervalMs(): number {
 }
 
 /**
+ * Trova il prossimo slot valido da `cursor` in poi, rispettando un minimo di
+ * MIN_INTERVAL_MS da qualunque slot GIÀ programmato (`existingSorted`, ordinato crescente,
+ * solo slot futuri). Se il candidato cade troppo vicino a uno slot esistente, non lo scarta e
+ * basta: usa quello slot esistente come nuovo `cursor` e riprova — così i nuovi slot riempiono
+ * per prime le finestre LIBERE più vicine ad ora, invece di accodarsi sempre dopo l'ultimo
+ * slot esistente (che poteva anche essere lontanissimo nel futuro, lasciando ore vuote prima).
+ */
+function pickNextSlot(cursor: number, existingSorted: number[]): number {
+  const candidate = cursor + randomIntervalMs();
+  for (const existing of existingSorted) {
+    if (existing < cursor) continue; // già superato, non è più un vincolo
+    if (Math.abs(candidate - existing) < MIN_INTERVAL_MS) {
+      return pickNextSlot(existing, existingSorted);
+    }
+    if (existing > candidate) break; // ordinati: i successivi sono ancora più lontani, nessun altro conflitto possibile
+  }
+  return candidate;
+}
+
+/**
  * Programma automaticamente più clip in fila su YouTube, distanziate 2h-2h30 l'una dall'altra
- * (variabile per non essere un pattern troppo riconoscibile) — "capisce" che è già presente
- * uno slot programmato guardando il publish_at più lontano nel futuro tra i job esistenti
- * dell'utente e accoda i nuovi dopo quello, invece di rischiare sovrapposizioni.
+ * (variabile per non essere un pattern troppo riconoscibile) — riempie prima le finestre
+ * libere più vicine ad ora, saltando oltre uno slot già programmato solo se ci si arriva
+ * davvero vicino (vedi pickNextSlot), invece di accodarsi sempre dopo l'ultimo slot esistente.
  */
 export async function POST(request: Request) {
   const supabase = await createSupabaseServerClient();
@@ -58,17 +78,21 @@ export async function POST(request: Request) {
   }
   const alreadyPublishingClipIds = new Set((existingJobs ?? []).map((j) => j.clip_id));
 
-  // Ultimo slot già programmato dall'utente (su QUALSIASI clip, non solo queste): i nuovi
-  // vanno messi in coda dopo quello, non solo dopo "adesso".
-  const { data: latestScheduled } = await supabase
+  // Tutti gli slot futuri già programmati dall'utente (su QUALSIASI clip, non solo queste, e
+  // RLS limita comunque alla riga dell'utente): i nuovi devono evitarli mantenendo un minimo di
+  // spaziatura, ma senza saltare oltre finestre libere più vicine ad ora (vedi pickNextSlot).
+  const { data: futureJobs } = await supabase
     .from("youtube_publish_jobs")
     .select("publish_at")
     .not("publish_at", "is", null)
-    .order("publish_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .gt("publish_at", new Date().toISOString())
+    .order("publish_at", { ascending: true });
 
-  let cursor = Math.max(Date.now(), latestScheduled?.publish_at ? new Date(latestScheduled.publish_at).getTime() : 0);
+  const existingSorted = (futureJobs ?? [])
+    .map((j) => new Date(j.publish_at!).getTime())
+    .sort((a, b) => a - b);
+
+  let cursor = Date.now();
 
   const scheduled: Array<{ clipId: string; publishAt: string }> = [];
   const errors: Array<{ clipId: string; error: string }> = [];
@@ -88,7 +112,7 @@ export async function POST(request: Request) {
       continue;
     }
 
-    cursor += randomIntervalMs();
+    cursor = pickNextSlot(cursor, existingSorted);
     const publishAt = new Date(cursor).toISOString();
 
     const { error: insertError } = await supabase.from("youtube_publish_jobs").insert({

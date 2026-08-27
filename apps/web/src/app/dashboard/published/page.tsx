@@ -16,6 +16,7 @@ interface PublishJobRow {
   like_count: number | null;
   comment_count: number | null;
   stats_updated_at: string | null;
+  cancelled_at: string | null;
   clips: { title: string; duration: number } | { title: string; duration: number }[] | null;
 }
 
@@ -30,7 +31,7 @@ export default async function PublishedPage() {
   const { data: jobsRaw } = await supabase
     .from("youtube_publish_jobs")
     .select(
-      "id, clip_id, status, youtube_url, publish_at, completed_at, view_count, like_count, comment_count, stats_updated_at, clips(title, duration)",
+      "id, clip_id, status, youtube_url, publish_at, completed_at, view_count, like_count, comment_count, stats_updated_at, cancelled_at, clips(title, duration)",
     )
     .order("created_at", { ascending: false });
 
@@ -38,11 +39,11 @@ export default async function PublishedPage() {
   const now = Date.now();
 
   const scheduled = jobs
-    .filter((j) => j.publish_at && new Date(j.publish_at).getTime() > now)
+    .filter((j) => !j.cancelled_at && j.publish_at && new Date(j.publish_at).getTime() > now)
     .sort((a, b) => new Date(a.publish_at!).getTime() - new Date(b.publish_at!).getTime());
 
   const published = jobs
-    .filter((j) => j.status === "COMPLETED" && j.youtube_url && (!j.publish_at || new Date(j.publish_at).getTime() <= now))
+    .filter((j) => !j.cancelled_at && j.status === "COMPLETED" && j.youtube_url && (!j.publish_at || new Date(j.publish_at).getTime() <= now))
     .sort((a, b) => new Date(b.completed_at ?? b.publish_at ?? 0).getTime() - new Date(a.completed_at ?? a.publish_at ?? 0).getTime());
 
   // Le statistiche vengono aggiornate da un job periodico del worker (ogni ~20 minuti), non

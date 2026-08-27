@@ -22,6 +22,7 @@ export interface ClipViewModel {
   youtubeUrl: string | null;
   youtubeError: string | null;
   youtubePublishAt: string | null;
+  youtubeCancelledAt: string | null;
   badges: ClipBadge[];
 }
 
@@ -333,6 +334,7 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                             youtubeUrl={clip.youtubeUrl}
                             youtubeError={clip.youtubeError}
                             youtubePublishAt={clip.youtubePublishAt}
+                            youtubeCancelledAt={clip.youtubeCancelledAt}
                           />
                         </div>
                       ) : (

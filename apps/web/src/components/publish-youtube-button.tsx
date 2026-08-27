@@ -12,6 +12,7 @@ interface PublishYoutubeButtonProps {
   youtubeUrl: string | null;
   youtubeError: string | null;
   youtubePublishAt: string | null;
+  youtubeCancelledAt: string | null;
 }
 
 export function PublishYoutubeButton({
@@ -23,6 +24,7 @@ export function PublishYoutubeButton({
   youtubeUrl,
   youtubeError,
   youtubePublishAt,
+  youtubeCancelledAt,
 }: PublishYoutubeButtonProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -31,20 +33,57 @@ export function PublishYoutubeButton({
   const [hashtags, setHashtags] = useState(defaultHashtags.join(" "));
   const [scheduledAt, setScheduledAt] = useState(""); // valore di <input type="datetime-local">, vuoto = nessuna programmazione
   const [submitting, setSubmitting] = useState<"now" | "scheduled" | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  async function cancelSchedule() {
+    if (!window.confirm("Annullare la programmazione? Il video resterà caricato ma privato su YouTube.")) return;
+    setCancelling(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/clips/${clipId}/cancel-schedule`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Annullamento fallito");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore imprevisto");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   if (status === "COMPLETED" && youtubeUrl) {
+    if (youtubeCancelledAt) {
+      return (
+        <div className="space-y-0.5">
+          <a href={youtubeUrl} target="_blank" rel="noreferrer" className="inline-block text-xs font-medium text-zinc-400 hover:underline">
+            Programmazione annullata — video privato ↗
+          </a>
+        </div>
+      );
+    }
+
     const scheduledInFuture = youtubePublishAt && new Date(youtubePublishAt).getTime() > Date.now();
     return (
-      <div className="space-y-0.5">
+      <div className="space-y-1">
         <a href={youtubeUrl} target="_blank" rel="noreferrer" className="inline-block text-xs font-medium text-emerald-400 hover:underline">
           {scheduledInFuture ? "Caricato, in attesa di pubblicazione ↗" : "Pubblicato su YouTube ↗"}
         </a>
         {scheduledInFuture && (
-          <p className="text-xs text-zinc-500">
-            Diventerà pubblico il{" "}
-            {new Date(youtubePublishAt).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "short" })}
-          </p>
+          <>
+            <p className="text-xs text-zinc-500">
+              Diventerà pubblico il{" "}
+              {new Date(youtubePublishAt).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "short" })}
+            </p>
+            {error && <p className="text-xs text-red-400">{error}</p>}
+            <button
+              onClick={cancelSchedule}
+              disabled={cancelling}
+              className="rounded-lg border border-red-400/40 px-3 py-1 text-xs font-medium text-red-200 hover:border-red-400 disabled:opacity-50"
+            >
+              {cancelling ? "Annullo..." : "Annulla programmazione"}
+            </button>
+          </>
         )}
       </div>
     );

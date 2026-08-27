@@ -54,6 +54,7 @@ Il frontend e le API route leggere (creazione progetto, signed URL, creazione re
    - `packages/db/migrations/0010_project_auto_generate.sql`
    - `packages/db/migrations/0011_cancel_jobs.sql`
    - `packages/db/migrations/0012_voiceover_jobs.sql`
+   - `packages/db/migrations/0013_youtube_publish_cancel.sql`
 3. Vai su **Project Settings → API** e copia `URL` e `anon public key` (servono al frontend). Vai su **Project Settings → API → Service role** e copia anche quella (serve solo al worker).
 
 ### 2. Bucket Cloudflare R2

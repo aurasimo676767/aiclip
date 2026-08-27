@@ -34,7 +34,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
     clipIds.length > 0
       ? await supabase
           .from("youtube_publish_jobs")
-          .select("clip_id, status, youtube_url, error_message, created_at, publish_at")
+          .select("clip_id, status, youtube_url, error_message, created_at, publish_at, cancelled_at")
           .in("clip_id", clipIds)
           .order("created_at", { ascending: false })
       : { data: [] as never[] };
@@ -42,7 +42,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
   // Solo il job di pubblicazione più recente per clip (l'array è già ordinato created_at desc).
   const latestPublishByClip = new Map<
     string,
-    { status: string; youtubeUrl: string | null; errorMessage: string | null; publishAt: string | null }
+    { status: string; youtubeUrl: string | null; errorMessage: string | null; publishAt: string | null; cancelledAt: string | null }
   >();
   for (const job of publishJobsRaw ?? []) {
     if (!latestPublishByClip.has(job.clip_id)) {
@@ -51,6 +51,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
         youtubeUrl: job.youtube_url,
         errorMessage: job.error_message,
         publishAt: job.publish_at,
+        cancelledAt: job.cancelled_at,
       });
     }
   }
@@ -83,6 +84,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       youtubeUrl: publish?.youtubeUrl ?? null,
       youtubeError: publish?.errorMessage ?? null,
       youtubePublishAt: publish?.publishAt ?? null,
+      youtubeCancelledAt: publish?.cancelledAt ?? null,
     };
     const list = clipsByProject.get(c.project_id) ?? [];
     list.push(clip);
