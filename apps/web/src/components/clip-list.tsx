@@ -175,9 +175,9 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
   }
 
   const selectableCount = sorted.filter((c) => c.status === "SUGGESTED" || c.status === "FAILED").length;
-  const schedulableCount = youtubeConnected
-    ? sorted.filter((c) => c.status === "COMPLETED" && c.youtubePublishStatus === null).length
-    : 0;
+  // Un job annullato non blocca una nuova programmazione: il video è stato eliminato da YouTube.
+  const isFreeToSchedule = (c: ClipViewModel) => c.youtubePublishStatus === null || c.youtubeCancelledAt !== null;
+  const schedulableCount = youtubeConnected ? sorted.filter((c) => c.status === "COMPLETED" && isFreeToSchedule(c)).length : 0;
 
   return (
     <div className="space-y-4">
@@ -214,7 +214,7 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
         {sorted.map((clip, index) => {
           const score = overallScore(clip.scores);
           const canSelect = clip.status === "SUGGESTED" || clip.status === "FAILED";
-          const canSchedule = youtubeConnected && clip.status === "COMPLETED" && clip.youtubePublishStatus === null;
+          const canSchedule = youtubeConnected && clip.status === "COMPLETED" && isFreeToSchedule(clip);
           const canPreview = clip.status === "COMPLETED";
           const previewUrl = previewUrls[clip.id];
 

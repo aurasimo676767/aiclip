@@ -68,11 +68,14 @@ export async function POST(request: Request) {
   }
   const clipById = new Map((clips ?? []).map((c) => [c.id, c]));
 
+  // Un job annullato (cancelled_at valorizzato) NON conta come "già in pubblicazione": il video
+  // è stato eliminato da YouTube e la clip è di nuovo libera per una nuova programmazione.
   const { data: existingJobs, error: existingJobsError } = await supabase
     .from("youtube_publish_jobs")
     .select("clip_id, status, publish_at")
     .in("clip_id", clipIds)
-    .neq("status", "FAILED");
+    .neq("status", "FAILED")
+    .is("cancelled_at", null);
   if (existingJobsError) {
     return NextResponse.json({ error: `Lettura job esistenti fallita: ${existingJobsError.message}` }, { status: 500 });
   }

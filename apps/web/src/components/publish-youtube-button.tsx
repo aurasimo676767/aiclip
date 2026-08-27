@@ -53,16 +53,6 @@ export function PublishYoutubeButton({
   }
 
   if (status === "COMPLETED" && youtubeUrl) {
-    if (youtubeCancelledAt) {
-      return (
-        <div className="space-y-0.5">
-          <a href={youtubeUrl} target="_blank" rel="noreferrer" className="inline-block text-xs font-medium text-zinc-400 hover:underline">
-            Programmazione annullata — video privato ↗
-          </a>
-        </div>
-      );
-    }
-
     const scheduledInFuture = youtubePublishAt && new Date(youtubePublishAt).getTime() > Date.now();
     return (
       <div className="space-y-1">
@@ -135,6 +125,9 @@ export function PublishYoutubeButton({
     return (
       <div className="space-y-1">
         {status === "FAILED" && youtubeError && <p className="text-xs text-red-400">Pubblicazione fallita: {youtubeError}</p>}
+        {youtubeCancelledAt && !youtubeUrl && (
+          <p className="text-xs text-zinc-500">Programmazione precedente annullata (video eliminato da YouTube).</p>
+        )}
         <button
           onClick={() => setOpen(true)}
           className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:border-zinc-500"

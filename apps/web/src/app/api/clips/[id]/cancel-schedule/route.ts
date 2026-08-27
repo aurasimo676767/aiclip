@@ -4,10 +4,12 @@ import { getValidYoutubeAccessToken } from "@/lib/youtube-scan";
 
 /**
  * Annulla una pubblicazione YouTube GIÀ CARICATA (privata, in attesa che YouTube la renda
- * pubblica da sola a publish_at): il file è già su YouTube, quindi "annullare" significa
- * togliere la programmazione nativa di YouTube (status.privacyStatus="private" senza
- * publishAt annulla lo scheduled publish) — NON elimina il video, resta privato e riusabile
- * a mano da YouTube Studio se serve.
+ * pubblica da sola a publish_at): elimina DAVVERO il video da YouTube (videos.delete), non lo
+ * mette solo privato — un video privato "fantasma" può comunque penalizzare la visibilità di
+ * una futura riprogrammazione della stessa clip, mentre eliminandolo la riprogrammazione parte
+ * da zero con un upload nuovo. Il job resta COMPLETED (l'upload originale è davvero riuscito)
+ * ma con cancelled_at valorizzato e youtube_video_id/youtube_url azzerati: la clip torna così
+ * "pubblicabile" come se non fosse mai stata caricata.
  */
 export async function POST(_request: Request, { params }: { params: { id: string } }) {
   const supabase = await createSupabaseServerClient();
@@ -46,12 +48,13 @@ export async function POST(_request: Request, { params }: { params: { id: string
   try {
     const accessToken = await getValidYoutubeAccessToken(supabase, connection);
 
-    const res = await fetch("https://www.googleapis.com/youtube/v3/videos?part=status", {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ id: job.youtube_video_id, status: { privacyStatus: "private" } }),
-    });
-    if (!res.ok) {
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?id=${encodeURIComponent(job.youtube_video_id)}`,
+      { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    // 404 = il video non esiste più su YouTube (già eliminato a mano, o mai davvero caricato):
+    // va bene comunque, l'obiettivo (nessun video pendente su YouTube) è già raggiunto.
+    if (!res.ok && res.status !== 404) {
       const errBody = await res.json().catch(() => null);
       throw new Error(errBody?.error?.message ?? `YouTube ha rifiutato la richiesta (HTTP ${res.status})`);
     }
@@ -62,7 +65,7 @@ export async function POST(_request: Request, { params }: { params: { id: string
 
   const { error: updateError } = await supabase
     .from("youtube_publish_jobs")
-    .update({ cancelled_at: new Date().toISOString(), publish_at: null })
+    .update({ cancelled_at: new Date().toISOString(), publish_at: null, youtube_video_id: null, youtube_url: null })
     .eq("id", job.id);
   if (updateError) {
     return NextResponse.json({ error: `Aggiornamento fallito: ${updateError.message}` }, { status: 500 });
