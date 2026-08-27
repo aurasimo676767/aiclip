@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-const SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"];
+// youtube.upload basta per caricare, ma NON per modificare lo stato (privacy/programmazione)
+// di un video già caricato — videos.update con part=status richiede lo scope pieno "youtube"
+// (osservato in pratica: "Request had insufficient authentication scopes" sull'annullamento
+// programmazione, che chiama esattamente questo endpoint).
+const SCOPES = ["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.readonly"];
 
 /** Avvia il flusso OAuth Google: reindirizza l'utente alla schermata di consenso. */
 export async function GET(request: Request) {
