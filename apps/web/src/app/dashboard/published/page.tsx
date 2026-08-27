@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { PollingRefresher } from "@/components/polling-refresher";
+import { MarkYoutubeDeletedButton } from "@/components/mark-youtube-deleted-button";
 
 // Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
 // cachati anche col polling attivo.
@@ -76,9 +77,12 @@ export default async function PublishedPage() {
                   className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3"
                 >
                   <span className="min-w-0 break-words text-sm text-white">{title}</span>
-                  <span className="shrink-0 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-300">
-                    {new Date(job.publish_at!).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "short" })}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-300">
+                      {new Date(job.publish_at!).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "short" })}
+                    </span>
+                    <MarkYoutubeDeletedButton clipId={job.clip_id} />
+                  </div>
                 </li>
               );
             })}
@@ -111,11 +115,14 @@ export default async function PublishedPage() {
                         : ""}
                     </span>
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
-                    <span>{Math.round(duration)}s</span>
-                    <span>{formatCount(job.view_count)} visualizzazioni</span>
-                    <span>{formatCount(job.like_count)} like</span>
-                    <span>{formatCount(job.comment_count)} commenti</span>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
+                      <span>{Math.round(duration)}s</span>
+                      <span>{formatCount(job.view_count)} visualizzazioni</span>
+                      <span>{formatCount(job.like_count)} like</span>
+                      <span>{formatCount(job.comment_count)} commenti</span>
+                    </div>
+                    <MarkYoutubeDeletedButton clipId={job.clip_id} />
                   </div>
                 </li>
               );
