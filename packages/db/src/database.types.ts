@@ -34,6 +34,8 @@ export type YoutubePublishStatus = "PENDING" | "UPLOADING" | "COMPLETED" | "FAIL
 
 export type YoutubePrivacyStatus = "public" | "unlisted" | "private";
 
+export type VoiceoverJobStatus = "UPLOADING" | "PENDING" | "RENDERING" | "COMPLETED" | "FAILED";
+
 export interface Database {
   public: {
     Tables: {
@@ -533,6 +535,67 @@ export interface Database {
         };
         Relationships: [];
       };
+
+      voiceover_jobs: {
+        Row: {
+          id: string;
+          user_id: string;
+          title: string;
+          video_storage_path: string | null;
+          video_original_filename: string;
+          video_mime_type: string;
+          audio_storage_path: string | null;
+          audio_original_filename: string;
+          status: VoiceoverJobStatus;
+          output_video_path: string | null;
+          error_message: string | null;
+          claimed_by: string | null;
+          claimed_at: string | null;
+          attempts: number;
+          cancel_requested: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          title: string;
+          video_storage_path?: string | null;
+          video_original_filename: string;
+          video_mime_type: string;
+          audio_storage_path?: string | null;
+          audio_original_filename: string;
+          status?: VoiceoverJobStatus;
+          output_video_path?: string | null;
+          error_message?: string | null;
+          claimed_by?: string | null;
+          claimed_at?: string | null;
+          attempts?: number;
+          cancel_requested?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          title?: string;
+          video_storage_path?: string | null;
+          video_original_filename?: string;
+          video_mime_type?: string;
+          audio_storage_path?: string | null;
+          audio_original_filename?: string;
+          status?: VoiceoverJobStatus;
+          output_video_path?: string | null;
+          error_message?: string | null;
+          claimed_by?: string | null;
+          claimed_at?: string | null;
+          attempts?: number;
+          cancel_requested?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
 
     Views: Record<string, never>;
@@ -549,6 +612,10 @@ export interface Database {
       claim_next_publish_job: {
         Args: { p_worker_id: string; p_stale_seconds?: number; p_max_attempts?: number };
         Returns: Database["public"]["Tables"]["youtube_publish_jobs"]["Row"] | null;
+      };
+      claim_next_voiceover_job: {
+        Args: { p_worker_id: string; p_stale_seconds?: number; p_max_attempts?: number };
+        Returns: Database["public"]["Tables"]["voiceover_jobs"]["Row"] | null;
       };
     };
   };
@@ -598,3 +665,7 @@ export type FollowedChannelInsert = Database["public"]["Tables"]["followed_chann
 export type YoutubePublishJobRow = Database["public"]["Tables"]["youtube_publish_jobs"]["Row"];
 export type YoutubePublishJobInsert = Database["public"]["Tables"]["youtube_publish_jobs"]["Insert"];
 export type YoutubePublishJobUpdate = Database["public"]["Tables"]["youtube_publish_jobs"]["Update"];
+
+export type VoiceoverJobRow = Database["public"]["Tables"]["voiceover_jobs"]["Row"];
+export type VoiceoverJobInsert = Database["public"]["Tables"]["voiceover_jobs"]["Insert"];
+export type VoiceoverJobUpdate = Database["public"]["Tables"]["voiceover_jobs"]["Update"];

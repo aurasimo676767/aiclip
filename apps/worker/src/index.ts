@@ -4,9 +4,11 @@ import { WORKER_ID } from "./lib/worker-id.js";
 import { claimNextVideo } from "./queue/video-queue.js";
 import { claimNextRenderJob } from "./queue/render-queue.js";
 import { claimNextPublishJob } from "./queue/publish-queue.js";
+import { claimNextVoiceoverJob } from "./queue/voiceover-queue.js";
 import { processVideoJob } from "./pipeline/process-video-job.js";
 import { processRenderJob } from "./pipeline/process-render-job.js";
 import { processPublishJob } from "./pipeline/process-publish-job.js";
+import { processVoiceoverJob } from "./pipeline/process-voiceover-job.js";
 import { refreshYoutubeStats } from "./pipeline/refresh-youtube-stats.js";
 
 let shuttingDown = false;
@@ -66,6 +68,23 @@ async function publishQueueLoop(): Promise<void> {
   }
 }
 
+/** Loop di polling per la coda "voice over" (clip + audio caricati manualmente, nessuna AI). */
+async function voiceoverQueueLoop(): Promise<void> {
+  while (!shuttingDown) {
+    try {
+      const job = await claimNextVoiceoverJob();
+      if (job) {
+        logger.info("Voiceover job claimato", { jobId: job.id, workerId: WORKER_ID });
+        await processVoiceoverJob(job);
+        continue;
+      }
+    } catch (err) {
+      logger.error("Errore nel loop della coda voiceover", { error: err instanceof Error ? err.message : String(err) });
+    }
+    await sleep(env.QUEUE_POLL_INTERVAL_MS);
+  }
+}
+
 const STATS_REFRESH_INTERVAL_MS = 20 * 60 * 1000; // ogni 20 minuti: sweep periodico, non una coda — non serve più frequente
 
 /** Sweep periodico (non una coda): aggiorna views/like/commenti dei video già pubblicati. */
@@ -100,4 +119,4 @@ logger.info("ClipForge worker avviato", {
 const videoLoops = Array.from({ length: env.VIDEO_CONCURRENCY }, () => videoQueueLoop());
 const renderLoops = Array.from({ length: env.RENDER_CONCURRENCY }, () => renderQueueLoop());
 
-await Promise.all([...videoLoops, ...renderLoops, publishQueueLoop(), statsRefreshLoop()]);
+await Promise.all([...videoLoops, ...renderLoops, publishQueueLoop(), voiceoverQueueLoop(), statsRefreshLoop()]);
