@@ -40,9 +40,15 @@ const envSchema = z.object({
   // account autenticato per essere scaricati con yt-dlp, altrimenti falliscono sempre (anche
   // riprovando) con "Sign in to confirm your age". Se impostato, yt-dlp riusa i cookie di
   // sessione di un browser già loggato su YouTube SU QUESTA MACCHINA (es. "chrome", "edge",
-  // "firefox" — stesso valore accettato da yt-dlp per --cookies-from-browser). Chiudi il
-  // browser prima di lanciare il worker se yt-dlp segnala il profilo "in uso".
+  // "firefox" — stesso valore accettato da yt-dlp per --cookies-from-browser). Su Windows,
+  // Chrome può fallire con "Failed to decrypt with DPAPI" (bug noto legato alla nuova
+  // App-Bound Encryption di Chrome, yt-dlp/yt-dlp#10927) — Edge di solito non ne risente.
   YT_DLP_COOKIES_FROM_BROWSER: z.string().optional(),
+  // Alternativa più affidabile (bypassa del tutto il problema DPAPI sopra): percorso a un file
+  // cookies.txt esportato manualmente da un'estensione del browser (es. "Get cookies.txt
+  // LOCALLY") mentre si è loggati su YouTube. Se impostato, ha PRECEDENZA su
+  // YT_DLP_COOKIES_FROM_BROWSER.
+  YT_DLP_COOKIES_FILE: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

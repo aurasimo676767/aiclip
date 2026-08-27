@@ -32,8 +32,13 @@ export async function downloadYoutubeVideo(url: string, outputDir: string): Prom
     "--no-playlist",
     "--print-json",
     // Alcuni video (età limitata, o che richiedono comunque un account) falliscono SEMPRE
-    // senza autenticazione — vedi YT_DLP_COOKIES_FROM_BROWSER in env.ts.
-    ...(env.YT_DLP_COOKIES_FROM_BROWSER ? ["--cookies-from-browser", env.YT_DLP_COOKIES_FROM_BROWSER] : []),
+    // senza autenticazione — vedi YT_DLP_COOKIES_FILE / YT_DLP_COOKIES_FROM_BROWSER in env.ts.
+    // Il file ha precedenza: bypassa il problema di decrittazione DPAPI di Chrome su Windows.
+    ...(env.YT_DLP_COOKIES_FILE
+      ? ["--cookies", env.YT_DLP_COOKIES_FILE]
+      : env.YT_DLP_COOKIES_FROM_BROWSER
+        ? ["--cookies-from-browser", env.YT_DLP_COOKIES_FROM_BROWSER]
+        : []),
     "-o",
     outputPath,
     url,
