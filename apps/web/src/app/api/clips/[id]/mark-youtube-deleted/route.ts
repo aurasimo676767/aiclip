@@ -32,12 +32,14 @@ export async function POST(_request: Request, { params }: { params: { id: string
   if (job.cancelled_at) {
     return NextResponse.json({ error: "Questa pubblicazione è già segnata come eliminata" }, { status: 409 });
   }
-  if (job.status !== "COMPLETED" || !job.youtube_video_id) {
-    return NextResponse.json({ error: "Nessun video caricato su YouTube per questa clip" }, { status: 409 });
-  }
 
+  // Nessun controllo sullo status: l'utente qui sta dichiarando lo stato REALE su YouTube (che
+  // il sito non può verificare da solo), quindi vale anche per job rimasti bloccati su
+  // PENDING/UPLOADING (es. worker interrotto a metà upload — il video potrebbe comunque essere
+  // stato creato su YouTube prima del crash, anche se qui non abbiamo mai salvato il suo id) o
+  // finiti FAILED prima ancora di caricare nulla.
   const { data: connection } = await supabase.from("youtube_connections").select("*").eq("user_id", user.id).maybeSingle();
-  if (connection) {
+  if (connection && job.youtube_video_id) {
     try {
       const accessToken = await getValidYoutubeAccessToken(supabase, connection);
       const res = await fetch(
@@ -59,9 +61,25 @@ export async function POST(_request: Request, { params }: { params: { id: string
     }
   }
 
+  // Se il job è ancora PENDING/UPLOADING, claim_next_publish_job lo riprenderebbe in automatico
+  // dopo lo stale-timeout ignorando cancelled_at (quel controllo guarda solo lo status) — quindi
+  // lo portiamo a un stato terminale (FAILED) qui, altrimenti il worker ricaricherebbe la clip.
+  const isTerminal = job.status === "COMPLETED" || job.status === "FAILED";
   const { error: updateError } = await supabase
     .from("youtube_publish_jobs")
-    .update({ cancelled_at: new Date().toISOString(), publish_at: null, youtube_video_id: null, youtube_url: null })
+    .update({
+      cancelled_at: new Date().toISOString(),
+      publish_at: null,
+      youtube_video_id: null,
+      youtube_url: null,
+      ...(isTerminal
+        ? {}
+        : {
+            status: "FAILED" as const,
+            error_message: "Annullato manualmente dall'utente (video gestito/eliminato a mano su YouTube)",
+            completed_at: new Date().toISOString(),
+          }),
+    })
     .eq("id", job.id);
   if (updateError) {
     return NextResponse.json({ error: `Aggiornamento fallito: ${updateError.message}` }, { status: 500 });
