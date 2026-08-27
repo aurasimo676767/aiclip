@@ -67,7 +67,11 @@ const RANKING_TOOL_SCHEMA = {
             end: { type: "number" },
             duration: { type: "number" },
             hook: { type: "string" },
-            title: { type: "string", description: "Titolo breve e accattivante per lo Short, max ~80 caratteri." },
+            title: {
+              type: "string",
+              description:
+                "Titolo REALE di pubblicazione su YouTube Shorts, max ~80 caratteri — segui alla lettera la sezione 'Stile titoli' del prompt di sistema (maiuscolo su hook, punteggiatura doppia, vocali accentate con apostrofo, emoji coerenti, tono esagerato), non un titolo 'corretto'.",
+            },
             reason: { type: "string", description: "Perché questa clip funziona, in 1-2 frasi." },
             scores: {
               type: "object",
@@ -139,7 +143,7 @@ const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il pri
    - 55-74: discreto, ha potenziale ma non è memorabile.
    - Sotto 55: debole — se un candidato scende sistematicamente sotto 50 su più dimensioni, scartalo invece di includerlo con punteggi bassi.
    Differenzia davvero il candidato migliore dagli altri: se 5 clip diverse meritano tutte "80" su ogni dimensione, non stai valutando abbastanza a fondo — quasi sempre alcune si distinguono nettamente dalle altre.
-3. Scrivere un titolo breve accattivante e il motivo (reason) per cui la clip funziona — reason è un campo INTERNO, mostrato solo nella dashboard per capire la scelta, non finisce mai pubblicato.
+3. Scrivere un titolo (vedi "Stile titoli" sotto) e il motivo (reason) per cui la clip funziona — reason è un campo INTERNO, mostrato solo nella dashboard per capire la scelta, non finisce mai pubblicato.
 4. Scegliere un editing_style (dynamic, clean, high_energy, calm) e un template coerente tra PODCAST_DYNAMIC, PODCAST_CLEAN, STREAMER, STORYTELLING, MOTIVATIONAL.
 5. Generare una Edit Decision List (EDL) con eventi "zoom" (sui momenti di enfasi), "highlight_word" (sulle 2-5 parole chiave più importanti della clip), "speaker_switch" (se cambia chi parla) e opzionalmente "punch_in" su un climax. I timestamp degli eventi devono cadere DENTRO l'intervallo [start, end] della clip e sono relativi al video originale (stessa timeline del transcript), non relativi all'inizio della clip.
 6. Generare 5-8 hashtag pertinenti per la pubblicazione su YouTube Shorts (senza #, minuscolo, senza spazi: es. "podcast", "funnymoments", non "Funny Moments"). Mescola hashtag generici ad alto volume di ricerca (es. "shorts", "viral") con 2-3 specifici al contenuto della clip.
@@ -147,6 +151,28 @@ const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il pri
 8. Assegnare (opzionalmente) uno o più badge tra: "gotcha" (un'affermazione viene fatta e poi smentita/corretta in diretta — es. "a volte le aragoste perdono le zampe da sole" seguito da "questa l'hai inventata"/"gliele hai staccate tu": funziona perché crea un momento di giudizio/rivincita, non solo un fatto curioso), "cliffhanger" (la clip si chiude su una domanda aperta o una svolta non risolta), "controversial" (un'opinione netta e divisiva, il tipo di cosa che genera commenti "vero"/"falso"), "relatable" (una situazione/dolore quotidiano riconoscibile, non un fatto astratto), "high_energy" (reazione fisica/vocale molto marcata, non solo parlato normale). Un candidato può avere zero badge: è normale, NON è un difetto e non deve influenzare i punteggi al ribasso — i badge sono un segnale aggiuntivo per la dashboard, mai un filtro. Non forzare un badge se non calza davvero: meglio nessun badge che uno finto.
 
 Calibrazione: non premiare automaticamente contenuto "corretto ma piatto" (spiegazioni fluide, tono pacato, fatti ordinati) solo perché è ben espresso — su questo formato vince quasi sempre il momento di attrito reale (un gotcha, una reazione fisica forte, un'opinione netta), non la clip più "educata". Se stai esitando tra una clip pulita ma poco mordente e una più caotica/diretta che genera davvero una reazione, preferisci la seconda.
+
+Stile titoli (campo "title", è il titolo REALE con cui il video viene pubblicato su YouTube, non una didascalia): scrivi come scrivono davvero i canali italiani di reaction/streaming di successo, non come un editor "corretto". Pattern osservati su titoli reali ad alto engagement, replicali:
+- MAIUSCOLO sulle parole chiave/sul hook (non serve tutto il titolo in caps, ma quasi sempre la parte "urlata" lo è).
+- Punteggiatura aggressiva e spesso doppia: "?!", "!!", "..", "..?!" — non fermarti al singolo "?" o "." se il tono è esagerato.
+- Le vocali accentate maiuscole si scrivono con l'apostrofo, non con l'accento: "PIU'" non "PIÙ", "E'" non "È", "PERCHE'" non "PERCHÉ" — è la convenzione reale usata su YouTube Shorts italiani, non un errore da correggere.
+- Ellissi "..." per sospendere prima di una parola/frase a sorpresa, eventualmente con ":" in stile setup→punchline (es. "Lollo e la sua amica:…dislessia").
+- Se la clip si presta, usa il formato "POV:" o un rating tipo "da 1 a 10".
+- Includi il nome delle persone coinvolte quando è naturale dal contesto, spesso in caps.
+- Chiudi (opzionale) con 1-2 emoji coerenti col tono, mai decorativi a caso: 💀🥶 per shock/assurdo, 🤬 per rabbia, 🇮🇹 per un riferimento nazionale, ecc. Mai più di 2-3 emoji.
+- Tono assurdo/esagerato/controverso, mai educato, pacato o esplicativo — evita titoli che "riassumono" la clip.
+- NON aggiungere hashtag nel titolo (a differenza di alcuni esempi reali) — nella nostra pipeline vivono nel campo "hashtags" a parte, altrimenti si duplicano.
+- Max ~80 caratteri.
+
+Esempi reali (solo per stile/registro, non copiarli — i contenuti sono diversi):
+"POV: COME SI SVEGLIANO LE PERSONE?!🗿🥱"
+"NON SMETTE FINO A QUANDO NON SI ARRABBIA!!🫪"
+"NINNA e MATTI cosa COMBINATE..?!"
+"L'INFLUENCER PIU' ODIATO D'ITALIA?!🇮🇹🤬"
+"LA SFIDA RAP PIU' BELLA DI SEMPRE!!😂😱"
+"PRIMO BAGNO dell'ANNO FINITO MALE.."
+"QUANTO E' PAZZA DA 1 A 10?!💀🥶"
+"Lollo e la sua amica:…dislessia 😜😂"
 
 Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
