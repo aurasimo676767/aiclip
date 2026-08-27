@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getValidYoutubeAccessToken, filterExistingYoutubeVideoIds } from "@/lib/youtube-scan";
 
 const MIN_INTERVAL_MS = 2 * 60 * 60 * 1000; // 2h
 const MAX_INTERVAL_MS = 2.5 * 60 * 60 * 1000; // 2h30
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
   }
   const { clipIds } = parsed.data;
 
-  const { data: connection } = await supabase.from("youtube_connections").select("id").eq("user_id", user.id).maybeSingle();
+  const { data: connection } = await supabase.from("youtube_connections").select("*").eq("user_id", user.id).maybeSingle();
   if (!connection) {
     return NextResponse.json({ error: "Collega prima un account YouTube dalle Impostazioni" }, { status: 409 });
   }
@@ -72,26 +73,64 @@ export async function POST(request: Request) {
   // è stato eliminato da YouTube e la clip è di nuovo libera per una nuova programmazione.
   const { data: existingJobs, error: existingJobsError } = await supabase
     .from("youtube_publish_jobs")
-    .select("clip_id, status, publish_at")
+    .select("id, clip_id, status, publish_at, youtube_video_id")
     .in("clip_id", clipIds)
     .neq("status", "FAILED")
     .is("cancelled_at", null);
   if (existingJobsError) {
     return NextResponse.json({ error: `Lettura job esistenti fallita: ${existingJobsError.message}` }, { status: 500 });
   }
-  const alreadyPublishingClipIds = new Set((existingJobs ?? []).map((j) => j.clip_id));
 
   // Tutti gli slot futuri già programmati dall'utente (su QUALSIASI clip, non solo queste, e
   // RLS limita comunque alla riga dell'utente): i nuovi devono evitarli mantenendo un minimo di
   // spaziatura, ma senza saltare oltre finestre libere più vicine ad ora (vedi pickNextSlot).
   const { data: futureJobs } = await supabase
     .from("youtube_publish_jobs")
-    .select("publish_at")
+    .select("id, publish_at, youtube_video_id")
     .not("publish_at", "is", null)
     .gt("publish_at", new Date().toISOString())
     .order("publish_at", { ascending: true });
 
+  // Il sito non riceve nessun webhook da YouTube: se l'utente ha eliminato dei video a mano da
+  // YouTube Studio, questi job restano "fantasma" in DB e bloccherebbero per errore sia il
+  // riutilizzo della clip sia gli slot che in realtà sono di nuovo liberi. Verifichiamo quindi
+  // quali video esistono ancora prima di usarli come vincoli, e "guariamo" gli altri.
+  const candidateVideoIds = [
+    ...(existingJobs ?? []).map((j) => j.youtube_video_id),
+    ...(futureJobs ?? []).map((j) => j.youtube_video_id),
+  ].filter((id): id is string => Boolean(id));
+
+  let stillExistingVideoIds = new Set<string>(candidateVideoIds);
+  if (candidateVideoIds.length > 0) {
+    try {
+      const accessToken = await getValidYoutubeAccessToken(supabase, connection);
+      stillExistingVideoIds = await filterExistingYoutubeVideoIds([...new Set(candidateVideoIds)], accessToken);
+    } catch {
+      // Se la verifica su YouTube fallisce (token, rete, quota), non blocchiamo la programmazione:
+      // si ragiona sui dati DB così come sono, nel peggiore dei casi un job fantasma resta un vincolo.
+    }
+  }
+
+  const ghostJobIds = [
+    ...(existingJobs ?? []),
+    ...(futureJobs ?? []),
+  ]
+    .filter((j) => j.youtube_video_id && !stillExistingVideoIds.has(j.youtube_video_id))
+    .map((j) => j.id);
+  if (ghostJobIds.length > 0) {
+    await supabase
+      .from("youtube_publish_jobs")
+      .update({ cancelled_at: new Date().toISOString(), publish_at: null, youtube_video_id: null, youtube_url: null })
+      .in("id", [...new Set(ghostJobIds)]);
+  }
+  const ghostJobIdSet = new Set(ghostJobIds);
+
+  const alreadyPublishingClipIds = new Set(
+    (existingJobs ?? []).filter((j) => !ghostJobIdSet.has(j.id)).map((j) => j.clip_id),
+  );
+
   const existingSorted = (futureJobs ?? [])
+    .filter((j) => !ghostJobIdSet.has(j.id))
     .map((j) => new Date(j.publish_at!).getTime())
     .sort((a, b) => a - b);
 

@@ -172,3 +172,34 @@ export async function fetchVideoViewCounts(videoIds: string[], accessToken: stri
 
   return result;
 }
+
+/**
+ * Tra un elenco di ID video, ritorna solo quelli che esistono ANCORA su YouTube. Serve a
+ * "guarire" job di pubblicazione la cui riga in DB dice ancora "programmato"/"pubblicato" ma
+ * il video è stato eliminato a mano da YouTube Studio (il sito non riceve nessun webhook da
+ * YouTube per queste cancellazioni dirette, quindi altrimenti resterebbe disallineato per
+ * sempre — es. bloccando per errore la coda di auto-programmazione su slot in realtà liberi).
+ */
+export async function filterExistingYoutubeVideoIds(videoIds: string[], accessToken: string): Promise<Set<string>> {
+  const result = new Set<string>();
+  const CHUNK_SIZE = 50;
+
+  for (let i = 0; i < videoIds.length; i += CHUNK_SIZE) {
+    const chunk = videoIds.slice(i, i + CHUNK_SIZE);
+    if (chunk.length === 0) continue;
+
+    const params = new URLSearchParams({ part: "id", id: chunk.join(",") });
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const data = (await res.json()) as YoutubeVideosStatsResponse;
+    if (!res.ok) {
+      throw new Error("Verifica video su YouTube fallita");
+    }
+    for (const item of data.items ?? []) {
+      result.add(item.id);
+    }
+  }
+
+  return result;
+}
