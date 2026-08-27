@@ -108,11 +108,17 @@ export interface ChannelUploadVideo {
   videoId: string;
   title: string;
   publishedAt: string;
+  thumbnailUrl: string;
 }
 
 interface YoutubePlaylistItemsResponse {
   items?: Array<{
-    snippet?: { title?: string; publishedAt?: string; resourceId?: { videoId?: string } };
+    snippet?: {
+      title?: string;
+      publishedAt?: string;
+      resourceId?: { videoId?: string };
+      thumbnails?: { medium?: { url?: string }; default?: { url?: string } };
+    };
   }>;
 }
 
@@ -132,6 +138,37 @@ export async function fetchLatestUploads(uploadsPlaylistId: string, accessToken:
       videoId: item.snippet?.resourceId?.videoId ?? "",
       title: item.snippet?.title ?? "",
       publishedAt: item.snippet?.publishedAt ?? "",
+      thumbnailUrl: item.snippet?.thumbnails?.medium?.url ?? item.snippet?.thumbnails?.default?.url ?? "",
     }))
     .filter((v) => v.videoId);
+}
+
+interface YoutubeVideosStatsResponse {
+  items?: Array<{ id: string; statistics?: { viewCount?: string } }>;
+}
+
+/** Conteggio visualizzazioni per un elenco di video (in blocchi da 50, limite dell'API). */
+export async function fetchVideoViewCounts(videoIds: string[], accessToken: string): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>();
+  const CHUNK_SIZE = 50;
+
+  for (let i = 0; i < videoIds.length; i += CHUNK_SIZE) {
+    const chunk = videoIds.slice(i, i + CHUNK_SIZE);
+    if (chunk.length === 0) continue;
+
+    const params = new URLSearchParams({ part: "statistics", id: chunk.join(",") });
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const data = (await res.json()) as YoutubeVideosStatsResponse;
+    if (!res.ok) {
+      throw new Error("Lettura statistiche video fallita");
+    }
+    for (const item of data.items ?? []) {
+      const raw = item.statistics?.viewCount;
+      result.set(item.id, raw ? Number(raw) : null);
+    }
+  }
+
+  return result;
 }
