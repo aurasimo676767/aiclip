@@ -36,6 +36,13 @@ const envSchema = z.object({
   // valore, quindi aumentarlo non rischia OOM sulla GPU — parallelizza solo le altre fasi
   // (download, ranking AI, scritture DB).
   VIDEO_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  // Opzionale: alcuni video YouTube (età limitata, "sign in to confirm...") richiedono un
+  // account autenticato per essere scaricati con yt-dlp, altrimenti falliscono sempre (anche
+  // riprovando) con "Sign in to confirm your age". Se impostato, yt-dlp riusa i cookie di
+  // sessione di un browser già loggato su YouTube SU QUESTA MACCHINA (es. "chrome", "edge",
+  // "firefox" — stesso valore accettato da yt-dlp per --cookies-from-browser). Chiudi il
+  // browser prima di lanciare il worker se yt-dlp segnala il profilo "in uso".
+  YT_DLP_COOKIES_FROM_BROWSER: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

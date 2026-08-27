@@ -1,5 +1,6 @@
 import path from "node:path";
 import { runYtDlp } from "../lib/yt-dlp.js";
+import { env } from "../env.js";
 
 export interface YoutubeDownloadResult {
   filePath: string;
@@ -30,6 +31,9 @@ export async function downloadYoutubeVideo(url: string, outputDir: string): Prom
     "mp4",
     "--no-playlist",
     "--print-json",
+    // Alcuni video (età limitata, o che richiedono comunque un account) falliscono SEMPRE
+    // senza autenticazione — vedi YT_DLP_COOKIES_FROM_BROWSER in env.ts.
+    ...(env.YT_DLP_COOKIES_FROM_BROWSER ? ["--cookies-from-browser", env.YT_DLP_COOKIES_FROM_BROWSER] : []),
     "-o",
     outputPath,
     url,
