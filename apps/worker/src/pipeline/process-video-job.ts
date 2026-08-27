@@ -135,6 +135,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       model: env.ANTHROPIC_MODEL_STRONG,
       videoTitle,
       sourceVideoPath: localVideoPath,
+      userId: project.user_id,
     });
 
     await updateVideoStatus(video.id, "CLIP_SELECTION");

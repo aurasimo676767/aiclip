@@ -3,6 +3,7 @@ import { rankedClipsResponseSchema, TEMPLATE_NAMES, EDITING_STYLES, CLIP_BADGES 
 import { getAnthropicClient } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
 import { extractCandidateFrameJpegs } from "./frame-sampler.js";
+import { buildPerformanceFeedback } from "./performance-feedback.js";
 import { logger } from "../../lib/logger.js";
 import type Anthropic from "@anthropic-ai/sdk";
 
@@ -182,6 +183,8 @@ export interface RankingOptions {
   videoTitle: string;
   /** Video sorgente locale, usato per estrarre i frame mostrati all'AI insieme al transcript. */
   sourceVideoPath: string;
+  /** Usato per recuperare lo storico di performance reale (views/engagement) SOLO di questo utente. */
+  userId: string;
 }
 
 export async function rankAndBuildEdl(
@@ -192,7 +195,8 @@ export async function rankAndBuildEdl(
   if (candidates.length === 0) return [];
 
   const client = getAnthropicClient(options.apiKey);
-  const userContent = await buildUserContent(candidates, segments, options.videoTitle, options.sourceVideoPath);
+  const performanceFeedback = await buildPerformanceFeedback(options.userId);
+  const userContent = await buildUserContent(candidates, segments, options.videoTitle, options.sourceVideoPath, performanceFeedback);
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: userContent }];
 
@@ -249,12 +253,20 @@ async function buildUserContent(
   segments: TranscriptSegment[],
   videoTitle: string,
   sourceVideoPath: string,
+  performanceFeedback: string | null,
 ): Promise<Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam>> {
   const CONTEXT_PADDING_SECONDS = 20;
 
   const content: Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> = [
     { type: "text", text: `Video: "${videoTitle}"` },
   ];
+
+  if (performanceFeedback) {
+    content.push({
+      type: "text",
+      text: `### Performance storiche REALI del canale (usa questi dati per calibrare le scelte — sono più affidabili di qualsiasi stima, riflettono cosa funziona DAVVERO con questo pubblico specifico)\n${performanceFeedback}`,
+    });
+  }
 
   for (let index = 0; index < candidates.length; index++) {
     const candidate = candidates[index]!;
