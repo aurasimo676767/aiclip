@@ -10,6 +10,7 @@ export function VideoFeed() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [showImported, setShowImported] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -48,10 +49,13 @@ export function VideoFeed() {
     }
   }
 
+  const newVideos = videos?.filter((v) => !v.alreadyImported) ?? [];
+  const importedVideos = videos?.filter((v) => v.alreadyImported) ?? [];
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-600">{videos ? `${videos.length} video` : ""}</p>
+        <p className="text-xs text-zinc-600">{videos ? `${newVideos.length} nuovi` : ""}</p>
         <button
           onClick={load}
           disabled={loading}
@@ -70,35 +74,73 @@ export function VideoFeed() {
           Nessun video trovato per i canali che segui.
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {videos?.map((video) => (
-            <div key={video.videoId} className="flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40">
-              <div className="aspect-video w-full bg-zinc-950">
-                {video.thumbnailUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={video.thumbnailUrl} alt={video.title} className="h-full w-full object-cover" />
-                )}
-              </div>
-              <div className="flex flex-1 flex-col gap-2 p-3">
-                <h3 className="line-clamp-2 text-sm font-medium text-white">{video.title}</h3>
-                <p className="text-xs text-zinc-500">{video.channelTitle}</p>
-                <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-                  <span className="text-xs text-zinc-500">
-                    {formatViewCount(video.viewCount)} • {formatRelativeTime(video.publishedAt)}
-                  </span>
-                  <button
-                    onClick={() => handleGenerate(video)}
-                    disabled={generatingId === video.videoId || video.alreadyImported}
-                    className="shrink-0 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-brand-600 disabled:opacity-50"
-                  >
-                    {video.alreadyImported ? "Già generato" : generatingId === video.videoId ? "Genero..." : "Genera"}
-                  </button>
-                </div>
-              </div>
+        <>
+          {newVideos.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-800 p-12 text-center text-sm text-zinc-500">
+              Nessun video nuovo — li hai già generati tutti.
             </div>
-          ))}
-        </div>
+          ) : (
+            <VideoGrid videos={newVideos} generatingId={generatingId} onGenerate={handleGenerate} />
+          )}
+
+          {importedVideos.length > 0 && (
+            <div className="border-t border-zinc-800 pt-4">
+              <button
+                onClick={() => setShowImported((prev) => !prev)}
+                className="text-xs font-medium text-zinc-500 hover:text-zinc-300"
+              >
+                {showImported ? "▾" : "▸"} Già generati ({importedVideos.length})
+              </button>
+              {showImported && (
+                <div className="mt-3">
+                  <VideoGrid videos={importedVideos} generatingId={generatingId} onGenerate={handleGenerate} />
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+function VideoGrid({
+  videos,
+  generatingId,
+  onGenerate,
+}: {
+  videos: FeedVideo[];
+  generatingId: string | null;
+  onGenerate: (video: FeedVideo) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {videos.map((video) => (
+        <div key={video.videoId} className="flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40">
+          <div className="aspect-video w-full bg-zinc-950">
+            {video.thumbnailUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={video.thumbnailUrl} alt={video.title} className="h-full w-full object-cover" />
+            )}
+          </div>
+          <div className="flex flex-1 flex-col gap-2 p-3">
+            <h3 className="line-clamp-2 text-sm font-medium text-white">{video.title}</h3>
+            <p className="text-xs text-zinc-500">{video.channelTitle}</p>
+            <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+              <span className="text-xs text-zinc-500">
+                {formatViewCount(video.viewCount)} • {formatRelativeTime(video.publishedAt)}
+              </span>
+              <button
+                onClick={() => onGenerate(video)}
+                disabled={generatingId === video.videoId || video.alreadyImported}
+                className="shrink-0 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-brand-600 disabled:opacity-50"
+              >
+                {video.alreadyImported ? "Già generato" : generatingId === video.videoId ? "Genero..." : "Genera"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
