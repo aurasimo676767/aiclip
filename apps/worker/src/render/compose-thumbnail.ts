@@ -107,17 +107,21 @@ export async function composeThumbnail(params: ComposeThumbnailParams): Promise<
   const composite: sharp.OverlayOptions[] = [];
 
   if (params.faceCutoutPngPath) {
-    const faceMeta = await sharp(params.faceCutoutPngPath).metadata();
+    // Il PNG del ritaglio spesso ha un margine trasparente attorno alla persona (non tagliato a
+    // filo dal passaggio di rimozione sfondo) — .trim() lo toglie, altrimenti quel margine resta
+    // come spazio vuoto anche dopo aver ancorato l'immagine all'angolo del canvas.
+    const trimmedBuffer = await sharp(params.faceCutoutPngPath).trim().toBuffer();
+    const faceMeta = await sharp(trimmedBuffer).metadata();
     const faceWidth = faceMeta.width || 1;
     const faceHeight = faceMeta.height || 1;
     // Vincola sia altezza che larghezza massime (non solo l'altezza): un ritaglio molto largo
     // (es. inquadratura a mezzo busto) altrimenti finisce per dominare metà del canvas.
-    const maxHeight = CANVAS_HEIGHT * 0.85;
-    const maxWidth = CANVAS_WIDTH * 0.42;
+    const maxHeight = CANVAS_HEIGHT * 0.95;
+    const maxWidth = CANVAS_WIDTH * 0.5;
     const scale = Math.min(maxHeight / faceHeight, maxWidth / faceWidth);
     const targetWidth = Math.round(faceWidth * scale);
     const targetHeight = Math.round(faceHeight * scale);
-    const faceResized = await sharp(params.faceCutoutPngPath).resize(targetWidth, targetHeight, { fit: "contain" }).png().toBuffer();
+    const faceResized = await sharp(trimmedBuffer).resize(targetWidth, targetHeight, { fit: "contain" }).png().toBuffer();
     composite.push({ input: faceResized, left: CANVAS_WIDTH - targetWidth, top: CANVAS_HEIGHT - targetHeight });
   }
 
