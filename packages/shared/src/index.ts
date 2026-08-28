@@ -8,6 +8,7 @@ export * from "./types/plan.js";
 
 export * from "./constants/upload.js";
 export * from "./constants/pipeline.js";
+export * from "./constants/longform-title-style.js";
 
 export * from "./schemas/edl.schema.js";
 export * from "./schemas/clip-candidates.schema.js";

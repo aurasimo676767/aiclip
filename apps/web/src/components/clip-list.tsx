@@ -45,6 +45,7 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
   const [error, setError] = useState<string | null>(null);
   const [retryingClipId, setRetryingClipId] = useState<string | null>(null);
   const [cancellingClipId, setCancellingClipId] = useState<string | null>(null);
+  const [regeneratingTitleClipId, setRegeneratingTitleClipId] = useState<string | null>(null);
   const [selectedForSchedule, setSelectedForSchedule] = useState<Set<string>>(new Set());
   const [submittingSchedule, setSubmittingSchedule] = useState(false);
   const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
@@ -161,6 +162,21 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
     }
   }
 
+  async function regenerateTitle(clipId: string) {
+    setRegeneratingTitleClipId(clipId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/clips/${clipId}/regenerate-title`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Rigenerazione fallita");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore imprevisto");
+    } finally {
+      setRegeneratingTitleClipId(null);
+    }
+  }
+
   async function loadPreview(clipId: string) {
     setPreviewLoading(clipId);
     setError(null);
@@ -252,6 +268,15 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                       <StatusBadge status={clip.status} />
                     </div>
                   </div>
+                  {clip.format === "longform" && (
+                    <button
+                      onClick={() => regenerateTitle(clip.id)}
+                      disabled={regeneratingTitleClipId === clip.id}
+                      className="text-xs text-zinc-500 underline decoration-dotted hover:text-zinc-300 disabled:opacity-50"
+                    >
+                      {regeneratingTitleClipId === clip.id ? "Rigenero titolo..." : "Rigenera titolo"}
+                    </button>
+                  )}
                   <p className="text-sm text-zinc-400">
                     {Math.round(clip.duration)}s — Hook: &ldquo;{clip.hook}&rdquo;
                   </p>
