@@ -6,6 +6,10 @@ const bodySchema = z.object({
   url: z.string().trim().url("URL non valido"),
   title: z.string().trim().min(1).max(300),
   streamerName: z.string().trim().min(1).max(200),
+  // Handle esatto del canale (es. "tumblurr", da followed_twitch_channels.login) — usato per
+  // costruire il link corretto nel preset di descrizione di pubblicazione, non solo il nome
+  // visualizzato che può differire per maiuscole/spazi.
+  streamerLogin: z.string().trim().min(1).max(200).optional(),
 });
 
 /**
@@ -29,7 +33,7 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Payload non valido" }, { status: 400 });
   }
-  const { url, title, streamerName } = parsed.data;
+  const { url, title, streamerName, streamerLogin } = parsed.data;
 
   const { data: project, error: projectError } = await supabase
     .from("projects")
@@ -45,6 +49,7 @@ export async function POST(request: Request) {
     original_filename: title,
     source_url: url,
     streamer_name: streamerName,
+    streamer_login: streamerLogin ?? null,
     status: "UPLOADED",
   });
   if (videoError) {

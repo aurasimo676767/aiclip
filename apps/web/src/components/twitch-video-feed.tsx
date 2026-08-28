@@ -38,7 +38,7 @@ export function TwitchVideoFeed() {
       const res = await fetch("/api/projects/twitch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: video.vodUrl, title: video.title, streamerName: video.streamerName }),
+        body: JSON.stringify({ url: video.vodUrl, title: video.title, streamerName: video.streamerName, streamerLogin: video.streamerLogin }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Creazione progetto fallita");

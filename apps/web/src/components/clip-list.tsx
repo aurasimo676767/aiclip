@@ -18,6 +18,8 @@ export interface ClipViewModel {
   errorMessage: string | null;
   hashtags: string[];
   caption: string;
+  /** Descrizione precompilata nel form di pubblicazione: per il long-form è un preset fisso di crediti allo streamer (non il riassunto IA di `caption`). */
+  publishDescription: string;
   youtubePublishStatus: string | null;
   youtubeUrl: string | null;
   youtubeError: string | null;
@@ -362,7 +364,7 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                           <PublishYoutubeButton
                             clipId={clip.id}
                             defaultTitle={clip.title}
-                            defaultDescription={clip.caption}
+                            defaultDescription={clip.publishDescription}
                             defaultHashtags={clip.hashtags}
                             status={clip.youtubePublishStatus}
                             youtubeUrl={clip.youtubeUrl}

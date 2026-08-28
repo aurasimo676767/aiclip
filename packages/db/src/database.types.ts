@@ -132,6 +132,7 @@ export interface Database {
           attempts: number;
           cancel_requested: boolean;
           streamer_name: string | null;
+          streamer_login: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -151,6 +152,7 @@ export interface Database {
           attempts?: number;
           cancel_requested?: boolean;
           streamer_name?: string | null;
+          streamer_login?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -170,6 +172,7 @@ export interface Database {
           attempts?: number;
           cancel_requested?: boolean;
           streamer_name?: string | null;
+          streamer_login?: string | null;
           created_at?: string;
           updated_at?: string;
         };

@@ -11,6 +11,19 @@ export interface ProjectDetail {
 }
 
 /**
+ * Preset di descrizione per la pubblicazione dei video long-form: solo crediti allo streamer
+ * originale, niente riassunto "rappresentativo" del contenuto (quello lo scriveva l'IA in
+ * clip.caption, ma su richiesta non è più il default del form di pubblicazione).
+ */
+function buildLongformDescriptionPreset(streamerName: string | null, streamerLogin: string | null): string {
+  if (!streamerName) return "";
+  const twitchLine = streamerLogin
+    ? `Guarda le live intere su Twitch: https://www.twitch.tv/${streamerLogin}`
+    : `Guarda le live intere sul canale Twitch di ${streamerName}`;
+  return `Live originale di ${streamerName}.\n${twitchLine}`;
+}
+
+/**
  * Carica progetto + video + clip (con view model completo, join sui job di pubblicazione
  * YouTube) per uno o più progetti in batch — usato sia dalla pagina di un singolo progetto
  * sia dalla vista "a colonne" di più progetti insieme (vedi dashboard/batch), evitando di
@@ -22,7 +35,10 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
 
   const [{ data: projects }, { data: videos }, { data: clipsRaw }] = await Promise.all([
     supabase.from("projects").select("id, title, status, error_message, source_type").in("id", projectIds),
-    supabase.from("videos").select("project_id, original_filename, duration_seconds, error_message").in("project_id", projectIds),
+    supabase
+      .from("videos")
+      .select("project_id, original_filename, duration_seconds, error_message, streamer_name, streamer_login")
+      .in("project_id", projectIds),
     supabase
       .from("clips")
       .select("id, project_id, title, hook, reason, duration, scores, status, error_message, hashtags, caption, badges, format")
@@ -57,17 +73,22 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
   }
 
   const videoByProject = new Map<string, ProjectDetail["video"]>();
+  const streamerByProject = new Map<string, { name: string | null; login: string | null }>();
   for (const v of videos ?? []) {
     videoByProject.set(v.project_id, {
       original_filename: v.original_filename,
       duration_seconds: v.duration_seconds,
       error_message: v.error_message,
     });
+    streamerByProject.set(v.project_id, { name: v.streamer_name, login: v.streamer_login });
   }
 
   const clipsByProject = new Map<string, ClipViewModel[]>();
   for (const c of clipsRaw ?? []) {
     const publish = latestPublishByClip.get(c.id);
+    const streamer = streamerByProject.get(c.project_id);
+    const publishDescription =
+      c.format === "longform" ? buildLongformDescriptionPreset(streamer?.name ?? null, streamer?.login ?? null) : (c.caption ?? "");
     const clip: ClipViewModel = {
       id: c.id,
       title: c.title,
@@ -79,6 +100,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       errorMessage: c.error_message,
       hashtags: (c.hashtags as string[] | null) ?? [],
       caption: c.caption ?? "",
+      publishDescription,
       badges: (c.badges as ClipBadge[] | null) ?? [],
       format: c.format,
       youtubePublishStatus: publish?.status ?? null,

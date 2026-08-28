@@ -10,6 +10,7 @@ export interface TwitchFeedVideo {
   title: string;
   thumbnailUrl: string;
   streamerName: string;
+  streamerLogin: string;
   createdAt: string;
   durationSeconds: number;
   alreadyImported: boolean;
@@ -45,7 +46,7 @@ export async function GET() {
       channels.map(async (channel) => {
         try {
           const vods = await fetchLatestVods(channel.twitch_user_id, VODS_PER_CHANNEL);
-          return vods.map((v) => ({ ...v, streamerName: channel.display_name }));
+          return vods.map((v) => ({ ...v, streamerName: channel.display_name, streamerLogin: channel.login }));
         } catch {
           return []; // un canale che fallisce non deve far fallire l'intero feed
         }
@@ -60,6 +61,7 @@ export async function GET() {
         title: v.title,
         thumbnailUrl: v.thumbnailUrl,
         streamerName: v.streamerName,
+        streamerLogin: v.streamerLogin,
         createdAt: v.createdAt,
         durationSeconds: v.durationSeconds,
         alreadyImported: existingUrls.has(v.url),
