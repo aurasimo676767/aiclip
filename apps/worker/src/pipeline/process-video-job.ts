@@ -73,52 +73,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     // download che su un VOD lungo può durare ore — altrimenti lo scopriremmo solo alla fine.
     await transcriptionProvider.checkReady?.();
 
-    let localVideoPath: string;
-    let videoTitle = video.original_filename;
-
-    if (video.storage_path) {
-      // Percorso "upload file": il client ha già caricato il video su Storage.
-      await updateVideoStatus(video.id, "EXTRACTING_AUDIO");
-      localVideoPath = path.join(jobDir, `source${path.extname(video.storage_path)}`);
-      await storageProvider.downloadToFile(video.storage_path, localVideoPath);
-    } else if (video.source_url) {
-      // Percorso "URL esterno" (YouTube o VOD Twitch, yt-dlp supporta entrambi senza distinzioni
-      // di codice): il worker scarica il video e lo carica su Storage lui stesso, così il resto
-      // della pipeline (estrazione audio, render) resta identico indipendentemente dalla sorgente.
-      await updateVideoStatus(video.id, "DOWNLOADING");
-      const downloaded = await downloadYoutubeVideo(video.source_url, jobDir);
-      localVideoPath = downloaded.filePath;
-      videoTitle = downloaded.title;
-
-      const storagePath = `videos/${project.user_id}/${video.id}/source.mp4`;
-      await storageProvider.uploadFile(localVideoPath, storagePath, "video/mp4");
-      const stat = await fsp.stat(localVideoPath);
-
-      const { error: videoUpdateError } = await supabase
-        .from("videos")
-        .update({
-          storage_path: storagePath,
-          size_bytes: stat.size,
-          mime_type: "video/mp4",
-          original_filename: downloaded.title,
-        })
-        .eq("id", video.id);
-      if (videoUpdateError) {
-        throw new Error(`Aggiornamento video (import YouTube) fallito: ${videoUpdateError.message}`);
-      }
-
-      const { error: projectUpdateError } = await supabase
-        .from("projects")
-        .update({ title: downloaded.title })
-        .eq("id", video.project_id);
-      if (projectUpdateError) {
-        logger.warn("Aggiornamento titolo progetto fallito", { error: projectUpdateError.message });
-      }
-
-      await updateVideoStatus(video.id, "EXTRACTING_AUDIO");
-    } else {
-      throw new Error("Il video non ha né uno storage_path né un source_url: impossibile procedere");
-    }
+    const isLongform = project.source_type === "twitch_vod";
 
     // Riusa un transcript già salvato per questo video (es. una rigenerazione manuale delle clip
     // dopo aver aggiustato un prompt, o un retry dopo che la trascrizione era già andata a buon
@@ -126,9 +81,65 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     // fase più lenta dopo il download, non ha senso ripeterla se il risultato è già valido.
     const { data: existingTranscriptRow } = await supabase.from("transcripts").select("*").eq("video_id", video.id).maybeSingle();
 
+    // Il file video locale serve per: estrarlo se manca il transcript (qualunque formato), o per
+    // i frame campionati dal ranking Shorts (sempre, anche con transcript riusato). Il ranking
+    // long-form invece non guarda mai il video, solo il transcript — se lo riusiamo, per il
+    // long-form si può saltare anche il download (che per un VOD di ore, anche solo da R2 a
+    // locale, non è gratis: minuti di rete + I/O su disco per niente).
+    const needsLocalVideoFile = !existingTranscriptRow || !isLongform;
+
+    let localVideoPath: string | null = null;
+    let videoTitle = video.original_filename;
+
+    if (needsLocalVideoFile) {
+      if (video.storage_path) {
+        // Percorso "upload file" (o video già scaricato in un tentativo precedente).
+        await updateVideoStatus(video.id, "EXTRACTING_AUDIO");
+        localVideoPath = path.join(jobDir, `source${path.extname(video.storage_path)}`);
+        await storageProvider.downloadToFile(video.storage_path, localVideoPath);
+      } else if (video.source_url) {
+        // Percorso "URL esterno" (YouTube o VOD Twitch, yt-dlp supporta entrambi senza distinzioni
+        // di codice): il worker scarica il video e lo carica su Storage lui stesso, così il resto
+        // della pipeline (estrazione audio, render) resta identico indipendentemente dalla sorgente.
+        await updateVideoStatus(video.id, "DOWNLOADING");
+        const downloaded = await downloadYoutubeVideo(video.source_url, jobDir);
+        localVideoPath = downloaded.filePath;
+        videoTitle = downloaded.title;
+
+        const storagePath = `videos/${project.user_id}/${video.id}/source.mp4`;
+        await storageProvider.uploadFile(localVideoPath, storagePath, "video/mp4");
+        const stat = await fsp.stat(localVideoPath);
+
+        const { error: videoUpdateError } = await supabase
+          .from("videos")
+          .update({
+            storage_path: storagePath,
+            size_bytes: stat.size,
+            mime_type: "video/mp4",
+            original_filename: downloaded.title,
+          })
+          .eq("id", video.id);
+        if (videoUpdateError) {
+          throw new Error(`Aggiornamento video (import YouTube) fallito: ${videoUpdateError.message}`);
+        }
+
+        const { error: projectUpdateError } = await supabase
+          .from("projects")
+          .update({ title: downloaded.title })
+          .eq("id", video.project_id);
+        if (projectUpdateError) {
+          logger.warn("Aggiornamento titolo progetto fallito", { error: projectUpdateError.message });
+        }
+
+        await updateVideoStatus(video.id, "EXTRACTING_AUDIO");
+      } else {
+        throw new Error("Il video non ha né uno storage_path né un source_url: impossibile procedere");
+      }
+    }
+
     let transcript: { language: string; durationSeconds: number; fullText: string; segments: TranscriptSegment[]; provider: string };
     if (existingTranscriptRow) {
-      logger.info("Transcript già presente, salto estrazione audio e trascrizione", { videoId: video.id });
+      logger.info("Transcript già presente, salto estrazione audio e trascrizione", { videoId: video.id, skippedDownload: !needsLocalVideoFile });
       transcript = {
         language: existingTranscriptRow.language,
         durationSeconds: existingTranscriptRow.duration_seconds,
@@ -137,6 +148,9 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
         provider: existingTranscriptRow.provider,
       };
     } else {
+      if (!localVideoPath) {
+        throw new Error("localVideoPath mancante: percorso inatteso, il file andava scaricato prima di estrarne l'audio");
+      }
       const audioPath = await extractAudio(localVideoPath, jobDir);
       if (await cancelled()) return;
 
@@ -162,18 +176,25 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
 
     await updateVideoStatus(video.id, "ANALYZING", { duration_seconds: transcript.durationSeconds });
 
-    const isLongform = project.source_type === "twitch_vod";
-
-    const clipsToInsert = isLongform
-      ? await buildLongformClipsToInsert(video, transcript.segments, transcript.durationSeconds, videoTitle)
-      : await buildShortClipsToInsert(
-          video,
-          transcript.segments,
-          transcript.durationSeconds,
-          videoTitle,
-          project.user_id,
-          localVideoPath,
-        );
+    let clipsToInsert: ClipToInsert[];
+    if (isLongform) {
+      clipsToInsert = await buildLongformClipsToInsert(video, transcript.segments, transcript.durationSeconds, videoTitle);
+    } else {
+      // Per lo Short il file locale serve sempre (frame per il ranking) — needsLocalVideoFile è
+      // sempre true quando !isLongform, quindi localVideoPath è garantito qui, ma lo verifichiamo
+      // comunque invece di un cast silenzioso.
+      if (!localVideoPath) {
+        throw new Error("localVideoPath mancante per la pipeline Shorts: percorso inatteso");
+      }
+      clipsToInsert = await buildShortClipsToInsert(
+        video,
+        transcript.segments,
+        transcript.durationSeconds,
+        videoTitle,
+        project.user_id,
+        localVideoPath,
+      );
+    }
 
     if (await cancelled()) return;
     await updateVideoStatus(video.id, "CLIP_SELECTION");
