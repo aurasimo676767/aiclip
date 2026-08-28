@@ -7,6 +7,8 @@ import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider, faceTracker } from "../lib/providers.js";
 import { getOrDownloadSourceFile } from "../lib/source-download-cache.js";
+import { redownloadSourceVideo } from "../lib/redownload-source.js";
+import { maybeCleanupSourceAfterClips } from "../lib/cleanup-source.js";
 import { renderClip } from "../render/render-clip.js";
 import { renderLongformClip } from "../render/render-longform-clip.js";
 import { runFfmpeg } from "../lib/ffmpeg.js";
@@ -25,6 +27,9 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
   // "Aggiornamento status render_job fallito: TypeError: fetch failed" dopo un render andato
   // a buon fine).
   let clipMarkedCompleted = false;
+  // Serve anche nel finally per l'eventuale pulizia del sorgente (video_id) — dichiarata qui
+  // perché nel try è nel suo scope, non raggiungibile da finally.
+  let videoIdForCleanup: string | null = null;
 
   // true se l'utente ha annullato: render_jobs/clips sono già stati marcati FAILED dal
   // pulsante "Annulla" lato web, il worker deve solo smettere di lavorarci senza
@@ -43,18 +48,31 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
 
     const clipRow = await fetchClip(job.clip_id);
     const videoRow = await fetchVideo(clipRow.video_id);
-
-    if (!videoRow.storage_path) {
-      throw new Error("Il video sorgente non ha uno storage_path valido");
-    }
+    videoIdForCleanup = videoRow.id;
 
     if (await cancelled()) return;
 
-    // Cache condivisa per storage_path: se un altro render della stessa clip/video è già in
-    // corso a scaricarlo (RENDER_CONCURRENCY > 1), questa chiamata aspetta lo stesso download
-    // invece di duplicarlo — su un VOD long-form da 20+ GB, due download contemporanei hanno
-    // già mandato in crash il worker per esaurimento RAM (osservato in pratica).
-    const localSourcePath = await getOrDownloadSourceFile(storageProvider, videoRow.storage_path);
+    let localSourcePath: string;
+    if (videoRow.storage_path) {
+      // Cache condivisa per storage_path: se un altro render della stessa clip/video è già in
+      // corso a scaricarlo (RENDER_CONCURRENCY > 1), questa chiamata aspetta lo stesso download
+      // invece di duplicarlo — su un VOD long-form da 20+ GB, due download contemporanei hanno
+      // già mandato in crash il worker per esaurimento RAM (osservato in pratica).
+      localSourcePath = await getOrDownloadSourceFile(storageProvider, videoRow.storage_path);
+    } else {
+      // Sorgente ripulita da R2 (vedi cleanup-source.ts, scatta quando tutte le clip di un
+      // video erano terminali) ma serve di nuovo per questo render — la ripristiniamo dalla
+      // piattaforma originale invece di fallire.
+      const { data: project, error: projectError } = await supabase
+        .from("projects")
+        .select("user_id")
+        .eq("id", clipRow.project_id)
+        .single();
+      if (projectError || !project) {
+        throw new Error(`Progetto non trovato per il video ${videoRow.id}: impossibile riscaricare la sorgente ripulita`);
+      }
+      localSourcePath = await redownloadSourceVideo(videoRow, project.user_id, jobDir);
+    }
     if (await cancelled()) return;
 
     await updateRenderJobStatus(job.id, "RENDERING", { stage: "rendering", progress: 20 });
@@ -156,6 +174,19 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
     }
   } finally {
     await fsp.rm(jobDir, { recursive: true, force: true }).catch(() => undefined);
+
+    // Se questo render_job era l'ultimo lavoro pendente per il video (tutte le clip ormai
+    // terminali), il sorgente originale non serve più a breve — libera spazio da R2 e dalla
+    // cache locale. Girato SEMPRE (successo o fallimento): una clip fallita è comunque "finita"
+    // finché qualcuno non la riprova a mano (a quel punto il sorgente viene ri-scaricato, vedi sopra).
+    if (videoIdForCleanup) {
+      await maybeCleanupSourceAfterClips(videoIdForCleanup).catch((err) => {
+        logger.warn("Pulizia sorgente post-render fallita, non bloccante", {
+          videoId: videoIdForCleanup,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
   }
 }
 
