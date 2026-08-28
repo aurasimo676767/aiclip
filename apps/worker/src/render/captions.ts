@@ -153,11 +153,13 @@ function applyTextCase(text: string, uppercase: boolean): string {
   return uppercase ? text.toUpperCase() : text;
 }
 
-function escapeAssText(text: string): string {
+// Esportate: riusate anche fuori da questo file per generare ASS "minimali" non legati a
+// sottotitoli parlati (es. la card dei crediti del render long-form, vedi render-longform-clip.ts).
+export function escapeAssText(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/\{/g, "\\{").replace(/\}/g, "\\}").replace(/\n/g, "\\N");
 }
 
-function formatAssTime(seconds: number): string {
+export function formatAssTime(seconds: number): string {
   const clamped = Math.max(0, seconds);
   const h = Math.floor(clamped / 3600);
   const m = Math.floor((clamped % 3600) / 60);

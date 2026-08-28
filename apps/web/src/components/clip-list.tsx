@@ -24,6 +24,7 @@ export interface ClipViewModel {
   youtubePublishAt: string | null;
   youtubeCancelledAt: string | null;
   badges: ClipBadge[];
+  format: "short" | "longform";
 }
 
 const BADGE_LABELS: Record<ClipBadge, string> = {
@@ -297,7 +298,15 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                   {canPreview && (
                     <div className="pt-2">
                       {previewUrl ? (
-                        <video src={previewUrl} controls className="aspect-[9/16] w-48 rounded-lg bg-black" />
+                        <video
+                          src={previewUrl}
+                          controls
+                          className={
+                            clip.format === "longform"
+                              ? "aspect-video w-full max-w-md rounded-lg bg-black"
+                              : "aspect-[9/16] w-48 rounded-lg bg-black"
+                          }
+                        />
                       ) : (
                         <div className="flex gap-2">
                           <button

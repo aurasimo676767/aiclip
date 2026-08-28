@@ -7,6 +7,7 @@ import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider, faceTracker } from "../lib/providers.js";
 import { renderClip } from "../render/render-clip.js";
+import { renderLongformClip } from "../render/render-longform-clip.js";
 import { runFfmpeg } from "../lib/ffmpeg.js";
 import { updateRenderJobStatus } from "../queue/render-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
@@ -41,7 +42,6 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
 
     const clipRow = await fetchClip(job.clip_id);
     const videoRow = await fetchVideo(clipRow.video_id);
-    const transcriptRow = await fetchTranscript(clipRow.video_id);
 
     if (!videoRow.storage_path) {
       throw new Error("Il video sorgente non ha uno storage_path valido");
@@ -53,34 +53,49 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
     await storageProvider.downloadToFile(videoRow.storage_path, localSourcePath);
     if (await cancelled()) return;
 
-    const template = DEFAULT_TEMPLATES[(clipRow.template as TemplateName) in DEFAULT_TEMPLATES ? (clipRow.template as TemplateName) : "PODCAST_CLEAN"];
-    const rankedClip: RankedClip = {
-      start: clipRow.start_time,
-      end: clipRow.end_time,
-      duration: clipRow.duration,
-      hook: clipRow.hook,
-      title: clipRow.title,
-      reason: clipRow.reason,
-      scores: clipRow.scores as RankedClip["scores"],
-      editing_style: clipRow.editing_style as RankedClip["editing_style"],
-      edl: clipRow.edl as RankedClip["edl"],
-      hashtags: (clipRow.hashtags as string[] | null) ?? [],
-      caption: clipRow.caption,
-      badges: (clipRow.badges as RankedClip["badges"] | null) ?? [],
-    };
-
     await updateRenderJobStatus(job.id, "RENDERING", { stage: "rendering", progress: 20 });
 
     const outputPath = path.join(jobDir, "output.mp4");
-    await renderClip({
-      sourceVideoPath: localSourcePath,
-      clip: rankedClip,
-      template,
-      transcriptSegments: transcriptRow.segments as TranscriptSegment[],
-      faceTracker,
-      workDir: jobDir,
-      outputPath,
-    });
+
+    if (clipRow.format === "longform") {
+      // Niente crop/zoom/captions per il long-form: solo trim + card dei crediti allo streamer
+      // originale (vedi render-longform-clip.ts) — non serve né il transcript né il face tracker.
+      await renderLongformClip({
+        sourceVideoPath: localSourcePath,
+        start: clipRow.start_time,
+        end: clipRow.end_time,
+        streamerName: videoRow.streamer_name,
+        workDir: jobDir,
+        outputPath,
+      });
+    } else {
+      const transcriptRow = await fetchTranscript(clipRow.video_id);
+      const template = DEFAULT_TEMPLATES[(clipRow.template as TemplateName) in DEFAULT_TEMPLATES ? (clipRow.template as TemplateName) : "PODCAST_CLEAN"];
+      const rankedClip: RankedClip = {
+        start: clipRow.start_time,
+        end: clipRow.end_time,
+        duration: clipRow.duration,
+        hook: clipRow.hook,
+        title: clipRow.title,
+        reason: clipRow.reason,
+        scores: clipRow.scores as RankedClip["scores"],
+        editing_style: clipRow.editing_style as RankedClip["editing_style"],
+        edl: clipRow.edl as RankedClip["edl"],
+        hashtags: (clipRow.hashtags as string[] | null) ?? [],
+        caption: clipRow.caption,
+        badges: (clipRow.badges as RankedClip["badges"] | null) ?? [],
+      };
+
+      await renderClip({
+        sourceVideoPath: localSourcePath,
+        clip: rankedClip,
+        template,
+        transcriptSegments: transcriptRow.segments as TranscriptSegment[],
+        faceTracker,
+        workDir: jobDir,
+        outputPath,
+      });
+    }
 
     if (await cancelled()) return;
 

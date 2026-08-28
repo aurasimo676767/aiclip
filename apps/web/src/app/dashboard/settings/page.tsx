@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { YoutubeConnectionPanel } from "@/components/youtube-connection-panel";
 import { FollowedChannelsPanel } from "@/components/followed-channels-panel";
+import { FollowedTwitchChannelsPanel } from "@/components/followed-twitch-channels-panel";
 
 // Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
 // cachati anche col polling attivo.
@@ -21,6 +22,11 @@ export default async function SettingsPage({
   const { data: followedChannels } = await supabase
     .from("followed_channels")
     .select("id, channel_title")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: true });
+  const { data: followedTwitchChannels } = await supabase
+    .from("followed_twitch_channels")
+    .select("id, display_name")
     .eq("user_id", user.id)
     .order("created_at", { ascending: true });
 
@@ -74,6 +80,17 @@ export default async function SettingsPage({
           />
         </div>
       )}
+
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <h2 className="mb-1 text-sm font-semibold text-zinc-300">Canali Twitch seguiti (video long-form)</h2>
+        <p className="mb-3 text-xs text-zinc-500">
+          Nessuna connessione richiesta. I VOD recenti compaiono nella tab Feed — da lì scegli quali trasformare in video
+          long-form divisi per argomento.
+        </p>
+        <FollowedTwitchChannelsPanel
+          channels={(followedTwitchChannels ?? []).map((c) => ({ id: c.id, displayName: c.display_name }))}
+        />
+      </div>
 
       <p className="text-xs text-zinc-600">
         Gestione fatturazione e upgrade piano non ancora disponibili in questa fase.

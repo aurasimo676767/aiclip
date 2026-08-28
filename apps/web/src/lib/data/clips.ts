@@ -25,7 +25,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
     supabase.from("videos").select("project_id, original_filename, duration_seconds, error_message").in("project_id", projectIds),
     supabase
       .from("clips")
-      .select("id, project_id, title, hook, reason, duration, scores, status, error_message, hashtags, caption, badges")
+      .select("id, project_id, title, hook, reason, duration, scores, status, error_message, hashtags, caption, badges, format")
       .in("project_id", projectIds),
   ]);
 
@@ -80,6 +80,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       hashtags: (c.hashtags as string[] | null) ?? [],
       caption: c.caption ?? "",
       badges: (c.badges as ClipBadge[] | null) ?? [],
+      format: c.format,
       youtubePublishStatus: publish?.status ?? null,
       youtubeUrl: publish?.youtubeUrl ?? null,
       youtubeError: publish?.errorMessage ?? null,

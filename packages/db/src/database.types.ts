@@ -36,6 +36,11 @@ export type YoutubePrivacyStatus = "public" | "unlisted" | "private";
 
 export type VoiceoverJobStatus = "UPLOADING" | "PENDING" | "RENDERING" | "COMPLETED" | "FAILED";
 
+export type ProjectSourceType = "upload" | "youtube_url" | "twitch_vod";
+
+/** "short" = Short verticale 9:16 (comportamento storico), "longform" = video orizzontale da un VOD, un segmento per argomento. */
+export type ClipFormat = "short" | "longform";
+
 export interface Database {
   public: {
     Tables: {
@@ -79,7 +84,7 @@ export interface Database {
           user_id: string;
           title: string;
           status: ProjectStatus;
-          source_type: "upload" | "youtube_url";
+          source_type: ProjectSourceType;
           error_message: string | null;
           auto_generate_clips: boolean;
           created_at: string;
@@ -90,7 +95,7 @@ export interface Database {
           user_id: string;
           title: string;
           status?: ProjectStatus;
-          source_type: "upload" | "youtube_url";
+          source_type: ProjectSourceType;
           error_message?: string | null;
           auto_generate_clips?: boolean;
           created_at?: string;
@@ -101,7 +106,7 @@ export interface Database {
           user_id?: string;
           title?: string;
           status?: ProjectStatus;
-          source_type?: "upload" | "youtube_url";
+          source_type?: ProjectSourceType;
           error_message?: string | null;
           auto_generate_clips?: boolean;
           created_at?: string;
@@ -126,6 +131,7 @@ export interface Database {
           claimed_at: string | null;
           attempts: number;
           cancel_requested: boolean;
+          streamer_name: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -144,6 +150,7 @@ export interface Database {
           claimed_at?: string | null;
           attempts?: number;
           cancel_requested?: boolean;
+          streamer_name?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -162,6 +169,7 @@ export interface Database {
           claimed_at?: string | null;
           attempts?: number;
           cancel_requested?: boolean;
+          streamer_name?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -220,6 +228,7 @@ export interface Database {
           hashtags: unknown;
           caption: string;
           badges: unknown;
+          format: ClipFormat;
           status: ClipStatus;
           output_video_path: string | null;
           thumbnail_path: string | null;
@@ -244,6 +253,7 @@ export interface Database {
           hashtags?: unknown;
           caption?: string;
           badges?: unknown;
+          format?: ClipFormat;
           status?: ClipStatus;
           output_video_path?: string | null;
           thumbnail_path?: string | null;
@@ -268,6 +278,7 @@ export interface Database {
           hashtags?: unknown;
           caption?: string;
           badges?: unknown;
+          format?: ClipFormat;
           status?: ClipStatus;
           output_video_path?: string | null;
           thumbnail_path?: string | null;
@@ -421,6 +432,34 @@ export interface Database {
           channel_id?: string;
           channel_title?: string;
           uploads_playlist_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+
+      followed_twitch_channels: {
+        Row: {
+          id: string;
+          user_id: string;
+          twitch_user_id: string;
+          login: string;
+          display_name: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          twitch_user_id: string;
+          login: string;
+          display_name: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          twitch_user_id?: string;
+          login?: string;
+          display_name?: string;
           created_at?: string;
         };
         Relationships: [];
@@ -664,6 +703,9 @@ export type YoutubeConnectionUpdate = Database["public"]["Tables"]["youtube_conn
 
 export type FollowedChannelRow = Database["public"]["Tables"]["followed_channels"]["Row"];
 export type FollowedChannelInsert = Database["public"]["Tables"]["followed_channels"]["Insert"];
+
+export type FollowedTwitchChannelRow = Database["public"]["Tables"]["followed_twitch_channels"]["Row"];
+export type FollowedTwitchChannelInsert = Database["public"]["Tables"]["followed_twitch_channels"]["Insert"];
 
 export type YoutubePublishJobRow = Database["public"]["Tables"]["youtube_publish_jobs"]["Row"];
 export type YoutubePublishJobInsert = Database["public"]["Tables"]["youtube_publish_jobs"]["Insert"];
