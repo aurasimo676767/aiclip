@@ -13,7 +13,18 @@ const TOOL_SCHEMA = {
       backgroundFrameIndex: {
         type: "integer",
         description:
-          "Indice (0-based) del fotogramma migliore da usare come sfondo della copertina — il più interessante/leggibile/rappresentativo del contenuto. Evita fotogrammi sfocati, transizioni, schermate nere o di caricamento.",
+          "Indice (0-based) del fotogramma migliore da usare come sfondo della copertina — il più interessante/leggibile/rappresentativo del contenuto. Evita fotogrammi sfocati, transizioni, schermate nere o di caricamento. EVITA fortemente fotogrammi dove si vede l'interfaccia del browser/player (barra di avanzamento video, controlli play/pausa, sidebar della chat Twitch, testo di commenti, titoli/pulsanti dell'interfaccia) — se proprio tutti i fotogrammi ce l'hanno, scegli quello con MENO interfaccia visibile e usa contentCropBox per tagliarla via.",
+      },
+      contentCropBox: {
+        type: "object",
+        properties: {
+          x: { type: "number" },
+          y: { type: "number" },
+          width: { type: "number" },
+          height: { type: "number" },
+        },
+        description:
+          "Riquadro (frazioni 0-1) da ritagliare dal fotogramma di sfondo scelto per ESCLUDERE interfaccia/chat/controlli e tenere solo il contenuto vero (es. il video reagito, il gioco). Ometti se il fotogramma è già pulito (nessuna interfaccia visibile) e va usato per intero.",
       },
       faceFrameIndex: {
         type: "integer",
@@ -34,7 +45,7 @@ const TOOL_SCHEMA = {
       headlineText: {
         type: "string",
         description:
-          "5-10 parole ad effetto in italiano, stile titolo clickbait da copertina YouTube, che riassumono il momento più interessante di questo segmento. Verrà scritto in grande sulla copertina: breve e d'impatto, non una frase completa. Niente tutto maiuscolo (lo gestisce il rendering), niente punteggiatura finale.",
+          "Una frase COMPLETA e AUTONOMA di 6-12 parole, capibile da sola anche da chi non ha letto la descrizione — stile titolo clickbait da copertina YouTube (es. \"Scappa da 100 poliziotti e vince 500.000€\", non un frammento come \"e vince 500.000€\"). Deve avere soggetto sottinteso + un fatto/numero/azione concreta e sorprendente, non un dettaglio isolato fuori contesto. Verrà scritto in grande sulla copertina. Niente tutto maiuscolo (lo gestisce il rendering), niente punteggiatura finale.",
       },
     },
     required: ["backgroundFrameIndex", "faceFrameIndex", "headlineText"],
@@ -43,10 +54,10 @@ const TOOL_SCHEMA = {
 
 const SYSTEM_PROMPT = `Sei un editor esperto di copertine YouTube per video reaction/gameplay. Ti vengono mostrati alcuni fotogrammi campionati da un video già montato, numerati da 0 in ordine. Guardali e:
 
-1. Scegli l'indice del fotogramma migliore da usare come SFONDO della copertina.
+1. Scegli l'indice del fotogramma migliore da usare come SFONDO della copertina — MAI uno con interfaccia browser/player visibile (barra di avanzamento, controlli, sidebar chat, testo di commenti): se capita in tutti, scegli quello con meno interfaccia e ritagliala via con contentCropBox.
 2. Se in uno o più fotogrammi è visibile la webcam/faccia della persona che guarda/gioca, scegli quello con l'espressione più marcata; altrimenti -1.
 3. Se hai scelto un fotogramma con faccia, indica un riquadro approssimativo attorno a testa/spalle.
-4. Scrivi un titolo ad effetto (headlineText) che riassuma il momento più interessante.
+4. Scrivi una frase ad effetto COMPLETA e autonoma (headlineText) — deve reggere da sola, non un dettaglio isolato staccato dal contesto (vedi descrizione del campo per un esempio).
 
 Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
@@ -62,6 +73,7 @@ export interface ThumbnailSelectionOptions {
 
 export interface ThumbnailSelection {
   backgroundFrameIndex: number;
+  contentCropBox: { x: number; y: number; width: number; height: number } | null;
   faceFrameIndex: number | null;
   faceBoundingBox: { x: number; y: number; width: number; height: number } | null;
   headlineText: string;
@@ -99,6 +111,7 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
 
   const input = toolUseBlock.input as {
     backgroundFrameIndex?: number;
+    contentCropBox?: { x: number; y: number; width: number; height: number };
     faceFrameIndex?: number;
     faceBoundingBox?: { x: number; y: number; width: number; height: number };
     headlineText?: string;
@@ -113,6 +126,7 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
 
   return {
     backgroundFrameIndex: input.backgroundFrameIndex,
+    contentCropBox: input.contentCropBox ?? null,
     faceFrameIndex,
     faceBoundingBox: faceFrameIndex !== null && input.faceBoundingBox ? input.faceBoundingBox : null,
     headlineText: input.headlineText,

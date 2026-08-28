@@ -76,8 +76,27 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
 
     // 3) Ri-estrae A PIENA RISOLUZIONE solo i due fotogrammi scelti (i candidati sopra erano
     // volutamente piccoli, non adatti come sfondo finale).
-    const backgroundFullPath = path.join(jobDir, "background-full.jpg");
-    await grabFrame(localVideoPath, timestamps[selection.backgroundFrameIndex] ?? timestamps[0]!, backgroundFullPath);
+    const backgroundRawPath = path.join(jobDir, "background-raw.jpg");
+    await grabFrame(localVideoPath, timestamps[selection.backgroundFrameIndex] ?? timestamps[0]!, backgroundRawPath);
+
+    // Se l'IA ha indicato una zona da ritagliare (per escludere interfaccia/chat/controlli
+    // visibili nel fotogramma scelto), la applichiamo qui prima di usarlo come sfondo.
+    let backgroundFullPath = backgroundRawPath;
+    if (selection.contentCropBox) {
+      const meta = await sharp(backgroundRawPath).metadata();
+      const w = meta.width ?? 0;
+      const h = meta.height ?? 0;
+      const box = selection.contentCropBox;
+      const left = Math.max(0, Math.round(box.x * w));
+      const top = Math.max(0, Math.round(box.y * h));
+      const right = Math.min(w, Math.round((box.x + box.width) * w));
+      const bottom = Math.min(h, Math.round((box.y + box.height) * h));
+      if (w > 0 && h > 0 && right - left > 100 && bottom - top > 100) {
+        const croppedPath = path.join(jobDir, "background-full.jpg");
+        await sharp(backgroundRawPath).extract({ left, top, width: right - left, height: bottom - top }).toFile(croppedPath);
+        backgroundFullPath = croppedPath;
+      }
+    }
 
     let faceCutoutPath: string | null = null;
     if (selection.faceFrameIndex !== null && selection.faceBoundingBox) {
