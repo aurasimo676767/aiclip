@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { StatusBadge, isProcessingStatus } from "@/components/status-badge";
+import { ProcessingProgressBar } from "@/components/processing-progress-bar";
 import { PollingRefresher } from "@/components/polling-refresher";
 import { ClipList } from "@/components/clip-list";
 import { RetryProjectButton } from "@/components/retry-project-button";
@@ -97,8 +98,9 @@ export default async function BatchReviewPage({ searchParams }: { searchParams: 
                 <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 animate-pulse rounded-full bg-brand-400" />
-                    <p className="text-xs text-zinc-400">{statusMessage(project.status)}</p>
+                    <p className="text-xs text-zinc-400">{statusMessage(project.status, project.source_type)}</p>
                   </div>
+                  <ProcessingProgressBar status={project.status} />
                   <CancelProjectButton projectId={project.id} compact />
                 </div>
               )}

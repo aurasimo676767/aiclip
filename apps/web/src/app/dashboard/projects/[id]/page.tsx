@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { StatusBadge, isProcessingStatus } from "@/components/status-badge";
+import { ProcessingProgressBar } from "@/components/processing-progress-bar";
 import { PollingRefresher } from "@/components/polling-refresher";
 import { ClipList } from "@/components/clip-list";
 import { RetryProjectButton } from "@/components/retry-project-button";
@@ -54,12 +55,15 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
       )}
 
       {projectProcessing && clips.length === 0 && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-8">
-          <div className="flex items-center gap-3">
-            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-brand-400" />
-            <p className="text-zinc-300">{statusMessage(project.status)}</p>
+        <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-8">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-brand-400" />
+              <p className="text-zinc-300">{statusMessage(project.status, project.source_type)}</p>
+            </div>
+            <CancelProjectButton projectId={project.id} compact />
           </div>
-          <CancelProjectButton projectId={project.id} compact />
+          <ProcessingProgressBar status={project.status} />
         </div>
       )}
 
@@ -73,13 +77,13 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
   );
 }
 
-export function statusMessage(status: string): string {
+export function statusMessage(status: string, sourceType?: string): string {
   switch (status) {
     case "UPLOADING":
     case "UPLOADED":
       return "In attesa che il worker prenda in carico il video...";
     case "DOWNLOADING":
-      return "Download del video da YouTube in corso...";
+      return sourceType === "twitch_vod" ? "Download del VOD da Twitch in corso..." : "Download del video da YouTube in corso...";
     case "EXTRACTING_AUDIO":
       return "Estrazione audio in corso...";
     case "TRANSCRIBING":

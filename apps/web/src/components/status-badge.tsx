@@ -18,7 +18,7 @@ const STATUS_STYLES: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
   UPLOADING: "Caricamento",
   UPLOADED: "Caricato",
-  DOWNLOADING: "Download da YouTube",
+  DOWNLOADING: "Download in corso",
   EXTRACTING_AUDIO: "Estrazione audio",
   TRANSCRIBING: "Trascrizione",
   ANALYZING: "Analisi AI",

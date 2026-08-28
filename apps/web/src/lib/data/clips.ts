@@ -5,7 +5,7 @@ import type { ClipViewModel } from "@/components/clip-list";
 type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
 export interface ProjectDetail {
-  project: { id: string; title: string; status: string; error_message: string | null };
+  project: { id: string; title: string; status: string; error_message: string | null; source_type: string };
   video: { original_filename: string; duration_seconds: number | null; error_message: string | null } | null;
   clips: ClipViewModel[];
 }
@@ -21,7 +21,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
   if (projectIds.length === 0) return result;
 
   const [{ data: projects }, { data: videos }, { data: clipsRaw }] = await Promise.all([
-    supabase.from("projects").select("id, title, status, error_message").in("id", projectIds),
+    supabase.from("projects").select("id, title, status, error_message, source_type").in("id", projectIds),
     supabase.from("videos").select("project_id, original_filename, duration_seconds, error_message").in("project_id", projectIds),
     supabase
       .from("clips")
