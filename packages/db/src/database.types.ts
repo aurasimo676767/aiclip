@@ -648,6 +648,7 @@ export interface Database {
           id: string;
           clip_id: string;
           youtube_url: string;
+          reacted_video_url: string | null;
           status: ThumbnailJobStatus;
           result_storage_path: string | null;
           youtube_thumbnail_set: boolean;
@@ -663,6 +664,7 @@ export interface Database {
           id?: string;
           clip_id: string;
           youtube_url: string;
+          reacted_video_url?: string | null;
           status?: ThumbnailJobStatus;
           result_storage_path?: string | null;
           youtube_thumbnail_set?: boolean;
@@ -678,6 +680,7 @@ export interface Database {
           id?: string;
           clip_id?: string;
           youtube_url?: string;
+          reacted_video_url?: string | null;
           status?: ThumbnailJobStatus;
           result_storage_path?: string | null;
           youtube_thumbnail_set?: boolean;

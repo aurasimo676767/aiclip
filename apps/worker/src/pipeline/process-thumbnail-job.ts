@@ -9,13 +9,30 @@ import { storageProvider } from "../lib/providers.js";
 import { runFfmpeg, probeVideo } from "../lib/ffmpeg.js";
 import { selectThumbnailAssets } from "../providers/ai/thumbnail-selection.js";
 import { composeThumbnail } from "../render/compose-thumbnail.js";
-import { setYoutubeThumbnail, findYoutubeThumbnailUrlBySearch, type YoutubeCredentials } from "../providers/youtube/youtube-publisher.js";
+import {
+  setYoutubeThumbnail,
+  findYoutubeThumbnailUrlBySearch,
+  fetchBestYoutubeThumbnailUrl,
+  type YoutubeCredentials,
+} from "../providers/youtube/youtube-publisher.js";
 import { updateThumbnailJobStatus } from "../queue/thumbnail-queue.js";
 
 const CANDIDATE_FRAME_COUNT = 8;
 // Le card dei crediti (3s) all'inizio/fine del render long-form non sono contenuto vero — le
 // escludiamo dal campionamento dei fotogrammi candidati.
 const CREDITS_CARD_MARGIN_SECONDS = 4;
+
+/** Estrae l'id video da un URL YouTube in uno dei formati comuni (watch?v=, youtu.be/, shorts/). */
+function extractYoutubeVideoId(input: string): string | null {
+  const trimmed = input.trim();
+  const patterns = [/[?&]v=([a-zA-Z0-9_-]{11})/, /youtu\.be\/([a-zA-Z0-9_-]{11})/, /\/shorts\/([a-zA-Z0-9_-]{11})/];
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (match) return match[1]!;
+  }
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
+  return null;
+}
 
 export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `thumbnail-${job.id}`);
@@ -89,24 +106,32 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       frameJpegsBase64: lowResBase64,
     });
 
-    // 3) Sfondo: se è leggibile il video/canale reagito, proviamo a recuperare la SUA copertina
-    // ufficiale reale via ricerca YouTube (molto meglio di uno screenshot improvvisato del
-    // nostro stesso video, spesso con interfaccia/chat visibile) — altrimenti ripiega sul
-    // fotogramma scelto dall'IA, con l'eventuale ritaglio per togliere l'interfaccia.
+    // 3) Sfondo, in ordine di affidabilità:
+    //    a) link del video reagito incollato a mano dall'utente (il più affidabile: nessun
+    //       indovinello, presa diretta della copertina ufficiale alla massima risoluzione);
+    //    b) titolo/canale letto dall'IA sui fotogrammi + ricerca YouTube (best-effort);
+    //    c) fotogramma scelto dall'IA dal nostro stesso video, con eventuale ritaglio anti-interfaccia.
     let backgroundFullPath: string | null = null;
-    if (selection.reactedVideoQuery && credentials) {
+
+    const manualVideoId = job.reacted_video_url ? extractYoutubeVideoId(job.reacted_video_url) : null;
+    if (manualVideoId) {
+      try {
+        const thumbUrl = await fetchBestYoutubeThumbnailUrl(manualVideoId);
+        backgroundFullPath = await downloadImageIfOk(thumbUrl, path.join(jobDir, "background-real-thumb.jpg"));
+        if (backgroundFullPath) logger.info("Copertina reale presa dal link incollato dall'utente", { jobId: job.id, manualVideoId });
+      } catch (err) {
+        logger.warn("Download copertina dal link incollato fallito, provo il ripiego automatico", {
+          jobId: job.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    if (!backgroundFullPath && selection.reactedVideoQuery && credentials) {
       try {
         const thumbUrl = await findYoutubeThumbnailUrlBySearch(credentials, selection.reactedVideoQuery);
-        if (thumbUrl) {
-          const res = await fetch(thumbUrl);
-          if (res.ok) {
-            const buffer = Buffer.from(await res.arrayBuffer());
-            const realThumbPath = path.join(jobDir, "background-real-thumb.jpg");
-            await fsp.writeFile(realThumbPath, buffer);
-            backgroundFullPath = realThumbPath;
-            logger.info("Copertina reale del video reagito trovata via ricerca YouTube", { jobId: job.id, query: selection.reactedVideoQuery });
-          }
-        }
+        backgroundFullPath = await downloadImageIfOk(thumbUrl, path.join(jobDir, "background-real-thumb.jpg"));
+        if (backgroundFullPath) logger.info("Copertina reale trovata via ricerca YouTube automatica", { jobId: job.id, query: selection.reactedVideoQuery });
       } catch (err) {
         logger.warn("Ricerca copertina reale fallita, ripiego sul fotogramma estratto", {
           jobId: job.id,
@@ -193,6 +218,14 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
   } finally {
     await fsp.rm(jobDir, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+async function downloadImageIfOk(url: string | null, outputPath: string): Promise<string | null> {
+  if (!url) return null;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  await fsp.writeFile(outputPath, Buffer.from(await res.arrayBuffer()));
+  return outputPath;
 }
 
 function sampleTimestamps(start: number, end: number, count: number): number[] {

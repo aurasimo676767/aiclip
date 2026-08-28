@@ -124,10 +124,32 @@ export async function uploadVideoToYoutube(params: YoutubeUploadParams): Promise
 }
 
 /**
+ * Prova, in ordine di qualità decrescente, gli URL diretti della CDN di YouTube per la copertina
+ * di un video — `search.list`/`videos.list` a volte non riportano affatto la variante `maxres`
+ * anche quando esiste davvero (osservato in pratica: la vera copertina 1280x720 esisteva,
+ * l'endpoint di ricerca però non la elencava mai, solo una versione piccola). Interrogare
+ * direttamente la CDN con una HEAD è più affidabile.
+ */
+export async function fetchBestYoutubeThumbnailUrl(videoId: string): Promise<string | null> {
+  const candidates = ["maxresdefault", "sddefault", "hqdefault"];
+  for (const name of candidates) {
+    const url = `https://i.ytimg.com/vi/${videoId}/${name}.jpg`;
+    try {
+      const res = await fetch(url, { method: "HEAD" });
+      if (res.ok) return url;
+    } catch {
+      // prova la prossima variante
+    }
+  }
+  return null;
+}
+
+/**
  * Cerca su YouTube il video più probabile per una query (titolo/canale letti dall'IA su un
- * fotogramma del video reagito) e ritorna l'URL della SUA copertina ufficiale — invece di uno
- * screenshot improvvisato del nostro stesso video (spesso con interfaccia/chat visibile). Stesso
- * scope OAuth "youtube" già usato per pubblicare/impostare copertine, nessun permesso nuovo.
+ * fotogramma del video reagito) e ritorna l'URL della SUA copertina ufficiale alla massima
+ * risoluzione disponibile — invece di uno screenshot improvvisato del nostro stesso video
+ * (spesso con interfaccia/chat visibile). Stesso scope OAuth "youtube" già usato per
+ * pubblicare/impostare copertine, nessun permesso nuovo.
  */
 export async function findYoutubeThumbnailUrlBySearch(credentials: YoutubeCredentials, query: string): Promise<string | null> {
   const oauth2Client = new google.auth.OAuth2(credentials.clientId, credentials.clientSecret);
@@ -145,7 +167,7 @@ export async function findYoutubeThumbnailUrlBySearch(credentials: YoutubeCreden
     maxResults: 1,
   });
 
-  const thumbnails = response.data.items?.[0]?.snippet?.thumbnails;
-  const url = thumbnails?.maxres?.url ?? thumbnails?.high?.url ?? thumbnails?.standard?.url ?? thumbnails?.default?.url;
-  return url ?? null;
+  const videoId = response.data.items?.[0]?.id?.videoId;
+  if (!videoId) return null;
+  return fetchBestYoutubeThumbnailUrl(videoId);
 }

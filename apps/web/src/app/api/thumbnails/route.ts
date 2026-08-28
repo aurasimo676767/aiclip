@@ -4,6 +4,10 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const bodySchema = z.object({
   youtubeUrl: z.string().trim().min(1),
+  // Link del video ORIGINALE reagito, incollato a mano quando lo si conosce: scavalca del tutto
+  // il tentativo automatico (l'IA che legge titolo/canale dai fotogrammi + ricerca), che a volte
+  // non trova nulla o trova il video sbagliato.
+  reactedVideoUrl: z.string().trim().min(1).optional(),
 });
 
 /** Estrae l'id video da un URL YouTube in uno dei formati comuni (watch?v=, youtu.be/, shorts/). */
@@ -65,7 +69,11 @@ export async function POST(request: Request) {
 
   const { data: inserted, error: insertError } = await supabase
     .from("thumbnail_jobs")
-    .insert({ clip_id: publishJobTyped.clip_id, youtube_url: `https://www.youtube.com/watch?v=${videoId}` })
+    .insert({
+      clip_id: publishJobTyped.clip_id,
+      youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
+      reacted_video_url: parsed.data.reactedVideoUrl ?? null,
+    })
     .select("id")
     .single();
   if (insertError || !inserted) {
