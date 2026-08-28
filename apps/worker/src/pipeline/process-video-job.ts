@@ -68,11 +68,6 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
   try {
     if (await cancelled()) return;
 
-    // Controllo preventivo: se il provider di trascrizione lo implementa (es. il server Whisper
-    // locale), verifica in pochi secondi che sia raggiungibile PRIMA di impegnarsi in un
-    // download che su un VOD lungo può durare ore — altrimenti lo scopriremmo solo alla fine.
-    await transcriptionProvider.checkReady?.();
-
     const isLongform = project.source_type === "twitch_vod";
 
     // Riusa un transcript già salvato per questo video (es. una rigenerazione manuale delle clip
@@ -80,6 +75,16 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     // fine) invece di rifare estrazione audio + trascrizione da zero — su un VOD di ore è la
     // fase più lenta dopo il download, non ha senso ripeterla se il risultato è già valido.
     const { data: existingTranscriptRow } = await supabase.from("transcripts").select("*").eq("video_id", video.id).maybeSingle();
+
+    // Controllo preventivo: se il provider di trascrizione lo implementa (es. il server Whisper
+    // locale) e serve DAVVERO trascrivere (nessun transcript da riusare), verifica in pochi
+    // secondi che sia raggiungibile PRIMA di impegnarsi in un download che su un VOD lungo può
+    // durare ore — altrimenti lo scopriremmo solo alla fine. Se il transcript esiste già, il
+    // server Whisper non serve proprio: non ha senso far fallire una rigenerazione solo perché
+    // è spento, quando non verrà comunque usato.
+    if (!existingTranscriptRow) {
+      await transcriptionProvider.checkReady?.();
+    }
 
     // Il file video locale serve per: estrarlo se manca il transcript (qualunque formato), o per
     // i frame campionati dal ranking Shorts (sempre, anche con transcript riusato). Il ranking
