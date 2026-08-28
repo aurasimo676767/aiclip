@@ -6,6 +6,7 @@ import { env } from "../env.js";
 import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider, faceTracker } from "../lib/providers.js";
+import { getOrDownloadSourceFile } from "../lib/source-download-cache.js";
 import { renderClip } from "../render/render-clip.js";
 import { renderLongformClip } from "../render/render-longform-clip.js";
 import { runFfmpeg } from "../lib/ffmpeg.js";
@@ -49,8 +50,11 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
 
     if (await cancelled()) return;
 
-    const localSourcePath = path.join(jobDir, `source${path.extname(videoRow.storage_path)}`);
-    await storageProvider.downloadToFile(videoRow.storage_path, localSourcePath);
+    // Cache condivisa per storage_path: se un altro render della stessa clip/video è già in
+    // corso a scaricarlo (RENDER_CONCURRENCY > 1), questa chiamata aspetta lo stesso download
+    // invece di duplicarlo — su un VOD long-form da 20+ GB, due download contemporanei hanno
+    // già mandato in crash il worker per esaurimento RAM (osservato in pratica).
+    const localSourcePath = await getOrDownloadSourceFile(storageProvider, videoRow.storage_path);
     if (await cancelled()) return;
 
     await updateRenderJobStatus(job.id, "RENDERING", { stage: "rendering", progress: 20 });

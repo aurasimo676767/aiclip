@@ -384,7 +384,7 @@ async function buildLongformClipsToInsert(
 
   const rankedClips = await rankLongformClips(candidates, segments, {
     apiKey: env.ANTHROPIC_API_KEY,
-    model: env.ANTHROPIC_MODEL_STRONG,
+    model: env.ANTHROPIC_MODEL_LONGFORM,
     videoTitle,
     streamerName: video.streamer_name,
   });
