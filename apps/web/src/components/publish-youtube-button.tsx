@@ -1,27 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface PublishYoutubeButtonProps {
   clipId: string;
+  /** Long-form: niente pubblicazione automatica (manca ancora un modo per generare la miniatura) — carichiamo solo il video come privato e lasciamo che l'utente completi descrizione/miniatura/pubblicazione direttamente su YouTube Studio. */
+  isLongform: boolean;
   defaultTitle: string;
   defaultDescription: string;
   defaultHashtags: string[];
   status: string | null;
   youtubeUrl: string | null;
+  youtubeVideoId: string | null;
   youtubeError: string | null;
   youtubePublishAt: string | null;
   youtubeCancelledAt: string | null;
 }
 
+function studioEditUrl(videoId: string): string {
+  return `https://studio.youtube.com/video/${videoId}/edit`;
+}
+
 export function PublishYoutubeButton({
   clipId,
+  isLongform,
   defaultTitle,
   defaultDescription,
   defaultHashtags,
   status,
   youtubeUrl,
+  youtubeVideoId,
   youtubeError,
   youtubePublishAt,
   youtubeCancelledAt,
@@ -35,6 +44,21 @@ export function PublishYoutubeButton({
   const [submitting, setSubmitting] = useState<"now" | "scheduled" | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Per il long-form: apriamo una tab vuota SUBITO al click (dentro il gesture dell'utente, quindi
+  // non bloccata dal popup-blocker), e la reindirizziamo a YouTube Studio appena l'upload finisce —
+  // un vero window.open() automatico dopo il completamento verrebbe quasi certamente bloccato perché
+  // non avviene più dentro un click diretto.
+  const pendingStudioTabRef = useRef<Window | null>(null);
+
+  useEffect(() => {
+    if (!isLongform || status !== "COMPLETED" || !youtubeVideoId) return;
+    const tab = pendingStudioTabRef.current;
+    if (tab && !tab.closed) {
+      tab.location.href = studioEditUrl(youtubeVideoId);
+    }
+    pendingStudioTabRef.current = null;
+  }, [isLongform, status, youtubeVideoId]);
 
   async function cancelSchedule() {
     if (!window.confirm("Annullare la programmazione? Il video resterà caricato ma privato su YouTube.")) return;
@@ -50,6 +74,22 @@ export function PublishYoutubeButton({
     } finally {
       setCancelling(false);
     }
+  }
+
+  if (isLongform && status === "COMPLETED" && youtubeVideoId) {
+    return (
+      <div className="space-y-1">
+        <a
+          href={studioEditUrl(youtubeVideoId)}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-block text-xs font-medium text-emerald-400 hover:underline"
+        >
+          Caricato come privato — apri su YouTube Studio ↗
+        </a>
+        <p className="text-xs text-zinc-600">Da lì imposta descrizione, miniatura e pubblica quando vuoi.</p>
+      </div>
+    );
   }
 
   if (status === "COMPLETED" && youtubeUrl) {
@@ -80,12 +120,29 @@ export function PublishYoutubeButton({
   }
 
   if (status === "PENDING" || status === "UPLOADING") {
-    return <span className="text-xs text-amber-300">Pubblicazione su YouTube in corso...</span>;
+    return (
+      <span className="text-xs text-amber-300">
+        {isLongform ? "Caricamento su YouTube in corso..." : "Pubblicazione su YouTube in corso..."}
+      </span>
+    );
   }
 
   async function submit(mode: "now" | "scheduled") {
     setSubmitting(mode);
     setError(null);
+
+    // Va aperta QUI, sincrona dentro il click, altrimenti il browser la blocca come popup:
+    // la reindirizziamo a YouTube Studio più avanti, quando l'upload risulta completato (vedi useEffect sopra).
+    if (isLongform) {
+      const tab = window.open("about:blank", "_blank");
+      if (tab) {
+        tab.document.write(
+          "<title>Caricamento su YouTube…</title><body style=\"font-family:sans-serif;padding:2rem;color:#ccc;background:#111\">Caricamento del video su YouTube in corso… questa pagina si aprirà da sola su YouTube Studio appena pronta.</body>",
+        );
+        pendingStudioTabRef.current = tab;
+      }
+    }
+
     try {
       const tags = hashtags
         .split(/[\s,]+/)
@@ -94,12 +151,14 @@ export function PublishYoutubeButton({
 
       // <input type="datetime-local"> non ha timezone: interpretato come ora LOCALE del
       // browser da `new Date(...)`, poi convertito in UTC da toISOString() per l'API.
-      const publishAt = mode === "scheduled" && scheduledAt ? new Date(scheduledAt).toISOString() : null;
+      const publishAt = isLongform ? null : mode === "scheduled" && scheduledAt ? new Date(scheduledAt).toISOString() : null;
 
       const res = await fetch(`/api/clips/${clipId}/publish-youtube`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, description, tags, privacyStatus: "public", publishAt }),
+        // Per il long-form il server forza comunque privacyStatus a "private" (mai pubblico in
+        // automatico, manca ancora la miniatura) — lo mandiamo coerente anche da qui.
+        body: JSON.stringify({ title, description, tags, privacyStatus: isLongform ? "private" : "public", publishAt }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Pubblicazione fallita");
@@ -107,6 +166,8 @@ export function PublishYoutubeButton({
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore imprevisto");
+      pendingStudioTabRef.current?.close();
+      pendingStudioTabRef.current = null;
     } finally {
       setSubmitting(null);
     }
@@ -132,9 +193,47 @@ export function PublishYoutubeButton({
           onClick={() => setOpen(true)}
           className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:border-zinc-500"
         >
-          Pubblica su YouTube
+          {isLongform ? "Carica su YouTube" : "Pubblica su YouTube"}
         </button>
       </div>
+    );
+  }
+
+  if (isLongform) {
+    return (
+      <form onSubmit={handleSubmit} className="mt-2 max-w-md space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+        <div>
+          <label className="mb-1 block text-xs text-zinc-500">Titolo ({title.length}/100)</label>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value.slice(0, 100))}
+            className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-white outline-none focus:border-brand-400"
+          />
+        </div>
+        <p className="text-xs text-zinc-600">
+          Il video viene caricato su YouTube come privato — descrizione, miniatura e pubblicazione vera e propria le fai
+          direttamente su YouTube Studio, che si apre da solo appena il caricamento finisce.
+        </p>
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            type="submit"
+            disabled={submitting !== null}
+            className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+          >
+            {submitting ? "Caricamento..." : "Carica su YouTube"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-500"
+          >
+            Annulla
+          </button>
+        </div>
+      </form>
     );
   }
 

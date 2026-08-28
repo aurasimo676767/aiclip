@@ -20,6 +20,7 @@ export interface ClipViewModel {
   caption: string;
   youtubePublishStatus: string | null;
   youtubeUrl: string | null;
+  youtubeVideoId: string | null;
   youtubeError: string | null;
   youtubePublishAt: string | null;
   youtubeCancelledAt: string | null;
@@ -336,11 +337,13 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                         <div className="mt-2">
                           <PublishYoutubeButton
                             clipId={clip.id}
+                            isLongform={clip.format === "longform"}
                             defaultTitle={clip.title}
                             defaultDescription={clip.caption}
                             defaultHashtags={clip.hashtags}
                             status={clip.youtubePublishStatus}
                             youtubeUrl={clip.youtubeUrl}
+                            youtubeVideoId={clip.youtubeVideoId}
                             youtubeError={clip.youtubeError}
                             youtubePublishAt={clip.youtubePublishAt}
                             youtubeCancelledAt={clip.youtubeCancelledAt}

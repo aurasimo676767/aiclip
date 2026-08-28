@@ -5,7 +5,7 @@ import { env } from "../env.js";
 import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
-import { uploadShortToYoutube } from "../providers/youtube/youtube-publisher.js";
+import { uploadVideoToYoutube } from "../providers/youtube/youtube-publisher.js";
 import { updatePublishJobStatus } from "../queue/publish-queue.js";
 
 export async function processPublishJob(job: YoutubePublishJobRow): Promise<void> {
@@ -17,7 +17,7 @@ export async function processPublishJob(job: YoutubePublishJobRow): Promise<void
 
     const { data: clip, error: clipError } = await supabase
       .from("clips")
-      .select("id, project_id, status, output_video_path")
+      .select("id, project_id, status, output_video_path, format")
       .eq("id", job.clip_id)
       .single();
     if (clipError || !clip) {
@@ -48,7 +48,7 @@ export async function processPublishJob(job: YoutubePublishJobRow): Promise<void
     const localVideoPath = path.join(jobDir, "clip.mp4");
     await storageProvider.downloadToFile(clip.output_video_path, localVideoPath);
 
-    const result = await uploadShortToYoutube({
+    const result = await uploadVideoToYoutube({
       credentials: {
         clientId: env.GOOGLE_CLIENT_ID,
         clientSecret: env.GOOGLE_CLIENT_SECRET,
@@ -62,6 +62,7 @@ export async function processPublishJob(job: YoutubePublishJobRow): Promise<void
       tags: (job.tags as string[] | null) ?? [],
       privacyStatus: job.privacy_status,
       publishAt: job.publish_at,
+      videoKind: clip.format === "longform" ? "longform" : "short",
     });
 
     if (result.refreshedAccessToken) {

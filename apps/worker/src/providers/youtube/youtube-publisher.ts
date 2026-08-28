@@ -20,6 +20,8 @@ export interface YoutubeUploadParams {
   privacyStatus: YoutubePrivacyStatus;
   /** ISO 8601. Se presente, il video viene caricato subito ma reso pubblico da YouTube stessa a quest'ora — non serve nessuno scheduler nostro. YouTube richiede privacyStatus "private" quando publishAt è impostato. */
   publishAt?: string | null;
+  /** Determina solo l'URL restituito (/shorts/ vs /watch): un long-form caricato con l'URL da Short funziona per caso via redirect di YouTube, ma non è corretto. */
+  videoKind: "short" | "longform";
 }
 
 export interface YoutubeUploadResult {
@@ -31,14 +33,13 @@ export interface YoutubeUploadResult {
 }
 
 /**
- * "Publisher" per YouTube Shorts: carica il file mp4 renderizzato sul canale collegato
- * dell'utente via YouTube Data API v3 (`videos.insert`, upload resumable gestito dalla
- * libreria ufficiale `googleapis`). YouTube riconosce automaticamente un video come Short
- * se verticale/quadrato e di durata contenuta — le nostre clip lo sono già, nessun flag
- * speciale da passare.
+ * Carica un file mp4 renderizzato (Short o long-form) sul canale collegato dell'utente via
+ * YouTube Data API v3 (`videos.insert`, upload resumable gestito dalla libreria ufficiale
+ * `googleapis`). YouTube riconosce automaticamente un video come Short se verticale/quadrato
+ * e di durata contenuta — le nostre clip lo sono già, nessun flag speciale da passare.
  */
-export async function uploadShortToYoutube(params: YoutubeUploadParams): Promise<YoutubeUploadResult> {
-  const { credentials, filePath, title, description, tags, privacyStatus, publishAt } = params;
+export async function uploadVideoToYoutube(params: YoutubeUploadParams): Promise<YoutubeUploadResult> {
+  const { credentials, filePath, title, description, tags, privacyStatus, publishAt, videoKind } = params;
 
   const oauth2Client = new google.auth.OAuth2(credentials.clientId, credentials.clientSecret);
   oauth2Client.setCredentials({
@@ -80,7 +81,7 @@ export async function uploadShortToYoutube(params: YoutubeUploadParams): Promise
 
   return {
     videoId,
-    url: `https://www.youtube.com/shorts/${videoId}`,
+    url: videoKind === "short" ? `https://www.youtube.com/shorts/${videoId}` : `https://www.youtube.com/watch?v=${videoId}`,
     refreshedAccessToken: refreshedCredentials.access_token !== credentials.accessToken ? (refreshedCredentials.access_token ?? undefined) : undefined,
     refreshedExpiresAt: refreshedCredentials.expiry_date ? new Date(refreshedCredentials.expiry_date).toISOString() : undefined,
   };

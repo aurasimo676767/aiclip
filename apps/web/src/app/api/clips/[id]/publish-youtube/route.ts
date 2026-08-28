@@ -31,7 +31,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Payload non valido" }, { status: 400 });
   }
 
-  const { data: clip, error: clipError } = await supabase.from("clips").select("id, status").eq("id", params.id).single();
+  const { data: clip, error: clipError } = await supabase.from("clips").select("id, status, format").eq("id", params.id).single();
   if (clipError || !clip) {
     return NextResponse.json({ error: "Clip non trovata" }, { status: 404 });
   }
@@ -46,6 +46,11 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   const { title, description, tags, privacyStatus, publishAt } = parsed.data;
 
+  // Long-form: mai pubblicazione automatica (manca ancora un modo per generare la miniatura) —
+  // si carica solo come privato, senza programmazione, e si finisce tutto a mano su YouTube
+  // Studio. Non ci si fida del solo valore mandato dal client per questo.
+  const isLongform = clip.format === "longform";
+
   const { error: insertError } = await supabase.from("youtube_publish_jobs").insert({
     clip_id: clip.id,
     title,
@@ -53,8 +58,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
     tags,
     // YouTube richiede "private" quando si programma: il worker lo forza comunque lato suo,
     // ma teniamo coerente anche il valore salvato qui.
-    privacy_status: publishAt ? "private" : privacyStatus,
-    publish_at: publishAt ?? null,
+    privacy_status: isLongform ? "private" : publishAt ? "private" : privacyStatus,
+    publish_at: isLongform ? null : (publishAt ?? null),
   });
   if (insertError) {
     return NextResponse.json({ error: `Creazione job di pubblicazione fallita: ${insertError.message}` }, { status: 500 });
