@@ -1,11 +1,16 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { pipeline } from "node:stream/promises";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { StorageProvider } from "./storage-provider.js";
+import { logger } from "../lib/logger.js";
+
+const DOWNLOAD_MAX_ATTEMPTS = 5;
+const DOWNLOAD_RETRY_DELAY_MS = 5000;
 
 export interface R2Config {
   accountId: string;
@@ -35,13 +40,61 @@ export class R2StorageProvider implements StorageProvider {
     });
   }
 
+  /**
+   * Un file grosso (VOD long-form, 15-25GB) è UNA richiesta HTTP tenuta aperta per minuti: un
+   * qualunque intoppo (rete, R2, pressione sul sistema locale) a metà la interrompe con un
+   * generico errore "aborted" — osservato in pratica, sempre e solo su download di questo tipo,
+   * mai su file piccoli. Riprova fino a DOWNLOAD_MAX_ATTEMPTS volte, e da un tentativo all'altro
+   * RIPRENDE da dove si era fermata (Range HTTP sui byte già scritti) invece di ripartire da
+   * zero — un fallimento a 20 minuti su un download da 25 minuti non deve buttare via il lavoro
+   * già fatto.
+   */
   async downloadToFile(storagePath: string, localFilePath: string): Promise<void> {
-    const response = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: storagePath }));
-    if (!response.Body) {
-      throw new Error(`Download storage fallito per "${storagePath}": corpo della risposta vuoto`);
-    }
     await fsp.mkdir(path.dirname(localFilePath), { recursive: true });
-    await pipeline(response.Body as NodeJS.ReadableStream, fs.createWriteStream(localFilePath));
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt++) {
+      let existingBytes = 0;
+      try {
+        existingBytes = (await fsp.stat(localFilePath)).size;
+      } catch {
+        existingBytes = 0;
+      }
+
+      try {
+        const response = await this.client.send(
+          new GetObjectCommand({
+            Bucket: this.bucket,
+            Key: storagePath,
+            ...(existingBytes > 0 ? { Range: `bytes=${existingBytes}-` } : {}),
+          }),
+        );
+        if (!response.Body) {
+          throw new Error(`Download storage fallito per "${storagePath}": corpo della risposta vuoto`);
+        }
+        const writeStream = fs.createWriteStream(localFilePath, { flags: existingBytes > 0 ? "a" : "w" });
+        await pipeline(response.Body as NodeJS.ReadableStream, writeStream);
+        return;
+      } catch (err) {
+        lastError = err;
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn("Download da storage interrotto, ritento", {
+          storagePath,
+          attempt,
+          maxAttempts: DOWNLOAD_MAX_ATTEMPTS,
+          error: message,
+        });
+        if (attempt < DOWNLOAD_MAX_ATTEMPTS) {
+          await sleep(DOWNLOAD_RETRY_DELAY_MS);
+        }
+      }
+    }
+
+    throw new Error(
+      `Download da storage fallito per "${storagePath}" dopo ${DOWNLOAD_MAX_ATTEMPTS} tentativi: ${
+        lastError instanceof Error ? lastError.message : String(lastError)
+      }`,
+    );
   }
 
   async uploadFile(localFilePath: string, storagePath: string, contentType: string): Promise<string> {
