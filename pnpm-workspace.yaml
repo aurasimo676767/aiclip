@@ -6,3 +6,9 @@ allowBuilds:
   esbuild: true
   onnxruntime-node: true
   sharp: true
+# @imgly/background-removal-node porta con sé una SUA copia di onnxruntime-node (~1.17.0),
+# diversa da quella già usata dal face-tracker degli Shorts (^1.27.0) — due copie installate
+# insieme hanno mandato in crash il worker all'avvio (binario nativo della 1.17.3 non caricabile,
+# "ERR_DLOPEN_FAILED"). Forzare un'unica versione in tutto il progetto risolve il conflitto.
+overrides:
+  onnxruntime-node: ^1.27.0
