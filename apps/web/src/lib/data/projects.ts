@@ -18,10 +18,14 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient
 export async function fetchProjectSummaries(
   supabase: SupabaseServerClient,
   statusFilter?: ProjectRow["status"][],
+  limit?: number,
 ): Promise<ProjectSummary[]> {
   let query = supabase.from("projects").select("*").order("created_at", { ascending: false });
   if (statusFilter && statusFilter.length > 0) {
     query = query.in("status", statusFilter);
+  }
+  if (limit) {
+    query = query.limit(limit);
   }
 
   const { data: projects, error: projectsError } = await query;
