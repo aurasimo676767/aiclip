@@ -3,6 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { StorageProvider } from "./storage-provider.js";
 
@@ -44,10 +45,22 @@ export class R2StorageProvider implements StorageProvider {
   }
 
   async uploadFile(localFilePath: string, storagePath: string, contentType: string): Promise<string> {
-    const body = await fsp.readFile(localFilePath);
-    await this.client.send(
-      new PutObjectCommand({ Bucket: this.bucket, Key: storagePath, Body: body, ContentType: contentType }),
-    );
+    // Upload multipart in streaming: leggere l'intero file in memoria con fsp.readFile e fare un
+    // singolo PutObjectCommand (come prima) fallisce sopra i 2GiB — un VOD Twitch di ore può
+    // pesare 15-25GB. @aws-sdk/lib-storage carica a blocchi da disco senza mai tenere l'intero
+    // file in RAM, e gestisce da sola la logica multipart S3-compatibile (R2 la supporta).
+    const upload = new Upload({
+      client: this.client,
+      params: {
+        Bucket: this.bucket,
+        Key: storagePath,
+        Body: fs.createReadStream(localFilePath),
+        ContentType: contentType,
+      },
+      queueSize: 4,
+      partSize: 50 * 1024 * 1024, // 50MB a parte
+    });
+    await upload.done();
     return storagePath;
   }
 
