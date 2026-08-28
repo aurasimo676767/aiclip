@@ -37,6 +37,12 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `video-${video.id}`);
   await fsp.mkdir(jobDir, { recursive: true });
 
+  // false SOLO quando l'errore sta per essere ritentato in automatico (vedi blocco catch): in
+  // quel caso jobDir NON va ripulito, altrimenti un download lungo interrotto a metà (un VOD
+  // Twitch di ore, scaricato a frammenti) ripartirebbe sempre da zero invece di riprendere dai
+  // frammenti già scaricati (yt-dlp lo fa da solo se i file restano, vedi download-youtube.ts).
+  let shouldCleanupJobDir = true;
+
   const { data: project, error: projectFetchError } = await supabase
     .from("projects")
     .select("id, user_id, auto_generate_clips, source_type")
@@ -61,6 +67,11 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
 
   try {
     if (await cancelled()) return;
+
+    // Controllo preventivo: se il provider di trascrizione lo implementa (es. il server Whisper
+    // locale), verifica in pochi secondi che sia raggiungibile PRIMA di impegnarsi in un
+    // download che su un VOD lungo può durare ore — altrimenti lo scopriremmo solo alla fine.
+    await transcriptionProvider.checkReady?.();
 
     let localVideoPath: string;
     let videoTitle = video.original_filename;
@@ -215,11 +226,14 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     if (video.attempts < MAX_AUTO_RETRY_ATTEMPTS) {
       logger.warn("Rimetto in coda automaticamente per un nuovo tentativo", { videoId: video.id, attempts: video.attempts });
       await updateVideoStatus(video.id, "UPLOADED", { error_message: message, claimed_by: null, claimed_at: null });
+      shouldCleanupJobDir = false;
     } else {
       await updateVideoStatus(video.id, "FAILED", { error_message: message });
     }
   } finally {
-    await fsp.rm(jobDir, { recursive: true, force: true }).catch(() => undefined);
+    if (shouldCleanupJobDir) {
+      await fsp.rm(jobDir, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 }
 

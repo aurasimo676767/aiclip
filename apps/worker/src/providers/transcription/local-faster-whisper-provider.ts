@@ -62,6 +62,22 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
     return gpuMutex.run(() => this.transcribeLocked(audioFilePath));
   }
 
+  /** GET /health: risponde in millisecondi, verifica che il server sia su prima di impegnarsi in un download lungo. */
+  async checkReady(): Promise<void> {
+    let response: Awaited<ReturnType<typeof request>>;
+    try {
+      response = await request(`${this.serverUrl}/health`, { method: "GET", headersTimeout: 5000, bodyTimeout: 5000 });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Server Whisper locale non raggiungibile su ${this.serverUrl} (avvialo da apps/worker/whisper-server/) — ${message}`,
+      );
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw new Error(`Server Whisper locale su ${this.serverUrl} non pronto: HTTP ${response.statusCode}`);
+    }
+  }
+
   private async transcribeLocked(audioFilePath: string): Promise<Transcript> {
     const fullDuration = (await probeVideo(audioFilePath)).durationSeconds;
     const chunks = await splitAudioIntoChunks(audioFilePath, this.tmpDir);
