@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pipeline } from "node:stream/promises";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { StorageProvider } from "./storage-provider.js";
@@ -52,6 +52,20 @@ export class R2StorageProvider implements StorageProvider {
   async downloadToFile(storagePath: string, localFilePath: string): Promise<void> {
     await fsp.mkdir(path.dirname(localFilePath), { recursive: true });
 
+    // Bug reale osservato: un file locale già completo (es. da un tentativo precedente andato a
+    // buon fine, magari in una cache condivisa mai ripulita) faceva comunque partire una
+    // richiesta "dammi i byte da fine-file in poi" — R2 la rifiuta con 416 "range not
+    // satisfiable" perché quei byte non esistono. Controllare la dimensione REALE remota prima
+    // (HEAD, economico) evita sia questo errore sia un ri-download totalmente inutile.
+    let remoteSize: number | null = null;
+    try {
+      const head = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: storagePath }));
+      remoteSize = head.ContentLength ?? null;
+    } catch {
+      // Se anche l'HEAD fallisce non blocchiamo qui: il GetObject sotto darà comunque un errore
+      // chiaro (es. file non trovato) se il problema è reale.
+    }
+
     let lastError: unknown;
     for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt++) {
       let existingBytes = 0;
@@ -59,6 +73,11 @@ export class R2StorageProvider implements StorageProvider {
         existingBytes = (await fsp.stat(localFilePath)).size;
       } catch {
         existingBytes = 0;
+      }
+
+      if (remoteSize !== null && existingBytes >= remoteSize) {
+        // Già tutto scaricato in un tentativo precedente: nessun byte in più da chiedere.
+        return;
       }
 
       try {
