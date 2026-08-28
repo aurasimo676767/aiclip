@@ -120,26 +120,44 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       throw new Error("Il video non ha né uno storage_path né un source_url: impossibile procedere");
     }
 
-    const audioPath = await extractAudio(localVideoPath, jobDir);
-    if (await cancelled()) return;
+    // Riusa un transcript già salvato per questo video (es. una rigenerazione manuale delle clip
+    // dopo aver aggiustato un prompt, o un retry dopo che la trascrizione era già andata a buon
+    // fine) invece di rifare estrazione audio + trascrizione da zero — su un VOD di ore è la
+    // fase più lenta dopo il download, non ha senso ripeterla se il risultato è già valido.
+    const { data: existingTranscriptRow } = await supabase.from("transcripts").select("*").eq("video_id", video.id).maybeSingle();
 
-    await updateVideoStatus(video.id, "TRANSCRIBING");
-    const transcript = await transcriptionProvider.transcribe(audioPath);
-    if (await cancelled()) return;
+    let transcript: { language: string; durationSeconds: number; fullText: string; segments: TranscriptSegment[]; provider: string };
+    if (existingTranscriptRow) {
+      logger.info("Transcript già presente, salto estrazione audio e trascrizione", { videoId: video.id });
+      transcript = {
+        language: existingTranscriptRow.language,
+        durationSeconds: existingTranscriptRow.duration_seconds,
+        fullText: existingTranscriptRow.full_text,
+        segments: existingTranscriptRow.segments as TranscriptSegment[],
+        provider: existingTranscriptRow.provider,
+      };
+    } else {
+      const audioPath = await extractAudio(localVideoPath, jobDir);
+      if (await cancelled()) return;
 
-    const { error: transcriptError } = await supabase.from("transcripts").upsert(
-      {
-        video_id: video.id,
-        language: transcript.language,
-        duration_seconds: transcript.durationSeconds,
-        full_text: transcript.fullText,
-        segments: transcript.segments,
-        provider: transcript.provider,
-      },
-      { onConflict: "video_id" },
-    );
-    if (transcriptError) {
-      throw new Error(`Salvataggio transcript fallito: ${transcriptError.message}`);
+      await updateVideoStatus(video.id, "TRANSCRIBING");
+      transcript = await transcriptionProvider.transcribe(audioPath);
+      if (await cancelled()) return;
+
+      const { error: transcriptError } = await supabase.from("transcripts").upsert(
+        {
+          video_id: video.id,
+          language: transcript.language,
+          duration_seconds: transcript.durationSeconds,
+          full_text: transcript.fullText,
+          segments: transcript.segments,
+          provider: transcript.provider,
+        },
+        { onConflict: "video_id" },
+      );
+      if (transcriptError) {
+        throw new Error(`Salvataggio transcript fallito: ${transcriptError.message}`);
+      }
     }
 
     await updateVideoStatus(video.id, "ANALYZING", { duration_seconds: transcript.durationSeconds });
