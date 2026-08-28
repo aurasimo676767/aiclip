@@ -31,9 +31,10 @@ apps/worker/storage-local/
 # cookie di sessione YouTube (yt-dlp) — equivalenti a un login, mai da versionare
 apps/worker/cookies.txt
 
-# foto reali degli streamer, usate come riferimento identità per la generazione IA delle
-# copertine — dati personali, mai da versionare, solo locali
+# foto reali degli streamer (riferimento per la generazione IA + ritagli pronti riusabili nelle
+# copertine) — dati personali, mai da versionare, solo locali
 apps/worker/assets/streamer-photos/
+apps/worker/assets/streamer-faces/
 
 # server whisper locale (faster-whisper): interprete embeddable + pacchetti scaricati localmente,
 # non versionati — vedi apps/worker/whisper-server/README.md per come ricrearlo

@@ -108,9 +108,15 @@ export async function composeThumbnail(params: ComposeThumbnailParams): Promise<
 
   if (params.faceCutoutPngPath) {
     const faceMeta = await sharp(params.faceCutoutPngPath).metadata();
-    const targetHeight = Math.round(CANVAS_HEIGHT * 0.92);
-    const scale = targetHeight / (faceMeta.height || targetHeight);
-    const targetWidth = Math.round((faceMeta.width || targetHeight) * scale);
+    const faceWidth = faceMeta.width || 1;
+    const faceHeight = faceMeta.height || 1;
+    // Vincola sia altezza che larghezza massime (non solo l'altezza): un ritaglio molto largo
+    // (es. inquadratura a mezzo busto) altrimenti finisce per dominare metà del canvas.
+    const maxHeight = CANVAS_HEIGHT * 0.85;
+    const maxWidth = CANVAS_WIDTH * 0.42;
+    const scale = Math.min(maxHeight / faceHeight, maxWidth / faceWidth);
+    const targetWidth = Math.round(faceWidth * scale);
+    const targetHeight = Math.round(faceHeight * scale);
     const faceResized = await sharp(params.faceCutoutPngPath).resize(targetWidth, targetHeight, { fit: "contain" }).png().toBuffer();
     composite.push({ input: faceResized, left: CANVAS_WIDTH - targetWidth, top: CANVAS_HEIGHT - targetHeight });
   }

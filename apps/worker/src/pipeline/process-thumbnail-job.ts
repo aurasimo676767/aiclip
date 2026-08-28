@@ -9,7 +9,7 @@ import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
 import { runFfmpeg, probeVideo } from "../lib/ffmpeg.js";
 import { selectThumbnailAssets } from "../providers/ai/thumbnail-selection.js";
-import { hasReferencePhotos, generateStreamerFacePortrait } from "../providers/ai/generate-face-portrait.js";
+import { resolveStreamerFace } from "../providers/ai/generate-face-portrait.js";
 import { composeThumbnail } from "../render/compose-thumbnail.js";
 import {
   setYoutubeThumbnail,
@@ -168,18 +168,18 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     // generato dal ranking long-form, che segue già questa convenzione (vedi longform-ranking.ts).
     const bannerText = extractBannerText(clip.title);
 
-    // 5) Faccia generata dall'IA a partire da foto vere dello streamer (niente più webcam grezza):
-    // solo se abbiamo foto di riferimento salvate per questo alias, altrimenti niente faccia.
+    // 5) Faccia: preferisce un ritaglio fisso già pronto (foto vera, gratis, sempre identica alla
+    // persona reale); se non c'è ancora per questo alias, prova a generarla con l'IA dalle foto
+    // di riferimento; se non c'è nessuna delle due, niente faccia in copertina.
     let faceCutoutPath: string | null = null;
     const { data: video } = await supabase.from("videos").select("streamer_name").eq("id", clip.video_id).maybeSingle();
     const aliasLower = video?.streamer_name ? LONGFORM_STREAMER_ALIASES[video.streamer_name.toLowerCase()]?.toLowerCase() : undefined;
-    if (aliasLower && (await hasReferencePhotos(aliasLower))) {
+    if (aliasLower) {
       try {
         const facePath = path.join(jobDir, "face-generated.png");
-        await generateStreamerFacePortrait({ apiKey: env.OPENAI_API_KEY, aliasLower, outputPath: facePath });
-        faceCutoutPath = facePath;
+        faceCutoutPath = await resolveStreamerFace({ apiKey: env.OPENAI_API_KEY, aliasLower, outputPath: facePath });
       } catch (err) {
-        logger.warn("Generazione faccia IA fallita, copertina senza faccia", {
+        logger.warn("Risoluzione faccia fallita, copertina senza faccia", {
           jobId: job.id,
           error: err instanceof Error ? err.message : String(err),
         });

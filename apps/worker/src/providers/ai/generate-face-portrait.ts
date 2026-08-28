@@ -4,6 +4,40 @@ import { fileURLToPath } from "node:url";
 import OpenAI, { toFile } from "openai";
 
 const PHOTOS_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../assets/streamer-photos");
+const FACES_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../assets/streamer-faces");
+
+/**
+ * Ritaglio pronto e fisso (assets/streamer-faces/<alias minuscolo>.png, sfondo già rimosso) —
+ * una foto vera ritagliata una volta sola e riusata sempre: gratis, istantaneo, e identico al
+ * 100% alla persona reale (a differenza della generazione IA sotto, che può assomigliare solo
+ * "abbastanza"). Va sempre preferito quando esiste, vedi resolveStreamerFace.
+ */
+async function findFixedCutout(aliasLower: string): Promise<string | null> {
+  const fixedPath = path.join(FACES_ROOT, `${aliasLower}.png`);
+  try {
+    await fsp.access(fixedPath);
+    return fixedPath;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Risolve il modo migliore disponibile per mostrare la faccia di uno streamer in copertina:
+ * un ritaglio fisso già pronto se esiste, altrimenti una nuova generazione IA dalle foto di
+ * riferimento se disponibili, altrimenti null (nessuna faccia in copertina).
+ */
+export async function resolveStreamerFace(params: { apiKey: string; aliasLower: string; outputPath: string }): Promise<string | null> {
+  const fixed = await findFixedCutout(params.aliasLower);
+  if (fixed) return fixed;
+
+  if (await hasReferencePhotos(params.aliasLower)) {
+    await generateStreamerFacePortrait(params);
+    return params.outputPath;
+  }
+
+  return null;
+}
 
 const PROMPT = `Create a high-quality, photorealistic portrait of the EXACT SAME real person shown in the reference images. This is critical: preserve their real facial features, face shape, hairstyle, eyes, and identity as closely as possible — it must be immediately recognizable as the same specific person, not a generic or different-looking person.
 
