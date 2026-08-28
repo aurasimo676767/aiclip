@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", exact: true },
   { href: "/dashboard/feed", label: "Feed" },
   { href: "/dashboard/published", label: "Pubblicati" },
+  { href: "/dashboard/thumbnails", label: "Copertine" },
   { href: "/dashboard/whop", label: "Whop" },
   { href: "/dashboard/settings", label: "Opzioni" },
 ];

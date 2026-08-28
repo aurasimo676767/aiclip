@@ -35,6 +35,7 @@ export type YoutubePublishStatus = "PENDING" | "UPLOADING" | "COMPLETED" | "FAIL
 export type YoutubePrivacyStatus = "public" | "unlisted" | "private";
 
 export type VoiceoverJobStatus = "UPLOADING" | "PENDING" | "RENDERING" | "COMPLETED" | "FAILED";
+export type ThumbnailJobStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
 
 export type ProjectSourceType = "upload" | "youtube_url" | "twitch_vod";
 
@@ -641,6 +642,55 @@ export interface Database {
         };
         Relationships: [];
       };
+
+      thumbnail_jobs: {
+        Row: {
+          id: string;
+          clip_id: string;
+          youtube_url: string;
+          status: ThumbnailJobStatus;
+          result_storage_path: string | null;
+          youtube_thumbnail_set: boolean;
+          error_message: string | null;
+          claimed_by: string | null;
+          claimed_at: string | null;
+          attempts: number;
+          started_at: string | null;
+          completed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          clip_id: string;
+          youtube_url: string;
+          status?: ThumbnailJobStatus;
+          result_storage_path?: string | null;
+          youtube_thumbnail_set?: boolean;
+          error_message?: string | null;
+          claimed_by?: string | null;
+          claimed_at?: string | null;
+          attempts?: number;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          clip_id?: string;
+          youtube_url?: string;
+          status?: ThumbnailJobStatus;
+          result_storage_path?: string | null;
+          youtube_thumbnail_set?: boolean;
+          error_message?: string | null;
+          claimed_by?: string | null;
+          claimed_at?: string | null;
+          attempts?: number;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
 
     Views: Record<string, never>;
@@ -661,6 +711,10 @@ export interface Database {
       claim_next_voiceover_job: {
         Args: { p_worker_id: string; p_stale_seconds?: number; p_max_attempts?: number };
         Returns: Database["public"]["Tables"]["voiceover_jobs"]["Row"] | null;
+      };
+      claim_next_thumbnail_job: {
+        Args: { p_worker_id: string; p_stale_seconds?: number; p_max_attempts?: number };
+        Returns: Database["public"]["Tables"]["thumbnail_jobs"]["Row"] | null;
       };
     };
   };
@@ -717,3 +771,7 @@ export type YoutubePublishJobUpdate = Database["public"]["Tables"]["youtube_publ
 export type VoiceoverJobRow = Database["public"]["Tables"]["voiceover_jobs"]["Row"];
 export type VoiceoverJobInsert = Database["public"]["Tables"]["voiceover_jobs"]["Insert"];
 export type VoiceoverJobUpdate = Database["public"]["Tables"]["voiceover_jobs"]["Update"];
+
+export type ThumbnailJobRow = Database["public"]["Tables"]["thumbnail_jobs"]["Row"];
+export type ThumbnailJobInsert = Database["public"]["Tables"]["thumbnail_jobs"]["Insert"];
+export type ThumbnailJobUpdate = Database["public"]["Tables"]["thumbnail_jobs"]["Update"];

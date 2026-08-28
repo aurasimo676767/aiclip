@@ -32,6 +32,42 @@ export interface YoutubeUploadResult {
   refreshedExpiresAt?: string;
 }
 
+export interface SetThumbnailParams {
+  credentials: YoutubeCredentials;
+  videoId: string;
+  imagePath: string;
+}
+
+export interface SetThumbnailResult {
+  refreshedAccessToken?: string;
+  refreshedExpiresAt?: string;
+}
+
+/**
+ * Imposta la miniatura di un video già esistente su YouTube (`thumbnails.set`) — stesso scope
+ * OAuth "youtube" già richiesto per l'upload/la cancellazione dei video, nessun nuovo permesso
+ * da autorizzare.
+ */
+export async function setYoutubeThumbnail(params: SetThumbnailParams): Promise<SetThumbnailResult> {
+  const { credentials, videoId, imagePath } = params;
+
+  const oauth2Client = new google.auth.OAuth2(credentials.clientId, credentials.clientSecret);
+  oauth2Client.setCredentials({
+    access_token: credentials.accessToken,
+    refresh_token: credentials.refreshToken,
+    expiry_date: credentials.expiryDate,
+  });
+
+  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+  await youtube.thumbnails.set({ videoId, media: { body: fs.createReadStream(imagePath) } });
+
+  const refreshedCredentials = oauth2Client.credentials;
+  return {
+    refreshedAccessToken: refreshedCredentials.access_token !== credentials.accessToken ? (refreshedCredentials.access_token ?? undefined) : undefined,
+    refreshedExpiresAt: refreshedCredentials.expiry_date ? new Date(refreshedCredentials.expiry_date).toISOString() : undefined,
+  };
+}
+
 /**
  * Carica un file mp4 renderizzato (Short o long-form) sul canale collegato dell'utente via
  * YouTube Data API v3 (`videos.insert`, upload resumable gestito dalla libreria ufficiale

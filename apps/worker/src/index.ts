@@ -5,10 +5,12 @@ import { claimNextVideo } from "./queue/video-queue.js";
 import { claimNextRenderJob } from "./queue/render-queue.js";
 import { claimNextPublishJob } from "./queue/publish-queue.js";
 import { claimNextVoiceoverJob } from "./queue/voiceover-queue.js";
+import { claimNextThumbnailJob } from "./queue/thumbnail-queue.js";
 import { processVideoJob } from "./pipeline/process-video-job.js";
 import { processRenderJob } from "./pipeline/process-render-job.js";
 import { processPublishJob } from "./pipeline/process-publish-job.js";
 import { processVoiceoverJob } from "./pipeline/process-voiceover-job.js";
+import { processThumbnailJob } from "./pipeline/process-thumbnail-job.js";
 import { refreshYoutubeStats } from "./pipeline/refresh-youtube-stats.js";
 
 let shuttingDown = false;
@@ -85,6 +87,23 @@ async function voiceoverQueueLoop(): Promise<void> {
   }
 }
 
+/** Loop di polling per la coda di generazione copertine YouTube. */
+async function thumbnailQueueLoop(): Promise<void> {
+  while (!shuttingDown) {
+    try {
+      const job = await claimNextThumbnailJob();
+      if (job) {
+        logger.info("Thumbnail job claimato", { jobId: job.id, workerId: WORKER_ID });
+        await processThumbnailJob(job);
+        continue;
+      }
+    } catch (err) {
+      logger.error("Errore nel loop della coda thumbnail", { error: err instanceof Error ? err.message : String(err) });
+    }
+    await sleep(env.QUEUE_POLL_INTERVAL_MS);
+  }
+}
+
 const STATS_REFRESH_INTERVAL_MS = 20 * 60 * 1000; // ogni 20 minuti: sweep periodico, non una coda — non serve più frequente
 
 /** Sweep periodico (non una coda): aggiorna views/like/commenti dei video già pubblicati. */
@@ -119,4 +138,4 @@ logger.info("ClipForge worker avviato", {
 const videoLoops = Array.from({ length: env.VIDEO_CONCURRENCY }, () => videoQueueLoop());
 const renderLoops = Array.from({ length: env.RENDER_CONCURRENCY }, () => renderQueueLoop());
 
-await Promise.all([...videoLoops, ...renderLoops, publishQueueLoop(), voiceoverQueueLoop(), statsRefreshLoop()]);
+await Promise.all([...videoLoops, ...renderLoops, publishQueueLoop(), voiceoverQueueLoop(), thumbnailQueueLoop(), statsRefreshLoop()]);
