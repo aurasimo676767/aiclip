@@ -122,3 +122,30 @@ export async function uploadVideoToYoutube(params: YoutubeUploadParams): Promise
     refreshedExpiresAt: refreshedCredentials.expiry_date ? new Date(refreshedCredentials.expiry_date).toISOString() : undefined,
   };
 }
+
+/**
+ * Cerca su YouTube il video più probabile per una query (titolo/canale letti dall'IA su un
+ * fotogramma del video reagito) e ritorna l'URL della SUA copertina ufficiale — invece di uno
+ * screenshot improvvisato del nostro stesso video (spesso con interfaccia/chat visibile). Stesso
+ * scope OAuth "youtube" già usato per pubblicare/impostare copertine, nessun permesso nuovo.
+ */
+export async function findYoutubeThumbnailUrlBySearch(credentials: YoutubeCredentials, query: string): Promise<string | null> {
+  const oauth2Client = new google.auth.OAuth2(credentials.clientId, credentials.clientSecret);
+  oauth2Client.setCredentials({
+    access_token: credentials.accessToken,
+    refresh_token: credentials.refreshToken,
+    expiry_date: credentials.expiryDate,
+  });
+
+  const youtube = google.youtube({ version: "v3", auth: oauth2Client });
+  const response = await youtube.search.list({
+    part: ["snippet"],
+    q: query,
+    type: ["video"],
+    maxResults: 1,
+  });
+
+  const thumbnails = response.data.items?.[0]?.snippet?.thumbnails;
+  const url = thumbnails?.maxres?.url ?? thumbnails?.high?.url ?? thumbnails?.standard?.url ?? thumbnails?.default?.url;
+  return url ?? null;
+}

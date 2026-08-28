@@ -26,21 +26,10 @@ const TOOL_SCHEMA = {
         description:
           "Riquadro (frazioni 0-1) da ritagliare dal fotogramma di sfondo scelto per ESCLUDERE interfaccia/chat/controlli e tenere solo il contenuto vero (es. il video reagito, il gioco). Ometti se il fotogramma è già pulito (nessuna interfaccia visibile) e va usato per intero.",
       },
-      faceFrameIndex: {
-        type: "integer",
+      reactedVideoQuery: {
+        type: "string",
         description:
-          "Indice del fotogramma con l'espressione più marcata/scioccata/divertita sulla webcam della persona che guarda/gioca (di solito in un angolo dello schermo). -1 se in NESSUN fotogramma è visibile chiaramente una faccia.",
-      },
-      faceBoundingBox: {
-        type: "object",
-        properties: {
-          x: { type: "number", description: "Bordo sinistro del riquadro, come frazione 0-1 della larghezza del fotogramma." },
-          y: { type: "number", description: "Bordo superiore del riquadro, come frazione 0-1 dell'altezza del fotogramma." },
-          width: { type: "number", description: "Larghezza del riquadro, come frazione 0-1 della larghezza del fotogramma." },
-          height: { type: "number", description: "Altezza del riquadro, come frazione 0-1 dell'altezza del fotogramma." },
-        },
-        description:
-          "Riquadro approssimativo attorno a testa/spalle della persona nel fotogramma scelto con faceFrameIndex — un po' più largo della sola faccia, per non tagliare capelli/spalle. Ometti se faceFrameIndex è -1.",
+          "Se in uno dei fotogrammi è leggibile il titolo e/o il nome del canale del video che si sta reagendo (es. testo nella pagina YouTube, tab del browser, sottotitolo in sovrimpressione), scrivi qui una query di ricerca breve per ritrovarlo (titolo + canale). Serve per recuperare la SUA copertina ufficiale reale invece di uno screenshot improvvisato. Ometti/lascia vuoto se non è leggibile con sicurezza — meglio niente che una query sbagliata.",
       },
       headlineText: {
         type: "string",
@@ -48,16 +37,15 @@ const TOOL_SCHEMA = {
           "Una frase COMPLETA e AUTONOMA di 6-12 parole, capibile da sola anche da chi non ha letto la descrizione — stile titolo clickbait da copertina YouTube (es. \"Scappa da 100 poliziotti e vince 500.000€\", non un frammento come \"e vince 500.000€\"). Deve avere soggetto sottinteso + un fatto/numero/azione concreta e sorprendente, non un dettaglio isolato fuori contesto. Verrà scritto in grande sulla copertina. Niente tutto maiuscolo (lo gestisce il rendering), niente punteggiatura finale.",
       },
     },
-    required: ["backgroundFrameIndex", "faceFrameIndex", "headlineText"],
+    required: ["backgroundFrameIndex", "headlineText"],
   },
 };
 
 const SYSTEM_PROMPT = `Sei un editor esperto di copertine YouTube per video reaction/gameplay. Ti vengono mostrati alcuni fotogrammi campionati da un video già montato, numerati da 0 in ordine. Guardali e:
 
 1. Scegli l'indice del fotogramma migliore da usare come SFONDO della copertina — MAI uno con interfaccia browser/player visibile (barra di avanzamento, controlli, sidebar chat, testo di commenti): se capita in tutti, scegli quello con meno interfaccia e ritagliala via con contentCropBox.
-2. Se in uno o più fotogrammi è visibile la webcam/faccia della persona che guarda/gioca, scegli quello con l'espressione più marcata; altrimenti -1.
-3. Se hai scelto un fotogramma con faccia, indica un riquadro approssimativo attorno a testa/spalle.
-4. Scrivi una frase ad effetto COMPLETA e autonoma (headlineText) — deve reggere da sola, non un dettaglio isolato staccato dal contesto (vedi descrizione del campo per un esempio).
+2. Se riesci a leggere con sicurezza il titolo o il canale del video/contenuto che si sta reagendo in uno dei fotogrammi, scrivilo in reactedVideoQuery.
+3. Scrivi una frase ad effetto COMPLETA e autonoma (headlineText) — deve reggere da sola, non un dettaglio isolato staccato dal contesto (vedi descrizione del campo per un esempio).
 
 Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
@@ -74,8 +62,7 @@ export interface ThumbnailSelectionOptions {
 export interface ThumbnailSelection {
   backgroundFrameIndex: number;
   contentCropBox: { x: number; y: number; width: number; height: number } | null;
-  faceFrameIndex: number | null;
-  faceBoundingBox: { x: number; y: number; width: number; height: number } | null;
+  reactedVideoQuery: string | null;
   headlineText: string;
 }
 
@@ -112,8 +99,7 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
   const input = toolUseBlock.input as {
     backgroundFrameIndex?: number;
     contentCropBox?: { x: number; y: number; width: number; height: number };
-    faceFrameIndex?: number;
-    faceBoundingBox?: { x: number; y: number; width: number; height: number };
+    reactedVideoQuery?: string;
     headlineText?: string;
   };
 
@@ -122,13 +108,10 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     throw new Error("Output non valido dalla selezione IA della copertina");
   }
 
-  const faceFrameIndex = typeof input.faceFrameIndex === "number" && input.faceFrameIndex >= 0 ? input.faceFrameIndex : null;
-
   return {
     backgroundFrameIndex: input.backgroundFrameIndex,
     contentCropBox: input.contentCropBox ?? null,
-    faceFrameIndex,
-    faceBoundingBox: faceFrameIndex !== null && input.faceBoundingBox ? input.faceBoundingBox : null,
+    reactedVideoQuery: input.reactedVideoQuery?.trim() ? input.reactedVideoQuery.trim() : null,
     headlineText: input.headlineText,
   };
 }

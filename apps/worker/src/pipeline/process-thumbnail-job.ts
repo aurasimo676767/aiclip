@@ -1,7 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { removeBackground } from "@imgly/background-removal-node";
 import type { ThumbnailJobRow } from "@clipforge/db";
 import { env } from "../env.js";
 import { logger } from "../lib/logger.js";
@@ -10,7 +9,7 @@ import { storageProvider } from "../lib/providers.js";
 import { runFfmpeg, probeVideo } from "../lib/ffmpeg.js";
 import { selectThumbnailAssets } from "../providers/ai/thumbnail-selection.js";
 import { composeThumbnail } from "../render/compose-thumbnail.js";
-import { setYoutubeThumbnail } from "../providers/youtube/youtube-publisher.js";
+import { setYoutubeThumbnail, findYoutubeThumbnailUrlBySearch, type YoutubeCredentials } from "../providers/youtube/youtube-publisher.js";
 import { updateThumbnailJobStatus } from "../queue/thumbnail-queue.js";
 
 const CANDIDATE_FRAME_COUNT = 8;
@@ -50,6 +49,22 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       throw new Error("Impossibile risalire all'id video YouTube per impostare la copertina");
     }
 
+    // Credenziali YouTube: servono sia per cercare la copertina reale del video reagito sia,
+    // alla fine, per impostare il risultato sul video pubblicato — le recuperiamo una volta sola.
+    const { data: project } = await supabase.from("projects").select("user_id").eq("id", clip.project_id).single();
+    const { data: connectionRow } = project
+      ? await supabase.from("youtube_connections").select("*").eq("user_id", project.user_id).maybeSingle()
+      : { data: null };
+    let credentials: YoutubeCredentials | null = connectionRow
+      ? {
+          clientId: env.GOOGLE_CLIENT_ID,
+          clientSecret: env.GOOGLE_CLIENT_SECRET,
+          accessToken: connectionRow.access_token,
+          refreshToken: connectionRow.refresh_token,
+          expiryDate: new Date(connectionRow.expires_at).getTime(),
+        }
+      : null;
+
     // 1) Scarica il render già pronto (non il sorgente da 20+GB, quello serve solo per il render vero).
     const localVideoPath = path.join(jobDir, "clip.mp4");
     await storageProvider.downloadToFile(clip.output_video_path, localVideoPath);
@@ -74,56 +89,50 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       frameJpegsBase64: lowResBase64,
     });
 
-    // 3) Ri-estrae A PIENA RISOLUZIONE solo i due fotogrammi scelti (i candidati sopra erano
-    // volutamente piccoli, non adatti come sfondo finale).
-    const backgroundRawPath = path.join(jobDir, "background-raw.jpg");
-    await grabFrame(localVideoPath, timestamps[selection.backgroundFrameIndex] ?? timestamps[0]!, backgroundRawPath);
-
-    // Se l'IA ha indicato una zona da ritagliare (per escludere interfaccia/chat/controlli
-    // visibili nel fotogramma scelto), la applichiamo qui prima di usarlo come sfondo.
-    let backgroundFullPath = backgroundRawPath;
-    if (selection.contentCropBox) {
-      const meta = await sharp(backgroundRawPath).metadata();
-      const w = meta.width ?? 0;
-      const h = meta.height ?? 0;
-      const box = selection.contentCropBox;
-      const left = Math.max(0, Math.round(box.x * w));
-      const top = Math.max(0, Math.round(box.y * h));
-      const right = Math.min(w, Math.round((box.x + box.width) * w));
-      const bottom = Math.min(h, Math.round((box.y + box.height) * h));
-      if (w > 0 && h > 0 && right - left > 100 && bottom - top > 100) {
-        const croppedPath = path.join(jobDir, "background-full.jpg");
-        await sharp(backgroundRawPath).extract({ left, top, width: right - left, height: bottom - top }).toFile(croppedPath);
-        backgroundFullPath = croppedPath;
+    // 3) Sfondo: se è leggibile il video/canale reagito, proviamo a recuperare la SUA copertina
+    // ufficiale reale via ricerca YouTube (molto meglio di uno screenshot improvvisato del
+    // nostro stesso video, spesso con interfaccia/chat visibile) — altrimenti ripiega sul
+    // fotogramma scelto dall'IA, con l'eventuale ritaglio per togliere l'interfaccia.
+    let backgroundFullPath: string | null = null;
+    if (selection.reactedVideoQuery && credentials) {
+      try {
+        const thumbUrl = await findYoutubeThumbnailUrlBySearch(credentials, selection.reactedVideoQuery);
+        if (thumbUrl) {
+          const res = await fetch(thumbUrl);
+          if (res.ok) {
+            const buffer = Buffer.from(await res.arrayBuffer());
+            const realThumbPath = path.join(jobDir, "background-real-thumb.jpg");
+            await fsp.writeFile(realThumbPath, buffer);
+            backgroundFullPath = realThumbPath;
+            logger.info("Copertina reale del video reagito trovata via ricerca YouTube", { jobId: job.id, query: selection.reactedVideoQuery });
+          }
+        }
+      } catch (err) {
+        logger.warn("Ricerca copertina reale fallita, ripiego sul fotogramma estratto", {
+          jobId: job.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
-    let faceCutoutPath: string | null = null;
-    if (selection.faceFrameIndex !== null && selection.faceBoundingBox) {
-      const faceFullPath = path.join(jobDir, "face-full.jpg");
-      await grabFrame(localVideoPath, timestamps[selection.faceFrameIndex] ?? timestamps[0]!, faceFullPath);
+    if (!backgroundFullPath) {
+      const backgroundRawPath = path.join(jobDir, "background-raw.jpg");
+      await grabFrame(localVideoPath, timestamps[selection.backgroundFrameIndex] ?? timestamps[0]!, backgroundRawPath);
 
-      const meta = await sharp(faceFullPath).metadata();
-      const w = meta.width ?? 0;
-      const h = meta.height ?? 0;
-      if (w > 0 && h > 0) {
-        const bbox = selection.faceBoundingBox;
-        // Un po' di margine attorno al riquadro stimato dall'IA: spalle/capelli, non solo il viso.
-        const padX = bbox.width * w * 0.25;
-        const padY = bbox.height * h * 0.25;
-        const left = Math.max(0, Math.round(bbox.x * w - padX));
-        const top = Math.max(0, Math.round(bbox.y * h - padY));
-        const right = Math.min(w, Math.round((bbox.x + bbox.width) * w + padX));
-        const bottom = Math.min(h, Math.round((bbox.y + bbox.height) * h + padY));
-
-        if (right > left && bottom > top) {
-          const cropPath = path.join(jobDir, "face-crop.jpg");
-          await sharp(faceFullPath).extract({ left, top, width: right - left, height: bottom - top }).toFile(cropPath);
-
-          const cutoutPath = path.join(jobDir, "face-cutout.png");
-          const blob = await removeBackground(cropPath);
-          await fsp.writeFile(cutoutPath, Buffer.from(await blob.arrayBuffer()));
-          faceCutoutPath = cutoutPath;
+      backgroundFullPath = backgroundRawPath;
+      if (selection.contentCropBox) {
+        const meta = await sharp(backgroundRawPath).metadata();
+        const w = meta.width ?? 0;
+        const h = meta.height ?? 0;
+        const box = selection.contentCropBox;
+        const left = Math.max(0, Math.round(box.x * w));
+        const top = Math.max(0, Math.round(box.y * h));
+        const right = Math.min(w, Math.round((box.x + box.width) * w));
+        const bottom = Math.min(h, Math.round((box.y + box.height) * h));
+        if (w > 0 && h > 0 && right - left > 100 && bottom - top > 100) {
+          const croppedPath = path.join(jobDir, "background-cropped.jpg");
+          await sharp(backgroundRawPath).extract({ left, top, width: right - left, height: bottom - top }).toFile(croppedPath);
+          backgroundFullPath = croppedPath;
         }
       }
     }
@@ -132,10 +141,12 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     // generato dal ranking long-form, che segue già questa convenzione (vedi longform-ranking.ts).
     const bannerText = extractBannerText(clip.title);
 
+    // Niente faccia da webcam per ora (qualità scarsa, spesso layout multi-streamer confuso) —
+    // in attesa di una foto di riferimento per farla generare dall'IA in modo realistico.
     const composedPath = path.join(jobDir, "thumbnail.jpg");
     await composeThumbnail({
       backgroundFramePath: backgroundFullPath,
-      faceCutoutPngPath: faceCutoutPath,
+      faceCutoutPngPath: null,
       bannerText,
       headlineText: selection.headlineText,
       outputPath: composedPath,
@@ -149,38 +160,24 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
 
     // 6) La imposta direttamente sul video YouTube già pubblicato.
     let youtubeThumbnailSet = false;
-    try {
-      const { data: project } = await supabase.from("projects").select("user_id").eq("id", clip.project_id).single();
-      const { data: connection } = project
-        ? await supabase.from("youtube_connections").select("*").eq("user_id", project.user_id).maybeSingle()
-        : { data: null };
-      if (connection) {
-        const result = await setYoutubeThumbnail({
-          credentials: {
-            clientId: env.GOOGLE_CLIENT_ID,
-            clientSecret: env.GOOGLE_CLIENT_SECRET,
-            accessToken: connection.access_token,
-            refreshToken: connection.refresh_token,
-            expiryDate: new Date(connection.expires_at).getTime(),
-          },
-          videoId: publishJob.youtube_video_id,
-          imagePath: composedPath,
-        });
-        if (result.refreshedAccessToken) {
+    if (credentials) {
+      try {
+        const result = await setYoutubeThumbnail({ credentials, videoId: publishJob.youtube_video_id, imagePath: composedPath });
+        if (result.refreshedAccessToken && connectionRow) {
           await supabase
             .from("youtube_connections")
-            .update({ access_token: result.refreshedAccessToken, expires_at: result.refreshedExpiresAt ?? connection.expires_at })
-            .eq("id", connection.id);
+            .update({ access_token: result.refreshedAccessToken, expires_at: result.refreshedExpiresAt ?? connectionRow.expires_at })
+            .eq("id", connectionRow.id);
         }
         youtubeThumbnailSet = true;
+      } catch (err) {
+        // Non facciamo fallire l'intero job per questo: la copertina è comunque pronta e
+        // scaricabile, l'utente può impostarla a mano se l'upload automatico su YouTube fallisce.
+        logger.warn("Impostazione copertina su YouTube fallita, la copertina resta comunque generata", {
+          jobId: job.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-    } catch (err) {
-      // Non facciamo fallire l'intero job per questo: la copertina è comunque pronta e
-      // scaricabile, l'utente può impostarla a mano se l'upload automatico su YouTube fallisce.
-      logger.warn("Impostazione copertina su YouTube fallita, la copertina resta comunque generata", {
-        jobId: job.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
     }
 
     await updateThumbnailJobStatus(job.id, "COMPLETED", {
