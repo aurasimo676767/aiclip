@@ -31,6 +31,16 @@ export async function downloadYoutubeVideo(url: string, outputDir: string): Prom
     "mp4",
     "--no-playlist",
     "--print-json",
+    // I VOD lunghi (Twitch, anche ore) scrivono migliaia di frammenti in rapida successione:
+    // su Windows capita che uno di questi venga bloccato per un istante da antivirus/indicizzazione
+    // proprio mentre yt-dlp ci scrive, con un vero e proprio "Permission denied" — non un errore di
+    // rete, quindi --fragment-retries (già alto di default) non lo ritenta. --file-access-retries è
+    // il flag dedicato a questa categoria di errore (osservato in pratica su un VOD di 5h e mezza,
+    // fallito al frammento 1387 su un download altrimenti riuscito).
+    "--file-access-retries",
+    "20",
+    "--fragment-retries",
+    "20",
     // Alcuni video (età limitata, o che richiedono comunque un account) falliscono SEMPRE
     // senza autenticazione — vedi YT_DLP_COOKIES_FILE / YT_DLP_COOKIES_FROM_BROWSER in env.ts.
     // Il file ha precedenza: bypassa il problema di decrittazione DPAPI di Chrome su Windows.
