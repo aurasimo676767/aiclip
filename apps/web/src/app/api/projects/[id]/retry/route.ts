@@ -29,7 +29,11 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   const { error: updateVideoError } = await supabase
     .from("videos")
-    .update({ status: "UPLOADED", error_message: null, claimed_by: null, claimed_at: null, attempts: 0 })
+    // cancel_requested va azzerato esplicitamente: se questo video era già stato annullato in
+    // passato (anche per sbaglio, o in un tentativo precedente) il flag resta true per sempre
+    // finché non viene ripulito qui — altrimenti il worker lo vede al primo claim del nuovo
+    // tentativo e interrompe subito la pipeline, come se l'utente avesse annullato ORA.
+    .update({ status: "UPLOADED", error_message: null, claimed_by: null, claimed_at: null, attempts: 0, cancel_requested: false })
     .eq("id", video.id);
   if (updateVideoError) {
     return NextResponse.json({ error: `Aggiornamento video fallito: ${updateVideoError.message}` }, { status: 500 });
