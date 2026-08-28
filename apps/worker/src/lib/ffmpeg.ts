@@ -50,7 +50,11 @@ function run(bin: "ffmpeg" | "ffprobe", args: string[], options: RunOptions = {}
         return;
       }
       if (code !== 0) {
-        reject(new FFmpegError(`${bin} terminato con codice ${code}`, code, stderr));
+        // Prima mancava la coda di stderr nel messaggio (a differenza di runFfmpegBinary, che
+        // ce l'aveva già) — un errore "terminato con codice N" senza altro contesto è quasi
+        // inutile per capire COSA è andato storto davvero (osservato in pratica: un crash con
+        // codice 4294967294 senza nessun dettaglio su cosa l'avesse causato).
+        reject(new FFmpegError(`${bin} terminato con codice ${code}: ${stderr.slice(-800)}`, code, stderr));
         return;
       }
       resolve({ stdout, stderr });
