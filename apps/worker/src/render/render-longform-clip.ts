@@ -67,7 +67,14 @@ interface VideoStreamParams {
  * meccanismo già testato e funzionante per i sottotitoli degli Shorts.
  */
 export async function renderLongformClip(params: RenderLongformClipParams): Promise<{ durationSeconds: number }> {
-  const { sourceVideoPath, start, end, streamerName, workDir, outputPath } = params;
+  const { sourceVideoPath, start, end, streamerName, outputPath } = params;
+  // Il demuxer concat di ffmpeg risolve le righe relative del file di lista RISPETTO ALLA
+  // CARTELLA DEL FILE DI LISTA STESSO (comportamento documentato di ffmpeg, non un bug suo).
+  // Se workDir arriva relativo (es. "./tmp" di default per WORKER_TMP_DIR), sia il percorso del
+  // file di lista sia le righe al suo interno finiscono relative alla STESSA cartella, e ffmpeg
+  // la concatena due volte da solo — osservato in pratica: 'tmp\render-x\tmp\render-x\intro.mp4'.
+  // Risolvere ad assoluto qui evita l'ambiguità alla radice.
+  const workDir = path.resolve(params.workDir);
 
   const sourceProbe = await probeVideo(sourceVideoPath);
   if (!sourceProbe.hasVideo || !sourceProbe.width || !sourceProbe.height) {
