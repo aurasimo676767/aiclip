@@ -20,7 +20,7 @@ const CANDIDATES_TOOL_SCHEMA = {
     properties: {
       candidates: {
         type: "array",
-        maxItems: 3,
+        maxItems: 2,
         items: {
           type: "object",
           properties: {
@@ -36,19 +36,19 @@ const CANDIDATES_TOOL_SCHEMA = {
   },
 };
 
-const SYSTEM_PROMPT = `Sei un editor esperto che prepara video long-form per YouTube a partire da VOD di live Twitch. Il tuo compito NON è trovare momenti brevi ad alto impatto (quello è un altro passaggio, per gli Shorts) — devi individuare BLOCCHI DI ATTIVITÀ INTERI, ognuno lungo quanto dura DAVVERO quell'attività (tipicamente 10-40 minuti, anche di più se l'attività continua), pensati per diventare un video YouTube completo con titolo tipo "[STREAMER] REAGISCE AI TIKTOK PIÙ ASSURDI DELLA SETTIMANA", "[STREAMER] parla dello scandalo X", "[STREAMER1], [STREAMER2] e [STREAMER3] giocano a X".
+const SYSTEM_PROMPT = `Sei un editor esperto che prepara video long-form per YouTube a partire da VOD di live Twitch. Il tuo compito NON è trovare momenti brevi ad alto impatto (quello è un altro passaggio, per gli Shorts) — devi individuare BLOCCHI DI ATTIVITÀ INTERI, ognuno lungo quanto dura DAVVERO quell'attività. Un segmento SOTTO i 15 minuti è quasi sempre un errore: prima di restituirlo, chiediti "questo fa davvero parte di un blocco più grande che sto spezzando per sbaglio?" — nella stragrande maggioranza dei casi la risposta è sì. Target realistico: 15-40 minuti, anche di più se l'attività continua. Pensali come video YouTube completi con titolo tipo "[STREAMER] REAGISCE AI TIKTOK PIÙ ASSURDI DELLA SETTIMANA", "[STREAMER] parla dello scandalo X", "[STREAMER1], [STREAMER2] e [STREAMER3] giocano a X" — un titolo così non si scrive per 10 minuti di gioco, si scrive per l'INTERA sessione.
 
-REGOLA PIÙ IMPORTANTE — confine del segmento = cambio di ATTIVITÀ, non cambio di momento: se lo streamer sta facendo reaction ai TikTok, TUTTO il blocco (dal primo "ora guardiamo un po' di TikTok" fino a quando smette e passa a fare altro) è UN SOLO segmento, anche se dura 30-40 minuti e attraversa TikTok diversi con reazioni diverse. Stesso discorso per una sessione di gioco: se il gruppo gioca a un gioco per 40 minuti, quei 40 minuti sono UN SOLO segmento anche se dentro succedono cose diverse (scoprono un obiettivo, falliscono, ci riprovano, festeggiano) — quelli sono CAPITOLI della stessa attività, NON argomenti diversi, e vanno tenuti insieme.
+REGOLA PIÙ IMPORTANTE — confine del segmento = cambio di ATTIVITÀ, non cambio di momento: se lo streamer sta facendo reaction ai TikTok, TUTTO il blocco (dal primo "ora guardiamo un po' di TikTok" fino a quando smette e passa a fare altro) è UN SOLO segmento, anche se dura 30-40 minuti e attraversa TikTok diversi con reazioni diverse. Stesso discorso per una sessione di gioco: se il gruppo gioca a un gioco per 40 minuti, quei 40 minuti sono UN SOLO segmento anche se dentro succedono cose diverse (scoprono un obiettivo, falliscono, ci riprovano, festeggiano) — quelli sono CAPITOLI della stessa attività, NON argomenti diversi, e vanno tenuti insieme. Lo stesso vale se dentro la stessa sessione di gioco/reaction si passa da un "episodio" all'altro (un'altra missione, un altro TikTok, un altro round): finché il FORMATO resta lo stesso (si sta ancora giocando allo stesso gioco, si stanno ancora guardando TikTok), NON è un cambio di attività, è la stessa attività che continua.
 
-ERRORE DA NON RIPETERE (osservato in un run reale): un'intera sessione di "caccia e trasporto di una balena" in un gioco co-op — scoperta dell'obiettivo, caccia, un incidente (morte nel magma), recupero, trasporto, consegna finale — è stata spezzata in 4 segmenti separati da 3-5 minuti ciascuno (uno per ogni "colpo di scena"). È SBAGLIATO: è tutta la STESSA attività (quella sessione di gioco/quell'obiettivo) e andava restituita come UN SOLO segmento dall'inizio alla fine, non frammentata per ogni mini-arco narrativo al suo interno. Se ti accorgi di voler creare più segmenti ravvicinati nel tempo sullo stesso gioco/argomento senza che sia successo un vero cambio di attività in mezzo, UNISCILI in un solo segmento con start/end che coprono tutto l'arco.
+ERRORE DA NON RIPETERE (osservato in DUE run reali, non uno): la prima volta un'intera sessione di "caccia e trasporto di una balena" in un gioco co-op è stata spezzata in 4 segmenti da 3-5 minuti (uno per ogni colpo di scena). La seconda volta, anche dopo aver corretto quell'errore, un intero VOD è stato diviso in 14 segmenti da ~10 minuti l'uno, MOLTI dei quali erano ancora sotto lo stesso grande argomento (es. la stessa sessione di gioco spezzata in 3-4 pezzi da 10 minuti invece di un solo segmento da 30-40). Se ti accorgi di voler creare più segmenti ravvicinati nel tempo sullo stesso gioco/argomento/formato senza che sia successo un vero cambio di attività in mezzo, UNISCILI SEMPRE in un solo segmento con start/end che coprono tutto l'arco — anche se il segmento risultante ti sembra "lungo", è quello che serve.
 
 Altre regole:
-- Ogni segmento deve avere un inizio e una fine naturali: comincia quando l'attività comincia DAVVERO, finisce quando cambia DAVVERO argomento/gioco/attività. Se un'attività comincia prima dell'inizio della finestra che ti è stata data o continua oltre la fine, usa comunque i timestamp REALI disponibili nel transcript fornito (non inventarli), anche se il segmento risulta parziale — verrà eventualmente unito a quello della finestra successiva.
+- Ogni segmento deve avere un inizio e una fine naturali: comincia quando l'attività comincia DAVVERO, finisce quando cambia DAVVERO argomento/gioco/attività/formato. Se un'attività comincia prima dell'inizio della finestra che ti è stata data o continua oltre la fine, usa comunque i timestamp REALI disponibili nel transcript fornito (non inventarli), anche se il segmento risulta parziale — verrà eventualmente unito a quello della finestra successiva.
 - Salta i momenti morti: setup tecnico, silenzi lunghi, chiacchiere senza argomento riconoscibile, momenti in cui la chat/il gioco caricano senza che succeda nulla — questi possono restare FUORI dal segmento (accorciano l'inizio/fine), ma non spezzano un'attività a metà solo perché per un minuto non succede nulla.
 - Non serve un "hook" come per gli Shorts: qui l'obiettivo è coerenza tematica su un intero blocco, non un colpo di scena nei primi secondi.
-- Preferisci pochi segmenti lunghi e coerenti a molti segmenti brevi: se questa finestra di 30 minuti di transcript è tutta la stessa attività, restituisci UN candidato che copre l'intera finestra (o quasi), non 4-5 candidati piccoli.
+- Preferisci pochi segmenti lunghi e coerenti a molti segmenti brevi: se questa finestra di 45 minuti di transcript è tutta la stessa attività, restituisci UN candidato che copre l'intera finestra (o quasi), non 2-3 candidati piccoli.
 
-Restituisci al massimo 3 segmenti per questa finestra di transcript (di solito ne basta 1, a volte 2 se c'è un vero cambio di attività a metà). Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito: non inventare tempi. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
+Restituisci al massimo 2 segmenti per questa finestra di transcript (quasi sempre ne basta 1 — un secondo solo se c'è un VERO cambio di attività a metà finestra). Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito: non inventare tempi. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
 export interface LongformCandidateDetectionOptions {
   apiKey: string;
@@ -117,7 +117,37 @@ ${formatSegments(windowSegments)}`;
     }
   }
 
-  return dedupeCandidates(allCandidates);
+  return mergeNearbyCandidates(dedupeCandidates(allCandidates));
+}
+
+// Se due candidati (anche da finestre diverse) sono separati da un vuoto breve, quasi sempre è
+// la STESSA attività spezzata per sbaglio (osservato in pratica: un'intera sessione di gioco
+// divisa in pezzi da ~10 minuti) — non ci affidiamo solo al prompt per evitarlo, lo forziamo qui.
+const MERGE_GAP_SECONDS = 300; // 5 minuti
+
+/** Unisce candidati consecutivi (ordinati per start) separati da meno di MERGE_GAP_SECONDS. */
+function mergeNearbyCandidates(
+  candidates: LongformCandidatesResponse["candidates"],
+): LongformCandidatesResponse["candidates"] {
+  const sorted = [...candidates].sort((a, b) => a.start - b.start);
+  const result: LongformCandidatesResponse["candidates"] = [];
+
+  for (const candidate of sorted) {
+    const last = result[result.length - 1];
+    if (last && candidate.start - last.end < MERGE_GAP_SECONDS) {
+      // Tiene il topic del segmento più lungo tra i due (confronto PRIMA di estendere last.end):
+      // dopo la fusione il passaggio di ranking guarda comunque il transcript completo del nuovo
+      // intervallo per scrivere titolo/descrizione reali, questo campo è solo un indizio.
+      if (candidate.end - candidate.start > last.end - last.start) {
+        last.topic = candidate.topic;
+      }
+      last.end = Math.max(last.end, candidate.end);
+    } else {
+      result.push({ ...candidate });
+    }
+  }
+
+  return result;
 }
 
 function buildWindows(durationSeconds: number): Array<{ start: number; end: number }> {
