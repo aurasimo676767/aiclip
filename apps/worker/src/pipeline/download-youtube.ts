@@ -42,12 +42,13 @@ export async function downloadYoutubeVideo(url: string, outputDir: string): Prom
     "--fragment-retries",
     "20",
     // Di default yt-dlp scarica i frammenti UNO ALLA VOLTA in sequenza: su una connessione
-    // veloce (es. 2 Gbps) il collo di bottiglia diventa il round-trip per ogni singola richiesta
-    // HTTP, non la banda disponibile — un VOD di ore finiva per metterci ore anche quando la
-    // rete avrebbe permesso di scaricarlo in pochi minuti. 8 frammenti in parallelo satura
-    // molto meglio connessioni veloci senza esagerare (rischio di rate-limit dal CDN Twitch).
+    // veloce il collo di bottiglia diventa il round-trip per ogni singola richiesta HTTP, non
+    // la banda disponibile. 4 in parallelo è un compromesso più prudente di 8 (usato in un primo
+    // tentativo): su una macchina con poca RAM libera, scrivere troppi frammenti insieme aumenta
+    // la pressione su disco/memoria abbastanza da bloccare l'intero sistema durante il download
+    // (osservato in pratica) — non vale il guadagno di velocità.
     "--concurrent-fragments",
-    "8",
+    "4",
     // Alcuni video (età limitata, o che richiedono comunque un account) falliscono SEMPRE
     // senza autenticazione — vedi YT_DLP_COOKIES_FILE / YT_DLP_COOKIES_FROM_BROWSER in env.ts.
     // Il file ha precedenza: bypassa il problema di decrittazione DPAPI di Chrome su Windows.
