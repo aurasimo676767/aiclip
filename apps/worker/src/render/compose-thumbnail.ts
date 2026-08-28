@@ -50,9 +50,6 @@ interface StrokedTextOptions {
   fill: string;
   strokeColor: string;
   strokeWidth: number;
-  /** Colore di alcune parole (es. numeri) evidenziate diversamente — opzionale, per parola esatta. */
-  highlightColor?: string;
-  highlightWords?: string[];
 }
 
 /** Renderizza testo con contorno spesso (stile titolo YouTube) su un PNG trasparente dimensionato al contenuto. */
@@ -63,21 +60,10 @@ function renderStrokedText(options: StrokedTextOptions): { buffer: Buffer; width
   const width = Math.round(options.maxWidthPx + padding * 2);
   const height = Math.round(lineHeight * lines.length + padding * 2);
 
-  const highlightSet = new Set((options.highlightWords ?? []).map((w) => w.toLowerCase()));
-
   const tspans = lines
     .map((line, i) => {
       const y = padding + options.fontSize + i * lineHeight;
-      const words = line.split(/\s+/);
-      const wordSpans = words
-        .map((word, wi) => {
-          const isHighlighted = highlightSet.size > 0 && highlightSet.has(word.replace(/[^\wàèéìòù]/gi, "").toLowerCase());
-          const fill = isHighlighted && options.highlightColor ? options.highlightColor : options.fill;
-          const prefix = wi === 0 ? "" : " ";
-          return `<tspan fill="${fill}">${escapeXml(prefix + word)}</tspan>`;
-        })
-        .join("");
-      return `<tspan x="${padding}" y="${y}">${wordSpans}</tspan>`;
+      return `<tspan x="${padding}" y="${y}" fill="${options.fill}">${escapeXml(line)}</tspan>`;
     })
     .join("");
 
@@ -99,22 +85,18 @@ export interface ComposeThumbnailParams {
   faceCutoutPngPath: string | null;
   /** Es. "BLUR REACTION" o "BLUR GIOCA A GTA 6". */
   bannerText: string;
-  /** Titolo ad effetto scritto in basso a sinistra. */
-  headlineText: string;
-  /** Parole del titolo da evidenziare in verde (numeri/soldi) — opzionale. */
-  headlineHighlightWords?: string[];
   outputPath: string;
 }
 
 /**
  * Compone la copertina finale: sfondo (fotogramma del video) + eventuale ritaglio della faccia
- * (ancorato in basso a destra) + banner in alto a sinistra + titolo ad effetto in basso a
- * sinistra. Layout FISSO (non deciso dall'IA): più prevedibile e consistente di una posizione
- * calcolata ogni volta, e un template ben tarato regge la maggior parte dei fotogrammi di sfondo.
+ * (ancorato in basso a destra) + banner in alto a sinistra. Layout FISSO (non deciso dall'IA):
+ * più prevedibile e consistente di una posizione calcolata ogni volta, e un template ben tarato
+ * regge la maggior parte dei fotogrammi di sfondo.
  */
 export async function composeThumbnail(params: ComposeThumbnailParams): Promise<void> {
   const hasFace = Boolean(params.faceCutoutPngPath);
-  // Se c'è la faccia a destra, banner e titolo restano nella metà sinistra per non sovrapporsi.
+  // Se c'è la faccia a destra, il banner resta nella metà sinistra per non sovrapporsi.
   const textMaxWidth = hasFace ? 760 : 1180;
 
   const background = await sharp(params.backgroundFramePath)
@@ -123,18 +105,6 @@ export async function composeThumbnail(params: ComposeThumbnailParams): Promise<
     .toBuffer();
 
   const composite: sharp.OverlayOptions[] = [];
-
-  // Striscia scura in basso a sinistra, per leggibilità del titolo su sfondi chiari/affollati.
-  const shadeSvg = `<svg width="${textMaxWidth + 80}" height="260" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="g" x1="0" y1="1" x2="0" y2="0">
-        <stop offset="0%" stop-color="black" stop-opacity="0.55"/>
-        <stop offset="100%" stop-color="black" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-    <rect width="100%" height="100%" fill="url(#g)"/>
-  </svg>`;
-  composite.push({ input: Buffer.from(shadeSvg), left: 0, top: CANVAS_HEIGHT - 260 });
 
   if (params.faceCutoutPngPath) {
     const faceMeta = await sharp(params.faceCutoutPngPath).metadata();
@@ -155,19 +125,6 @@ export async function composeThumbnail(params: ComposeThumbnailParams): Promise<
     strokeWidth: 9,
   });
   composite.push({ input: banner.buffer, left: 40, top: 30 });
-
-  const headline = renderStrokedText({
-    text: params.headlineText,
-    fontSize: 56,
-    maxWidthPx: textMaxWidth,
-    maxLines: 3,
-    fill: "#ffffff",
-    strokeColor: "#000000",
-    strokeWidth: 7,
-    highlightColor: "#3ddc4a",
-    highlightWords: params.headlineHighlightWords,
-  });
-  composite.push({ input: headline.buffer, left: 40, top: CANVAS_HEIGHT - headline.height - 30 });
 
   await sharp(background).composite(composite).jpeg({ quality: 90 }).toFile(params.outputPath);
 }

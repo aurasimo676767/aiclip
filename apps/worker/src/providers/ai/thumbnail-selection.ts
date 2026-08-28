@@ -31,13 +31,8 @@ const TOOL_SCHEMA = {
         description:
           "Se in uno dei fotogrammi è leggibile il titolo e/o il nome del canale del video che si sta reagendo (es. testo nella pagina YouTube, tab del browser, sottotitolo in sovrimpressione), scrivi qui una query di ricerca breve per ritrovarlo (titolo + canale). Serve per recuperare la SUA copertina ufficiale reale invece di uno screenshot improvvisato. Ometti/lascia vuoto se non è leggibile con sicurezza — meglio niente che una query sbagliata.",
       },
-      headlineText: {
-        type: "string",
-        description:
-          "Una frase COMPLETA e AUTONOMA di 6-12 parole, capibile da sola anche da chi non ha letto la descrizione — stile titolo clickbait da copertina YouTube (es. \"Scappa da 100 poliziotti e vince 500.000€\", non un frammento come \"e vince 500.000€\"). Deve avere soggetto sottinteso + un fatto/numero/azione concreta e sorprendente, non un dettaglio isolato fuori contesto. Verrà scritto in grande sulla copertina. Niente tutto maiuscolo (lo gestisce il rendering), niente punteggiatura finale.",
-      },
     },
-    required: ["backgroundFrameIndex", "headlineText"],
+    required: ["backgroundFrameIndex"],
   },
 };
 
@@ -45,7 +40,6 @@ const SYSTEM_PROMPT = `Sei un editor esperto di copertine YouTube per video reac
 
 1. Scegli l'indice del fotogramma migliore da usare come SFONDO della copertina — MAI uno con interfaccia browser/player visibile (barra di avanzamento, controlli, sidebar chat, testo di commenti): se capita in tutti, scegli quello con meno interfaccia e ritagliala via con contentCropBox.
 2. Se riesci a leggere con sicurezza il titolo o il canale del video/contenuto che si sta reagendo in uno dei fotogrammi, scrivilo in reactedVideoQuery.
-3. Scrivi una frase ad effetto COMPLETA e autonoma (headlineText) — deve reggere da sola, non un dettaglio isolato staccato dal contesto (vedi descrizione del campo per un esempio).
 
 Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
@@ -63,7 +57,6 @@ export interface ThumbnailSelection {
   backgroundFrameIndex: number;
   contentCropBox: { x: number; y: number; width: number; height: number } | null;
   reactedVideoQuery: string | null;
-  headlineText: string;
 }
 
 export async function selectThumbnailAssets(options: ThumbnailSelectionOptions): Promise<ThumbnailSelection> {
@@ -100,10 +93,9 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     backgroundFrameIndex?: number;
     contentCropBox?: { x: number; y: number; width: number; height: number };
     reactedVideoQuery?: string;
-    headlineText?: string;
   };
 
-  if (typeof input.backgroundFrameIndex !== "number" || typeof input.headlineText !== "string") {
+  if (typeof input.backgroundFrameIndex !== "number") {
     logger.warn("Output selezione copertina incompleto", { input });
     throw new Error("Output non valido dalla selezione IA della copertina");
   }
@@ -112,6 +104,5 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     backgroundFrameIndex: input.backgroundFrameIndex,
     contentCropBox: input.contentCropBox ?? null,
     reactedVideoQuery: input.reactedVideoQuery?.trim() ? input.reactedVideoQuery.trim() : null,
-    headlineText: input.headlineText,
   };
 }

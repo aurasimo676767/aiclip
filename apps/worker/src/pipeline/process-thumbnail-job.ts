@@ -173,7 +173,6 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       backgroundFramePath: backgroundFullPath,
       faceCutoutPngPath: null,
       bannerText,
-      headlineText: selection.headlineText,
       outputPath: composedPath,
     });
 

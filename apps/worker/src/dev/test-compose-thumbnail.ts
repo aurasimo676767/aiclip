@@ -11,8 +11,6 @@ await composeThumbnail({
   backgroundFramePath: backgroundPath,
   faceCutoutPngPath: faceCutoutPath,
   bannerText: "BLUR REACTION",
-  headlineText: "Scappa da 100 poliziotti e vince 500.000 euro",
-  headlineHighlightWords: ["500.000"],
   outputPath: "tmp/compose-test.jpg",
 });
 console.log("scritto tmp/compose-test.jpg");
