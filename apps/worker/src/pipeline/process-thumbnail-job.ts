@@ -9,7 +9,7 @@ import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
 import { runFfmpeg, probeVideo } from "../lib/ffmpeg.js";
 import { selectThumbnailAssets } from "../providers/ai/thumbnail-selection.js";
-import { resolveStreamerFace } from "../providers/ai/generate-face-portrait.js";
+import { resolveStreamerFace, listAvailableExpressions } from "../providers/ai/generate-face-portrait.js";
 import { composeThumbnail } from "../render/compose-thumbnail.js";
 import {
   setYoutubeThumbnail,
@@ -99,6 +99,12 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     );
     const lowResBase64 = await Promise.all(lowResPaths.map(async (p) => (await fsp.readFile(p)).toString("base64")));
 
+    // Alias/espressioni disponibili PRIMA della selezione, così Claude può scegliere quella più
+    // adatta al tono del segmento invece di sceglierla a caso dopo.
+    const { data: video } = await supabase.from("videos").select("streamer_name").eq("id", clip.video_id).maybeSingle();
+    const aliasLower = video?.streamer_name ? LONGFORM_STREAMER_ALIASES[video.streamer_name.toLowerCase()]?.toLowerCase() : undefined;
+    const availableExpressions = aliasLower ? await listAvailableExpressions(aliasLower) : [];
+
     const selection = await selectThumbnailAssets({
       apiKey: env.ANTHROPIC_API_KEY,
       model: env.ANTHROPIC_MODEL_CHEAP,
@@ -106,6 +112,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       clipHook: clip.hook,
       clipCaption: clip.caption ?? "",
       frameJpegsBase64: lowResBase64,
+      availableExpressions,
     });
 
     // 3) Sfondo, in ordine di affidabilità:
@@ -169,15 +176,19 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     const bannerText = extractBannerText(clip.title);
 
     // 5) Faccia: preferisce un ritaglio fisso già pronto (foto vera, gratis, sempre identica alla
-    // persona reale); se non c'è ancora per questo alias, prova a generarla con l'IA dalle foto
+    // persona reale), con l'espressione scelta sopra in base al tono del segmento se disponibile;
+    // se non c'è ancora nessun ritaglio per questo alias, prova a generarla con l'IA dalle foto
     // di riferimento; se non c'è nessuna delle due, niente faccia in copertina.
     let faceCutoutPath: string | null = null;
-    const { data: video } = await supabase.from("videos").select("streamer_name").eq("id", clip.video_id).maybeSingle();
-    const aliasLower = video?.streamer_name ? LONGFORM_STREAMER_ALIASES[video.streamer_name.toLowerCase()]?.toLowerCase() : undefined;
     if (aliasLower) {
       try {
         const facePath = path.join(jobDir, "face-generated.png");
-        faceCutoutPath = await resolveStreamerFace({ apiKey: env.OPENAI_API_KEY, aliasLower, outputPath: facePath });
+        faceCutoutPath = await resolveStreamerFace({
+          apiKey: env.OPENAI_API_KEY,
+          aliasLower,
+          outputPath: facePath,
+          preferredExpression: selection.desiredExpression,
+        });
       } catch (err) {
         logger.warn("Risoluzione faccia fallita, copertina senza faccia", {
           jobId: job.id,

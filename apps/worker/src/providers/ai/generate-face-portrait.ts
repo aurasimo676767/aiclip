@@ -6,17 +6,46 @@ import OpenAI, { toFile } from "openai";
 const PHOTOS_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../assets/streamer-photos");
 const FACES_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../assets/streamer-faces");
 
+/** Nome file "3-ride-forte.png" -> etichetta espressione "ride-forte" (senza numero né estensione). */
+function expressionLabel(filename: string): string {
+  return path.basename(filename, path.extname(filename)).replace(/^\d+-?/, "");
+}
+
 /**
- * Ritaglio pronto e fisso (assets/streamer-faces/<alias minuscolo>.png, sfondo già rimosso) —
- * una foto vera ritagliata una volta sola e riusata sempre: gratis, istantaneo, e identico al
- * 100% alla persona reale (a differenza della generazione IA sotto, che può assomigliare solo
- * "abbastanza"). Va sempre preferito quando esiste, vedi resolveStreamerFace.
+ * Elenca le espressioni disponibili per uno streamer (dai nomi dei file in
+ * assets/streamer-faces/<alias>/, es. "3-ride-forte.png" -> "ride-forte") — usato per far
+ * scegliere a Claude quella più adatta al tono del contenuto invece che a caso.
  */
-async function findFixedCutout(aliasLower: string): Promise<string | null> {
-  const fixedPath = path.join(FACES_ROOT, `${aliasLower}.png`);
+export async function listAvailableExpressions(aliasLower: string): Promise<string[]> {
   try {
-    await fsp.access(fixedPath);
-    return fixedPath;
+    const dir = path.join(FACES_ROOT, aliasLower);
+    const files = (await fsp.readdir(dir)).filter((f) => /\.(png|jpg|jpeg)$/i.test(f));
+    return files.map(expressionLabel).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Ritagli pronti e fissi (assets/streamer-faces/<alias minuscolo>/*.png, sfondo già rimosso) —
+ * foto vere ritagliate una volta sola e riusate: gratis, istantanee, e identiche al 100% alla
+ * persona reale (a differenza della generazione IA sotto, che può assomigliare solo
+ * "abbastanza"). Più foto (espressioni diverse: scioccato, contento, ride, triste...) = più
+ * varietà tra un video e l'altro invece di mostrare sempre la stessa identica immagine. Se
+ * `preferredExpression` combacia con una delle etichette disponibili la usa, altrimenti ne
+ * sceglie una a caso — va sempre preferito quando ce n'è almeno una, vedi resolveStreamerFace.
+ */
+async function pickFixedCutout(aliasLower: string, preferredExpression: string | null): Promise<string | null> {
+  try {
+    const dir = path.join(FACES_ROOT, aliasLower);
+    const files = (await fsp.readdir(dir)).filter((f) => /\.(png|jpg|jpeg)$/i.test(f));
+    if (files.length === 0) return null;
+    if (preferredExpression) {
+      const match = files.find((f) => expressionLabel(f).toLowerCase() === preferredExpression.toLowerCase());
+      if (match) return path.join(dir, match);
+    }
+    const chosen = files[Math.floor(Math.random() * files.length)]!;
+    return path.join(dir, chosen);
   } catch {
     return null;
   }
@@ -24,11 +53,17 @@ async function findFixedCutout(aliasLower: string): Promise<string | null> {
 
 /**
  * Risolve il modo migliore disponibile per mostrare la faccia di uno streamer in copertina:
- * un ritaglio fisso già pronto se esiste, altrimenti una nuova generazione IA dalle foto di
- * riferimento se disponibili, altrimenti null (nessuna faccia in copertina).
+ * un ritaglio fisso già pronto se esiste (preferendo l'espressione richiesta se combacia),
+ * altrimenti una nuova generazione IA dalle foto di riferimento se disponibili, altrimenti
+ * null (nessuna faccia in copertina).
  */
-export async function resolveStreamerFace(params: { apiKey: string; aliasLower: string; outputPath: string }): Promise<string | null> {
-  const fixed = await findFixedCutout(params.aliasLower);
+export async function resolveStreamerFace(params: {
+  apiKey: string;
+  aliasLower: string;
+  outputPath: string;
+  preferredExpression?: string | null;
+}): Promise<string | null> {
+  const fixed = await pickFixedCutout(params.aliasLower, params.preferredExpression ?? null);
   if (fixed) return fixed;
 
   if (await hasReferencePhotos(params.aliasLower)) {
