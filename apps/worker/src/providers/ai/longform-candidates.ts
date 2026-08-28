@@ -14,19 +14,19 @@ const TOOL_NAME = "return_longform_candidates";
 
 const CANDIDATES_TOOL_SCHEMA = {
   name: TOOL_NAME,
-  description: "Restituisce i segmenti candidati (uno per argomento) individuati nel transcript di un VOD lungo.",
+  description: "Restituisce i segmenti candidati (uno per ATTIVITÀ/ARGOMENTO, non uno per momento narrativo) individuati nel transcript di un VOD lungo.",
   input_schema: {
     type: "object" as const,
     properties: {
       candidates: {
         type: "array",
-        maxItems: 6,
+        maxItems: 3,
         items: {
           type: "object",
           properties: {
-            start: { type: "number", description: "Timestamp di inizio in secondi dall'inizio del VOD." },
-            end: { type: "number", description: "Timestamp di fine in secondi dall'inizio del VOD." },
-            topic: { type: "string", description: "Breve descrizione dell'argomento trattato in questo segmento." },
+            start: { type: "number", description: "Timestamp di inizio in secondi dall'inizio del VOD — l'inizio dell'ATTIVITÀ, non di un momento specifico dentro di essa." },
+            end: { type: "number", description: "Timestamp di fine in secondi dall'inizio del VOD — quando l'attività finisce DAVVERO (cambio argomento/gioco), non quando finisce un episodio dentro di essa." },
+            topic: { type: "string", description: "L'attività/argomento nel suo insieme, es. \"reaction ai TikTok\", \"sessione di gameplay a X\", \"discussione sullo scandalo Y\" — non un singolo evento dentro l'attività." },
           },
           required: ["start", "end", "topic"],
         },
@@ -36,15 +36,19 @@ const CANDIDATES_TOOL_SCHEMA = {
   },
 };
 
-const SYSTEM_PROMPT = `Sei un editor esperto che prepara video long-form per YouTube a partire da VOD di live Twitch. Il tuo compito NON è trovare momenti brevi ad alto impatto (quello è un altro passaggio, per gli Shorts) — devi individuare SEGMENTI LUNGHI E COERENTI, ognuno dedicato a UN argomento/momento della live che regge da solo come video a sé stante (5-20 minuti), es: "un'intera partita/round di un gioco", "un'intera reazione a un video/argomento", "un'intera interazione con un ospite/i chat", "un'intera storia raccontata per esteso".
+const SYSTEM_PROMPT = `Sei un editor esperto che prepara video long-form per YouTube a partire da VOD di live Twitch. Il tuo compito NON è trovare momenti brevi ad alto impatto (quello è un altro passaggio, per gli Shorts) — devi individuare BLOCCHI DI ATTIVITÀ INTERI, ognuno lungo quanto dura DAVVERO quell'attività (tipicamente 10-40 minuti, anche di più se l'attività continua), pensati per diventare un video YouTube completo con titolo tipo "[STREAMER] REAGISCE AI TIKTOK PIÙ ASSURDI DELLA SETTIMANA", "[STREAMER] parla dello scandalo X", "[STREAMER1], [STREAMER2] e [STREAMER3] giocano a X".
 
-Regole:
-- Ogni segmento deve avere un inizio e una fine naturali: non tagliare a metà di un discorso o di un round di gioco. Se un argomento comincia prima dell'inizio della finestra che ti è stata data o continua oltre la fine, usa comunque i timestamp REALI disponibili nel transcript fornito (non inventarli), anche se il segmento risulta parziale.
-- Salta i momenti morti: setup tecnico, silenzi lunghi, chiacchiere senza argomento riconoscibile, momenti in cui la chat/il gioco caricano senza che succeda nulla.
-- Non serve un "hook" come per gli Shorts: qui l'obiettivo è coerenza tematica, non un colpo di scena nei primi secondi.
-- Ogni segmento deve poter reggersi da solo: chi lo guarda senza aver visto il resto della live deve poter seguire cosa succede.
+REGOLA PIÙ IMPORTANTE — confine del segmento = cambio di ATTIVITÀ, non cambio di momento: se lo streamer sta facendo reaction ai TikTok, TUTTO il blocco (dal primo "ora guardiamo un po' di TikTok" fino a quando smette e passa a fare altro) è UN SOLO segmento, anche se dura 30-40 minuti e attraversa TikTok diversi con reazioni diverse. Stesso discorso per una sessione di gioco: se il gruppo gioca a un gioco per 40 minuti, quei 40 minuti sono UN SOLO segmento anche se dentro succedono cose diverse (scoprono un obiettivo, falliscono, ci riprovano, festeggiano) — quelli sono CAPITOLI della stessa attività, NON argomenti diversi, e vanno tenuti insieme.
 
-Restituisci al massimo 6 segmenti per questa finestra di transcript. Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito: non inventare tempi. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
+ERRORE DA NON RIPETERE (osservato in un run reale): un'intera sessione di "caccia e trasporto di una balena" in un gioco co-op — scoperta dell'obiettivo, caccia, un incidente (morte nel magma), recupero, trasporto, consegna finale — è stata spezzata in 4 segmenti separati da 3-5 minuti ciascuno (uno per ogni "colpo di scena"). È SBAGLIATO: è tutta la STESSA attività (quella sessione di gioco/quell'obiettivo) e andava restituita come UN SOLO segmento dall'inizio alla fine, non frammentata per ogni mini-arco narrativo al suo interno. Se ti accorgi di voler creare più segmenti ravvicinati nel tempo sullo stesso gioco/argomento senza che sia successo un vero cambio di attività in mezzo, UNISCILI in un solo segmento con start/end che coprono tutto l'arco.
+
+Altre regole:
+- Ogni segmento deve avere un inizio e una fine naturali: comincia quando l'attività comincia DAVVERO, finisce quando cambia DAVVERO argomento/gioco/attività. Se un'attività comincia prima dell'inizio della finestra che ti è stata data o continua oltre la fine, usa comunque i timestamp REALI disponibili nel transcript fornito (non inventarli), anche se il segmento risulta parziale — verrà eventualmente unito a quello della finestra successiva.
+- Salta i momenti morti: setup tecnico, silenzi lunghi, chiacchiere senza argomento riconoscibile, momenti in cui la chat/il gioco caricano senza che succeda nulla — questi possono restare FUORI dal segmento (accorciano l'inizio/fine), ma non spezzano un'attività a metà solo perché per un minuto non succede nulla.
+- Non serve un "hook" come per gli Shorts: qui l'obiettivo è coerenza tematica su un intero blocco, non un colpo di scena nei primi secondi.
+- Preferisci pochi segmenti lunghi e coerenti a molti segmenti brevi: se questa finestra di 30 minuti di transcript è tutta la stessa attività, restituisci UN candidato che copre l'intera finestra (o quasi), non 4-5 candidati piccoli.
+
+Restituisci al massimo 3 segmenti per questa finestra di transcript (di solito ne basta 1, a volte 2 se c'è un vero cambio di attività a metà). Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito: non inventare tempi. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
 export interface LongformCandidateDetectionOptions {
   apiKey: string;
