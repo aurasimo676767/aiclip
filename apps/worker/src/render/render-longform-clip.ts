@@ -30,6 +30,8 @@ interface VideoStreamParams {
   width: number;
   height: number;
   frameRate: string; // es. "30/1", passato così com'è a -r
+  /** Denominatore del time_base del segmento (es. 90000) — le card DEVONO usare lo stesso, vedi nota su -video_track_timescale. */
+  trackTimescale: number | null;
 }
 
 /**
@@ -43,9 +45,13 @@ interface VideoStreamParams {
  *    ri-codificato, per applicare comunque il loudnorm (economico, l'audio è leggero da
  *    processare rispetto al video).
  * 2. Le card dei crediti (3s ciascuna) vengono generate con GLI STESSI parametri video del
- *    segmento appena estratto (stesso profilo/livello H.264, risoluzione, frame rate) — sono gli
- *    unici pezzi realmente "renderizzati" da zero, ma durano 3 secondi, quindi il costo è
- *    trascurabile.
+ *    segmento appena estratto (stesso profilo/livello H.264, risoluzione, frame rate, E LO STESSO
+ *    time_base del contenitore via -video_track_timescale) — sono gli unici pezzi realmente
+ *    "renderizzati" da zero, ma durano 3 secondi, quindi il costo è trascurabile. Il time_base
+ *    combaciante non è un dettaglio: senza, il -c copy del passo 3 concatena correttamente i
+ *    pacchetti ma con DTS in unità diverse, e ffmpeg li "ripara" incrementandoli di un'unità alla
+ *    volta — la durata risultante è totalmente sballata (osservato in pratica: 575s+3s+3s diventati
+ *    3386s), pur senza che il comando fallisca con un errore.
  * 3. I tre pezzi (intro, contenuto, outro) vengono concatenati con IL DEMUXER concat (-c copy):
  *    a differenza del filtro concat usato prima, questo non decodifica/ricodifica nulla, si
  *    limita a incollare i pacchetti già codificati — possibile solo perché i tre pezzi hanno
@@ -142,7 +148,7 @@ async function probeVideoStreamParams(filePath: string): Promise<VideoStreamPara
     "-select_streams",
     "v:0",
     "-show_entries",
-    "stream=codec_name,profile,level,pix_fmt,width,height,r_frame_rate",
+    "stream=codec_name,profile,level,pix_fmt,width,height,r_frame_rate,time_base",
     "-print_format",
     "json",
     filePath,
@@ -156,12 +162,14 @@ async function probeVideoStreamParams(filePath: string): Promise<VideoStreamPara
       width?: number;
       height?: number;
       r_frame_rate?: string;
+      time_base?: string; // es. "1/90000"
     }>;
   };
   const stream = data.streams?.[0];
   if (!stream || !stream.width || !stream.height) {
     throw new Error(`Impossibile leggere i parametri video di "${filePath}"`);
   }
+  const timebaseDenominator = stream.time_base ? Number(stream.time_base.split("/")[1]) : NaN;
   return {
     codecName: stream.codec_name ?? "h264",
     profile: stream.profile ?? null,
@@ -170,6 +178,7 @@ async function probeVideoStreamParams(filePath: string): Promise<VideoStreamPara
     width: stream.width,
     height: stream.height,
     frameRate: stream.r_frame_rate ?? "30/1",
+    trackTimescale: Number.isFinite(timebaseDenominator) && timebaseDenominator > 0 ? timebaseDenominator : null,
   };
 }
 
@@ -243,6 +252,11 @@ async function buildCreditsCard(assFilterPath: string, videoParams: VideoStreamP
     "-map",
     "1:a",
     ...buildVideoEncoderArgs(videoParams),
+    // Fondamentale per il -c copy del concat demuxer dopo: se il time_base del contenitore
+    // differisse da quello del segmento (il default dell'encoder quasi certamente non combacia),
+    // il concat produce un file con DTS corrotti e una durata totalmente sballata SENZA che
+    // ffmpeg segnali un errore — bug reale osservato e verificato (vedi commento in cima al file).
+    ...(videoParams.trackTimescale ? ["-video_track_timescale", String(videoParams.trackTimescale)] : []),
     "-c:a",
     "aac",
     "-ar",
