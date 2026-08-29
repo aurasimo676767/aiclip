@@ -26,12 +26,32 @@ export async function listAvailableExpressions(aliasLower: string): Promise<stri
   }
 }
 
+const LAST_USED_STATE_PATH = path.join(FACES_ROOT, ".last-used.json");
+
+async function readLastUsed(): Promise<Record<string, string>> {
+  try {
+    return JSON.parse(await fsp.readFile(LAST_USED_STATE_PATH, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+async function writeLastUsed(state: Record<string, string>): Promise<void> {
+  await fsp.mkdir(FACES_ROOT, { recursive: true });
+  await fsp.writeFile(LAST_USED_STATE_PATH, JSON.stringify(state, null, 2));
+}
+
 /**
  * Ritagli pronti e fissi (assets/streamer-faces/<alias minuscolo>/*.png, sfondo già rimosso) —
  * foto vere ritagliate una volta sola e riusate: gratis, istantanee, e identiche al 100% alla
  * persona reale (a differenza della generazione IA sotto, che può assomigliare solo
  * "abbastanza"). Più foto (espressioni diverse: scioccato, contento, ride, triste...) = più
- * varietà tra un video e l'altro invece di mostrare sempre la stessa identica immagine. Se
+ * varietà tra un video e l'altro invece di mostrare sempre la stessa identica immagine.
+ *
+ * Esclude SEMPRE l'ultima foto usata per questo alias (tracciata in .last-used.json) prima di
+ * scegliere — altrimenti, con poche foto disponibili, Claude tende a valutare lo stesso tono
+ * "scioccato"/generico per molti contenuti reaction diversi e finisce per ripetere sempre la
+ * stessa (osservato in pratica su due clip diverse di seguito). Tra le rimanenti, se
  * `preferredExpression` combacia con una delle etichette disponibili la usa, altrimenti ne
  * sceglie una a caso — va sempre preferito quando ce n'è almeno una, vedi resolveStreamerFace.
  */
@@ -40,11 +60,18 @@ async function pickFixedCutout(aliasLower: string, preferredExpression: string |
     const dir = path.join(FACES_ROOT, aliasLower);
     const files = (await fsp.readdir(dir)).filter((f) => /\.(png|jpg|jpeg)$/i.test(f));
     if (files.length === 0) return null;
-    if (preferredExpression) {
-      const match = files.find((f) => expressionLabel(f).toLowerCase() === preferredExpression.toLowerCase());
-      if (match) return path.join(dir, match);
-    }
-    const chosen = files[Math.floor(Math.random() * files.length)]!;
+
+    const lastUsedState = await readLastUsed();
+    const lastFile = lastUsedState[aliasLower];
+    const candidates = files.length > 1 && lastFile ? files.filter((f) => f !== lastFile) : files;
+
+    let chosen: string;
+    const preferredMatch = preferredExpression
+      ? candidates.find((f) => expressionLabel(f).toLowerCase() === preferredExpression.toLowerCase())
+      : undefined;
+    chosen = preferredMatch ?? candidates[Math.floor(Math.random() * candidates.length)]!;
+
+    await writeLastUsed({ ...lastUsedState, [aliasLower]: chosen });
     return path.join(dir, chosen);
   } catch {
     return null;
