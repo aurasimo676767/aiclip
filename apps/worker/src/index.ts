@@ -12,6 +12,8 @@ import { processPublishJob } from "./pipeline/process-publish-job.js";
 import { processVoiceoverJob } from "./pipeline/process-voiceover-job.js";
 import { processThumbnailJob } from "./pipeline/process-thumbnail-job.js";
 import { refreshYoutubeStats } from "./pipeline/refresh-youtube-stats.js";
+import { pauseControlLoop } from "./pipeline/pause-control-loop.js";
+import { isWorkerPaused } from "./lib/pause-control.js";
 
 let shuttingDown = false;
 
@@ -23,6 +25,10 @@ function sleep(ms: number): Promise<void> {
 async function videoQueueLoop(): Promise<void> {
   while (!shuttingDown) {
     try {
+      if (await isWorkerPaused()) {
+        await sleep(env.QUEUE_POLL_INTERVAL_MS);
+        continue;
+      }
       const video = await claimNextVideo();
       if (video) {
         logger.info("Video claimato", { videoId: video.id, workerId: WORKER_ID });
@@ -40,6 +46,10 @@ async function videoQueueLoop(): Promise<void> {
 async function renderQueueLoop(): Promise<void> {
   while (!shuttingDown) {
     try {
+      if (await isWorkerPaused()) {
+        await sleep(env.QUEUE_POLL_INTERVAL_MS);
+        continue;
+      }
       const job = await claimNextRenderJob();
       if (job) {
         logger.info("Render job claimato", { jobId: job.id, workerId: WORKER_ID });
@@ -57,6 +67,10 @@ async function renderQueueLoop(): Promise<void> {
 async function publishQueueLoop(): Promise<void> {
   while (!shuttingDown) {
     try {
+      if (await isWorkerPaused()) {
+        await sleep(env.QUEUE_POLL_INTERVAL_MS);
+        continue;
+      }
       const job = await claimNextPublishJob();
       if (job) {
         logger.info("Publish job claimato", { jobId: job.id, workerId: WORKER_ID });
@@ -74,6 +88,10 @@ async function publishQueueLoop(): Promise<void> {
 async function voiceoverQueueLoop(): Promise<void> {
   while (!shuttingDown) {
     try {
+      if (await isWorkerPaused()) {
+        await sleep(env.QUEUE_POLL_INTERVAL_MS);
+        continue;
+      }
       const job = await claimNextVoiceoverJob();
       if (job) {
         logger.info("Voiceover job claimato", { jobId: job.id, workerId: WORKER_ID });
@@ -91,6 +109,10 @@ async function voiceoverQueueLoop(): Promise<void> {
 async function thumbnailQueueLoop(): Promise<void> {
   while (!shuttingDown) {
     try {
+      if (await isWorkerPaused()) {
+        await sleep(env.QUEUE_POLL_INTERVAL_MS);
+        continue;
+      }
       const job = await claimNextThumbnailJob();
       if (job) {
         logger.info("Thumbnail job claimato", { jobId: job.id, workerId: WORKER_ID });
@@ -138,4 +160,12 @@ logger.info("ClipForge worker avviato", {
 const videoLoops = Array.from({ length: env.VIDEO_CONCURRENCY }, () => videoQueueLoop());
 const renderLoops = Array.from({ length: env.RENDER_CONCURRENCY }, () => renderQueueLoop());
 
-await Promise.all([...videoLoops, ...renderLoops, publishQueueLoop(), voiceoverQueueLoop(), thumbnailQueueLoop(), statsRefreshLoop()]);
+await Promise.all([
+  ...videoLoops,
+  ...renderLoops,
+  publishQueueLoop(),
+  voiceoverQueueLoop(),
+  thumbnailQueueLoop(),
+  statsRefreshLoop(),
+  pauseControlLoop(),
+]);

@@ -694,6 +694,25 @@ export interface Database {
         };
         Relationships: [];
       };
+
+      worker_control: {
+        Row: {
+          id: boolean;
+          paused: boolean;
+          updated_at: string;
+        };
+        Insert: {
+          id?: boolean;
+          paused?: boolean;
+          updated_at?: string;
+        };
+        Update: {
+          id?: boolean;
+          paused?: boolean;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
 
     Views: Record<string, never>;
@@ -778,3 +797,6 @@ export type VoiceoverJobUpdate = Database["public"]["Tables"]["voiceover_jobs"][
 export type ThumbnailJobRow = Database["public"]["Tables"]["thumbnail_jobs"]["Row"];
 export type ThumbnailJobInsert = Database["public"]["Tables"]["thumbnail_jobs"]["Insert"];
 export type ThumbnailJobUpdate = Database["public"]["Tables"]["thumbnail_jobs"]["Update"];
+
+export type WorkerControlRow = Database["public"]["Tables"]["worker_control"]["Row"];
+export type WorkerControlUpdate = Database["public"]["Tables"]["worker_control"]["Update"];

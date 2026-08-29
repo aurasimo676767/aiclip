@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { WorkerPauseControl } from "./worker-pause-control";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", exact: true },
@@ -63,7 +64,8 @@ export function DashboardShell({ email, children }: { email: string; children: R
   );
 
   const accountFooter = (
-    <div className="space-y-2 border-t border-zinc-800 pt-4">
+    <div className="space-y-3 border-t border-zinc-800 pt-4">
+      <WorkerPauseControl />
       <p className="truncate px-2 text-xs text-zinc-500">{email}</p>
       <button
         onClick={handleSignOut}
