@@ -17,5 +17,9 @@ alter table public.worker_control enable row level security;
 
 -- Nessuna nozione di "proprietario": è un controllo globale del worker locale, non per-utente.
 -- Qualunque utente autenticato può leggerlo/scriverlo (coerente con l'uso: un solo operatore).
+-- drop/create invece di "if not exists" (non supportato da CREATE POLICY) per poter rieseguire
+-- questa migrazione senza errori se già applicata in parte.
+drop policy if exists "worker_control_select_authenticated" on public.worker_control;
 create policy "worker_control_select_authenticated" on public.worker_control for select using (auth.role() = 'authenticated');
+drop policy if exists "worker_control_update_authenticated" on public.worker_control;
 create policy "worker_control_update_authenticated" on public.worker_control for update using (auth.role() = 'authenticated');
