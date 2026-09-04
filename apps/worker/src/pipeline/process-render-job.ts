@@ -80,13 +80,12 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
     const outputPath = path.join(jobDir, "output.mp4");
 
     if (clipRow.format === "longform") {
-      // Niente crop/zoom/captions per il long-form: solo trim + card dei crediti allo streamer
-      // originale (vedi render-longform-clip.ts) — non serve né il transcript né il face tracker.
+      // Niente crop/zoom/captions/card per il long-form: solo trim (vedi render-longform-clip.ts)
+      // — non serve né il transcript né il face tracker.
       await renderLongformClip({
         sourceVideoPath: localSourcePath,
         start: clipRow.start_time,
         end: clipRow.end_time,
-        streamerName: videoRow.streamer_name,
         workDir: jobDir,
         outputPath,
       });
