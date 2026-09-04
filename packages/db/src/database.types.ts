@@ -134,6 +134,7 @@ export interface Database {
           cancel_requested: boolean;
           streamer_name: string | null;
           streamer_login: string | null;
+          usage_stats: unknown | null;
           created_at: string;
           updated_at: string;
         };
@@ -154,6 +155,7 @@ export interface Database {
           cancel_requested?: boolean;
           streamer_name?: string | null;
           streamer_login?: string | null;
+          usage_stats?: unknown | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -174,6 +176,7 @@ export interface Database {
           cancel_requested?: boolean;
           streamer_name?: string | null;
           streamer_login?: string | null;
+          usage_stats?: unknown | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -713,6 +716,31 @@ export interface Database {
         };
         Relationships: [];
       };
+
+      publish_schedules: {
+        Row: {
+          user_id: string;
+          short_times: string[];
+          longform_times: string[];
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          short_times?: string[];
+          longform_times?: string[];
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          short_times?: string[];
+          longform_times?: string[];
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
 
     Views: Record<string, never>;
@@ -763,6 +791,10 @@ export type TranscriptUpdate = Database["public"]["Tables"]["transcripts"]["Upda
 export type ClipRow = Database["public"]["Tables"]["clips"]["Row"];
 export type ClipInsert = Database["public"]["Tables"]["clips"]["Insert"];
 export type ClipUpdate = Database["public"]["Tables"]["clips"]["Update"];
+
+export type PublishScheduleRow = Database["public"]["Tables"]["publish_schedules"]["Row"];
+export type PublishScheduleInsert = Database["public"]["Tables"]["publish_schedules"]["Insert"];
+export type PublishScheduleUpdate = Database["public"]["Tables"]["publish_schedules"]["Update"];
 
 export type RenderJobRow = Database["public"]["Tables"]["render_jobs"]["Row"];
 export type RenderJobInsert = Database["public"]["Tables"]["render_jobs"]["Insert"];

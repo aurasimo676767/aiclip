@@ -1,4 +1,4 @@
-import type { ClipScores, ClipBadge } from "@clipforge/shared";
+import type { ClipScores, ClipBadge, VideoUsageStats } from "@clipforge/shared";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { ClipViewModel } from "@/components/clip-list";
 
@@ -6,7 +6,12 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient
 
 export interface ProjectDetail {
   project: { id: string; title: string; status: string; error_message: string | null; source_type: string };
-  video: { original_filename: string; duration_seconds: number | null; error_message: string | null } | null;
+  video: {
+    original_filename: string;
+    duration_seconds: number | null;
+    error_message: string | null;
+    usageStats: VideoUsageStats | null;
+  } | null;
   clips: ClipViewModel[];
 }
 
@@ -37,7 +42,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
     supabase.from("projects").select("id, title, status, error_message, source_type").in("id", projectIds),
     supabase
       .from("videos")
-      .select("project_id, original_filename, duration_seconds, error_message, streamer_name, streamer_login")
+      .select("project_id, original_filename, duration_seconds, error_message, streamer_name, streamer_login, usage_stats")
       .in("project_id", projectIds),
     supabase
       .from("clips")
@@ -79,6 +84,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       original_filename: v.original_filename,
       duration_seconds: v.duration_seconds,
       error_message: v.error_message,
+      usageStats: (v.usage_stats as VideoUsageStats | null) ?? null,
     });
     streamerByProject.set(v.project_id, { name: v.streamer_name, login: v.streamer_login });
   }

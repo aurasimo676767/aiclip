@@ -4,6 +4,7 @@ import { StatusBadge, isProcessingStatus } from "@/components/status-badge";
 import { ProcessingProgressBar } from "@/components/processing-progress-bar";
 import { PollingRefresher } from "@/components/polling-refresher";
 import { ClipList } from "@/components/clip-list";
+import { UsageStatsPanel } from "@/components/usage-stats-panel";
 import { RetryProjectButton } from "@/components/retry-project-button";
 import { CancelProjectButton } from "@/components/cancel-project-button";
 import { fetchProjectDetails, fetchYoutubeConnected } from "@/lib/data/clips";
@@ -66,6 +67,8 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
           <ProcessingProgressBar status={project.status} />
         </div>
       )}
+
+      {video?.usageStats && <UsageStatsPanel stats={video.usageStats} />}
 
       {clips.length > 0 && (
         <div className="space-y-4">

@@ -6,12 +6,19 @@ import {
   DEFAULT_TEMPLATES,
   MAX_SUGGESTED_CLIPS,
   MAX_SUGGESTED_LONGFORM_CLIPS,
+  CLIP_DURATION_TARGET,
+  classifyModelTier,
+  computeModelCostUsd,
   type TranscriptSegment,
   type ClipScores,
   type EditingStyle,
   type TemplateName,
   type EditDecisionList,
   type ClipBadge,
+  type RankedClip,
+  type ModelUsageKey,
+  type ModelTokenUsage,
+  type VideoUsageStats,
 } from "@clipforge/shared";
 import { env } from "../env.js";
 import { logger } from "../lib/logger.js";
@@ -19,6 +26,7 @@ import { supabase } from "../lib/supabase.js";
 import { storageProvider, transcriptionProvider } from "../lib/providers.js";
 import { extractAudio } from "./extract-audio.js";
 import { downloadYoutubeVideo } from "./download-youtube.js";
+import { ensureEnoughDiskSpaceForDownload } from "../lib/disk-space.js";
 import { detectClipCandidates } from "../providers/ai/candidates.js";
 import { rankAndBuildEdl } from "../providers/ai/ranking.js";
 import { detectLongformCandidates } from "../providers/ai/longform-candidates.js";
@@ -36,6 +44,12 @@ const MAX_AUTO_RETRY_ATTEMPTS = 3;
 export async function processVideoJob(video: VideoRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `video-${video.id}`);
   await fsp.mkdir(jobDir, { recursive: true });
+
+  // Tempi REALI di ogni fase (non stimati), salvati a fine pipeline in videos.usage_stats per
+  // poter confrontare previsione vs consumo vero — vedi il salvataggio finale sotto. undefined
+  // quando la fase viene saltata (es. transcript riusato, download saltato per un long-form con
+  // transcript già pronto).
+  const stageDurationsSeconds: VideoUsageStats["stages"] = {};
 
   // false SOLO quando l'errore sta per essere ritentato in automatico (vedi blocco catch): in
   // quel caso jobDir NON va ripulito, altrimenti un download lungo interrotto a metà (un VOD
@@ -97,16 +111,21 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     let videoTitle = video.original_filename;
 
     if (needsLocalVideoFile) {
+      const downloadStartedAt = Date.now();
       if (video.storage_path) {
         // Percorso "upload file" (o video già scaricato in un tentativo precedente).
         await updateVideoStatus(video.id, "EXTRACTING_AUDIO");
         localVideoPath = path.join(jobDir, `source${path.extname(video.storage_path)}`);
         await storageProvider.downloadToFile(video.storage_path, localVideoPath);
+        stageDurationsSeconds.downloadSeconds = (Date.now() - downloadStartedAt) / 1000;
       } else if (video.source_url) {
         // Percorso "URL esterno" (YouTube o VOD Twitch, yt-dlp supporta entrambi senza distinzioni
         // di codice): il worker scarica il video e lo carica su Storage lui stesso, così il resto
         // della pipeline (estrazione audio, render) resta identico indipendentemente dalla sorgente.
         await updateVideoStatus(video.id, "DOWNLOADING");
+        if (video.duration_seconds) {
+          await ensureEnoughDiskSpaceForDownload(env.WORKER_TMP_DIR, video.duration_seconds);
+        }
         const downloaded = await downloadYoutubeVideo(video.source_url, jobDir);
         localVideoPath = downloaded.filePath;
         videoTitle = downloaded.title;
@@ -136,6 +155,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
           logger.warn("Aggiornamento titolo progetto fallito", { error: projectUpdateError.message });
         }
 
+        stageDurationsSeconds.downloadSeconds = (Date.now() - downloadStartedAt) / 1000;
         await updateVideoStatus(video.id, "EXTRACTING_AUDIO");
       } else {
         throw new Error("Il video non ha né uno storage_path né un source_url: impossibile procedere");
@@ -160,7 +180,12 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       if (await cancelled()) return;
 
       await updateVideoStatus(video.id, "TRANSCRIBING");
-      transcript = await transcriptionProvider.transcribe(audioPath);
+      const transcriptionStartedAt = Date.now();
+      // fast: isLongform — SOLO il long-form/VOD può accettare il percorso batched (niente
+      // sottotitoli né timestamp per parola in quella pipeline, vedi TranscribeOptions). Gli
+      // Shorts restano sempre sul percorso sequenziale completo.
+      transcript = await transcriptionProvider.transcribe(audioPath, { fast: isLongform });
+      stageDurationsSeconds.transcriptionSeconds = (Date.now() - transcriptionStartedAt) / 1000;
       if (await cancelled()) return;
 
       const { error: transcriptError } = await supabase.from("transcripts").upsert(
@@ -181,9 +206,15 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
 
     await updateVideoStatus(video.id, "ANALYZING", { duration_seconds: transcript.durationSeconds });
 
+    const aiAnalysisStartedAt = Date.now();
     let clipsToInsert: ClipToInsert[];
+    // Popolato SOLO per il long-form: le funzioni Shorts (candidates.ts/ranking.ts) non
+    // restituiscono ancora l'uso token — vedi la nota nel salvataggio di usage_stats più sotto.
+    let usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>> = {};
     if (isLongform) {
-      clipsToInsert = await buildLongformClipsToInsert(video, transcript.segments, transcript.durationSeconds, videoTitle);
+      const result = await buildLongformClipsToInsert(video, transcript.segments, transcript.durationSeconds, videoTitle);
+      clipsToInsert = result.clipsToInsert;
+      usageByModel = result.usageByModel;
     } else {
       // Per lo Short il file locale serve sempre (frame per il ranking) — needsLocalVideoFile è
       // sempre true quando !isLongform, quindi localVideoPath è garantito qui, ma lo verifichiamo
@@ -200,6 +231,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
         localVideoPath,
       );
     }
+    stageDurationsSeconds.aiAnalysisSeconds = (Date.now() - aiAnalysisStartedAt) / 1000;
 
     if (await cancelled()) return;
     await updateVideoStatus(video.id, "CLIP_SELECTION");
@@ -254,6 +286,30 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
           template: c.template,
         });
       }
+    }
+
+    // Costo REALE (non stimato) calcolato dai token effettivi restituiti dall'API per ogni
+    // livello di modello usato — solo il long-form li popola per ora (vedi usageByModel sopra),
+    // per gli Shorts costUsd resta vuoto ma le fasi (download/trascrizione/analisi) si vedono
+    // comunque, sono tracciate per entrambe le pipeline.
+    const costUsdByModel: Partial<Record<ModelUsageKey, number>> = {};
+    let totalCostUsd = 0;
+    for (const [tier, usage] of Object.entries(usageByModel) as [ModelUsageKey, ModelTokenUsage][]) {
+      const cost = computeModelCostUsd(tier, usage);
+      costUsdByModel[tier] = cost;
+      totalCostUsd += cost;
+    }
+    const usageStats: VideoUsageStats = {
+      tokens: usageByModel,
+      costUsd: { ...costUsdByModel, total: totalCostUsd },
+      stages: stageDurationsSeconds,
+    };
+    const { error: usageStatsError } = await supabase.from("videos").update({ usage_stats: usageStats }).eq("id", video.id);
+    if (usageStatsError) {
+      logger.warn("Salvataggio usage_stats fallito, proseguo comunque (non blocca la pipeline)", {
+        videoId: video.id,
+        error: usageStatsError.message,
+      });
     }
 
     await updateVideoStatus(video.id, "READY");
@@ -346,53 +402,110 @@ async function buildShortClipsToInsert(
     userId,
   });
 
-  return rankedClips.slice(0, MAX_SUGGESTED_CLIPS).map((clip) =>
-    buildInsertRow({
-      video,
-      start: clip.start,
-      end: clip.end,
-      duration: clip.duration,
-      title: clip.title,
-      hook: clip.hook,
-      reason: clip.reason,
-      scores: clip.scores,
-      editingStyle: clip.editing_style,
-      template: clip.edl.template,
-      edl: clip.edl,
-      hashtags: clip.hashtags,
-      caption: clip.caption,
-      badges: clip.badges,
-      format: "short",
-    }),
-  );
+  return rankedClips
+    .slice(0, MAX_SUGGESTED_CLIPS)
+    .map((clip) => enforceHardDurationCap(clip, video.id))
+    .map((clip) =>
+      buildInsertRow({
+        video,
+        start: clip.start,
+        end: clip.end,
+        duration: clip.duration,
+        title: clip.title,
+        hook: clip.hook,
+        reason: clip.reason,
+        scores: clip.scores,
+        editingStyle: clip.editing_style,
+        template: clip.edl.template,
+        edl: clip.edl,
+        hashtags: clip.hashtags,
+        caption: clip.caption,
+        badges: clip.badges,
+        format: "short",
+      }),
+    );
+}
+
+/**
+ * Rete di sicurezza lato codice per il tetto di durata degli Shorts: il prompt di ranking.ts
+ * istruisce già l'AI a non superare CLIP_DURATION_TARGET.hardMax, ma un prompt può essere
+ * disatteso — qui lo si impone comunque, accorciando end (mai spostando start, che è già stato
+ * posizionato sul gancio dall'AI) e scartando gli eventi EDL che finiscono fuori dal nuovo
+ * intervallo [start, end]. Solo per gli Shorts: la pipeline long-form (buildLongformClipsToInsert)
+ * non la chiama e usa LONGFORM_DURATION_TARGET, non toccato da questo cap.
+ */
+function enforceHardDurationCap(clip: RankedClip, videoId: string): RankedClip {
+  const maxDuration = CLIP_DURATION_TARGET.hardMax;
+  if (clip.end - clip.start <= maxDuration) return clip;
+
+  const cappedEnd = clip.start + maxDuration;
+  logger.warn("Clip Shorts oltre il tetto di durata, accorciata lato codice", {
+    videoId,
+    hook: clip.hook,
+    originalDuration: clip.end - clip.start,
+    cappedDuration: maxDuration,
+  });
+
+  return {
+    ...clip,
+    end: cappedEnd,
+    duration: maxDuration,
+    edl: { ...clip.edl, events: clip.edl.events.filter((event) => event.time <= cappedEnd) },
+  };
 }
 
 /** Pipeline long-form (VOD Twitch): segmenti per argomento, niente crop/zoom/captions. */
+interface LongformClipsResult {
+  clipsToInsert: ClipToInsert[];
+  usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>>;
+}
+
+/** Accumula usage in usageByModel sotto il livello del modello effettivo (vedi classifyModelTier). */
+function addUsage(usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>>, modelId: string, usage: ModelTokenUsage) {
+  const tier = classifyModelTier(modelId);
+  if (!tier) {
+    logger.warn("Modello non riconosciuto per il tracciamento costi, escluso da usage_stats", { modelId });
+    return;
+  }
+  const existing = usageByModel[tier] ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 };
+  usageByModel[tier] = {
+    input: existing.input + usage.input,
+    output: existing.output + usage.output,
+    cacheRead: existing.cacheRead + usage.cacheRead,
+    cacheWrite: existing.cacheWrite + usage.cacheWrite,
+    calls: existing.calls + usage.calls,
+  };
+}
+
 async function buildLongformClipsToInsert(
   video: VideoRow,
   segments: TranscriptSegment[],
   videoDurationSeconds: number,
   videoTitle: string,
-): Promise<ClipToInsert[]> {
-  const candidates = await detectLongformCandidates(segments, {
+): Promise<LongformClipsResult> {
+  const usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>> = {};
+
+  const { candidates, usage: candidatesUsage } = await detectLongformCandidates(segments, {
     apiKey: env.ANTHROPIC_API_KEY,
     model: env.ANTHROPIC_MODEL_CHEAP,
     videoTitle,
     videoDurationSeconds,
   });
+  addUsage(usageByModel, env.ANTHROPIC_MODEL_CHEAP, candidatesUsage);
   logger.info("Candidati long-form individuati", { videoId: video.id, count: candidates.length });
 
-  const rankedClips = await rankLongformClips(candidates, segments, {
+  const { clips: rankedClips, usage: rankingUsage } = await rankLongformClips(candidates, segments, {
     apiKey: env.ANTHROPIC_API_KEY,
     model: env.ANTHROPIC_MODEL_LONGFORM,
     videoTitle,
     streamerName: video.streamer_name,
   });
+  addUsage(usageByModel, env.ANTHROPIC_MODEL_LONGFORM, rankingUsage);
 
   // editing_style/template/edl sono placeholder inerti: il render long-form (vedi
   // render-longform-clip.ts) non li legge mai, esistono solo perché le colonne DB sono NOT NULL
   // e condivise con gli Shorts.
-  return rankedClips.slice(0, MAX_SUGGESTED_LONGFORM_CLIPS).map((clip) =>
+  const clipsToInsert = rankedClips.slice(0, MAX_SUGGESTED_LONGFORM_CLIPS).map((clip) =>
     buildInsertRow({
       video,
       start: clip.start,
@@ -411,4 +524,6 @@ async function buildLongformClipsToInsert(
       format: "longform",
     }),
   );
+
+  return { clipsToInsert, usageByModel };
 }

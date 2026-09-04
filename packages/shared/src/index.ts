@@ -5,6 +5,7 @@ export * from "./types/longform.js";
 export * from "./types/edl.js";
 export * from "./types/template.js";
 export * from "./types/plan.js";
+export * from "./types/usage-stats.js";
 
 export * from "./constants/upload.js";
 export * from "./constants/pipeline.js";
