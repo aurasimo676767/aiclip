@@ -3,6 +3,7 @@ import type { VideoRow } from "@clipforge/db";
 import { supabase } from "./supabase.js";
 import { storageProvider } from "./providers.js";
 import { downloadYoutubeVideo } from "../pipeline/download-youtube.js";
+import { ensureEnoughDiskSpaceForDownload } from "./disk-space.js";
 import { logger } from "./logger.js";
 
 /**
@@ -22,6 +23,9 @@ export async function redownloadSourceVideo(video: VideoRow, projectUserId: stri
   logger.info("Sorgente non più su storage, riscarico dalla piattaforma originale", { videoId: video.id, sourceUrl: video.source_url });
 
   await fsp.mkdir(jobDir, { recursive: true });
+  if (video.duration_seconds) {
+    await ensureEnoughDiskSpaceForDownload(jobDir, video.duration_seconds);
+  }
   const downloaded = await downloadYoutubeVideo(video.source_url, jobDir);
   const storagePath = `videos/${projectUserId}/${video.id}/source.mp4`;
   await storageProvider.uploadFile(downloaded.filePath, storagePath, "video/mp4");

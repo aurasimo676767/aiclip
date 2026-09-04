@@ -35,6 +35,9 @@ export class OpenAIWhisperProvider implements TranscriptionProvider {
     this.client = new OpenAI({ apiKey });
   }
 
+  // `options.fast` ignorato: l'API OpenAI non offre un percorso batched, e non gestendo noi
+  // l'infrastruttura non c'è nulla da ottimizzare lato nostro — si applica solo al provider
+  // locale (vedi TranscribeOptions in transcription-provider.ts).
   async transcribe(audioFilePath: string): Promise<Transcript> {
     const fullDuration = (await probeVideo(audioFilePath)).durationSeconds;
     const chunks = await splitAudioIntoChunks(audioFilePath, this.tmpDir);

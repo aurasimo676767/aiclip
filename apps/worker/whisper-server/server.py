@@ -26,18 +26,25 @@ if os.name == "nt":
     for _dll_dir in _dll_dirs:
         os.add_dll_directory(str(_dll_dir))
 
-from faster_whisper import WhisperModel
+from faster_whisper import WhisperModel, BatchedInferencePipeline
 from flask import Flask, jsonify, request
 
 MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "large-v3")
 DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
 COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "int8_float16")
 PORT = int(os.environ.get("WHISPER_SERVER_PORT", "8765"))
+# Solo per /transcribe-fast (pipeline long-form/VOD, vedi sotto): quanti segmenti VAD la GPU
+# processa insieme. Testato su una 3060 Ti 8GB: 8 dà ~4.5x di velocità reale su audio denso
+# (reazioni/urla) senza errori di memoria. Non alzarlo senza rifare il test di VRAM.
+BATCH_SIZE = int(os.environ.get("WHISPER_BATCH_SIZE", "8"))
 
 app = Flask(__name__)
 
 print(f"[whisper-server] Caricamento modello {MODEL_SIZE} su {DEVICE} ({COMPUTE_TYPE})...", file=sys.stderr)
 model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
+# Wrappa la STESSA istanza del modello (nessun peso ricaricato, nessuna VRAM aggiuntiva) per
+# esporre anche la modalità batched, usata solo da /transcribe-fast.
+batched_pipeline = BatchedInferencePipeline(model=model)
 print("[whisper-server] Modello pronto.", file=sys.stderr)
 
 
@@ -77,6 +84,46 @@ def transcribe():
             "duration": info.duration,
             "segments": segments,
             "words": words,
+        }
+    )
+
+
+@app.route("/transcribe-fast", methods=["POST"])
+def transcribe_fast():
+    # SOLO per la pipeline long-form/VOD (vedi local-faster-whisper-provider.ts): quel percorso
+    # non legge mai i timestamp per parola né mostra sottotitoli, gli serve solo il testo a
+    # livello di frase per capire i blocchi di attività — quindi qui si può usare l'inferenza
+    # batched (~4.5x più veloce, verificato su audio reale) e disattivare word_timestamps senza
+    # perdere nulla che venga effettivamente usato. NON toccare mai gli Shorts con questo
+    # endpoint: perdono precisione sull'inizio della frase-gancio e i sottotitoli parola-per-
+    # parola, che invece usano SOLO /transcribe (sequenziale, sopra).
+    if "audio" not in request.files:
+        return jsonify({"error": "campo 'audio' mancante"}), 400
+
+    audio_file = request.files["audio"]
+    audio_bytes = io.BytesIO(audio_file.read())
+
+    segments_iter, info = batched_pipeline.transcribe(
+        audio_bytes,
+        word_timestamps=False,
+        vad_filter=True,
+        batch_size=BATCH_SIZE,
+    )
+
+    segments = []
+    text_parts = []
+
+    for i, seg in enumerate(segments_iter):
+        text_parts.append(seg.text.strip())
+        segments.append({"id": i, "start": seg.start, "end": seg.end, "text": seg.text.strip()})
+
+    return jsonify(
+        {
+            "text": " ".join(text_parts).strip(),
+            "language": info.language,
+            "duration": info.duration,
+            "segments": segments,
+            "words": [],
         }
     )
 

@@ -6,7 +6,7 @@ import type { Transcript, TranscriptSegment } from "@clipforge/shared";
 import { probeVideo } from "../../lib/ffmpeg.js";
 import { logger } from "../../lib/logger.js";
 import { splitAudioIntoChunks } from "./audio-chunker.js";
-import type { TranscriptionProvider } from "./transcription-provider.js";
+import type { TranscriptionProvider, TranscribeOptions } from "./transcription-provider.js";
 import { Mutex } from "../../lib/mutex.js";
 
 // Se più video vengono processati in parallelo (VIDEO_CONCURRENCY > 1), NON deve arrivare più
@@ -58,8 +58,8 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
     private readonly tmpDir: string,
   ) {}
 
-  async transcribe(audioFilePath: string): Promise<Transcript> {
-    return gpuMutex.run(() => this.transcribeLocked(audioFilePath));
+  async transcribe(audioFilePath: string, options?: TranscribeOptions): Promise<Transcript> {
+    return gpuMutex.run(() => this.transcribeLocked(audioFilePath, options?.fast ?? false));
   }
 
   /** GET /health: risponde in millisecondi, verifica che il server sia su prima di impegnarsi in un download lungo. */
@@ -78,11 +78,16 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
     }
   }
 
-  private async transcribeLocked(audioFilePath: string): Promise<Transcript> {
+  private async transcribeLocked(audioFilePath: string, fast: boolean): Promise<Transcript> {
     const fullDuration = (await probeVideo(audioFilePath)).durationSeconds;
     const chunks = await splitAudioIntoChunks(audioFilePath, this.tmpDir);
 
-    logger.info("Trascrizione locale (faster-whisper) avviata", { chunks: chunks.length, audioFilePath, server: this.serverUrl });
+    logger.info("Trascrizione locale (faster-whisper) avviata", {
+      chunks: chunks.length,
+      audioFilePath,
+      server: this.serverUrl,
+      fast,
+    });
 
     let segmentIdCounter = 0;
     const allSegments: TranscriptSegment[] = [];
@@ -90,7 +95,7 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
     const fullTextParts: string[] = [];
 
     for (const chunk of chunks) {
-      const response = await this.transcribeChunk(chunk.filePath);
+      const response = await this.transcribeChunk(chunk.filePath, fast);
       language = response.language ?? language;
       fullTextParts.push(response.text.trim());
 
@@ -125,7 +130,7 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
     };
   }
 
-  private async transcribeChunk(filePath: string): Promise<LocalWhisperResponse> {
+  private async transcribeChunk(filePath: string, fast: boolean): Promise<LocalWhisperResponse> {
     const fileBuffer = await fs.promises.readFile(filePath);
     const filename = path.basename(filePath);
     const boundary = `----clipforge${crypto.randomUUID()}`;
@@ -137,9 +142,10 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
       Buffer.from(`\r\n--${boundary}--\r\n`),
     ]);
 
+    const endpoint = fast ? "/transcribe-fast" : "/transcribe";
     let response: Awaited<ReturnType<typeof request>>;
     try {
-      response = await request(`${this.serverUrl}/transcribe`, {
+      response = await request(`${this.serverUrl}${endpoint}`, {
         method: "POST",
         headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
         body,
