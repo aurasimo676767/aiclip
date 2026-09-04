@@ -1,6 +1,12 @@
-import type { TranscriptSegment, LongformCandidateWindow, RankedLongformClip } from "@clipforge/shared";
-import { rankedLongformClipsResponseSchema, CLIP_BADGES, buildLongformTitleStylePrompt } from "@clipforge/shared";
-import { getAnthropicClient } from "./anthropic-client.js";
+import type { TranscriptSegment, LongformCandidateWindow, RankedLongformClip, ModelTokenUsage } from "@clipforge/shared";
+import {
+  rankedLongformClipsResponseSchema,
+  CLIP_BADGES,
+  buildLongformTitleStylePrompt,
+  computeModelCostUsd,
+  classifyModelTier,
+} from "@clipforge/shared";
+import { getAnthropicClient, cachedSystemPrompt, readCacheUsage } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
 import { logger } from "../../lib/logger.js";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -87,27 +93,71 @@ export interface LongformRankingOptions {
   streamerName: string | null;
 }
 
+export interface LongformRankingResult {
+  clips: RankedLongformClip[];
+  usage: ModelTokenUsage;
+}
+
 export async function rankLongformClips(
   candidates: LongformCandidateWindow[],
   segments: TranscriptSegment[],
   options: LongformRankingOptions,
-): Promise<RankedLongformClip[]> {
-  if (candidates.length === 0) return [];
+): Promise<LongformRankingResult> {
+  if (candidates.length === 0) return { clips: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 } };
 
   const client = getAnthropicClient(options.apiKey);
   const userContent = buildUserContent(candidates, segments, options.videoTitle, options.streamerName);
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: userContent }];
 
+  // Uso REALE misurato di questo passaggio (il più caro) — vedi logRankingCost sotto, chiamato
+  // sia sul successo sia sul fallimento finale, così un tentativo fallito si vede comunque nel
+  // costo (viene fatturato lo stesso).
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheReadTokens = 0;
+  let totalCacheWriteTokens = 0;
+  let apiCalls = 0;
+
+  function buildUsage(): ModelTokenUsage {
+    return {
+      input: totalInputTokens,
+      output: totalOutputTokens,
+      cacheRead: totalCacheReadTokens,
+      cacheWrite: totalCacheWriteTokens,
+      calls: apiCalls,
+    };
+  }
+
+  function logRankingCost() {
+    const usage = buildUsage();
+    // Fallback "sonnet" solo per non far esplodere il log se options.model è un ID non
+    // riconosciuto (vedi classifyModelTier) — il costo persistito in usage_stats (calcolato in
+    // process-video-job.ts) fa lo stesso fallback e logga un warning dedicato in quel caso.
+    const tier = classifyModelTier(options.model) ?? "sonnet";
+    logger.info("Costo REALE misurato — passaggio ranking long-form", {
+      model: options.model,
+      ...usage,
+      costUsd: computeModelCostUsd(tier, usage).toFixed(4),
+    });
+  }
+
   for (let attempt = 1; attempt <= 2; attempt++) {
     const message = await client.messages.create({
       model: options.model,
       max_tokens: 8000,
-      system: SYSTEM_PROMPT,
+      system: cachedSystemPrompt(SYSTEM_PROMPT),
       messages,
       tools: [RANKING_TOOL_SCHEMA],
       tool_choice: { type: "tool", name: TOOL_NAME },
     });
+
+    apiCalls++;
+    totalInputTokens += message.usage.input_tokens;
+    totalOutputTokens += message.usage.output_tokens;
+    const cacheUsage = readCacheUsage(message.usage);
+    totalCacheReadTokens += cacheUsage.cacheRead;
+    totalCacheWriteTokens += cacheUsage.cacheWrite;
 
     const toolUseBlock = message.content.find(
       (block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === TOOL_NAME,
@@ -120,7 +170,8 @@ export async function rankLongformClips(
 
     const validation = rankedLongformClipsResponseSchema.safeParse(toolUseBlock.input);
     if (validation.success) {
-      return validation.data.clips as RankedLongformClip[];
+      logRankingCost();
+      return { clips: validation.data.clips as RankedLongformClip[], usage: buildUsage() };
     }
 
     logger.warn("Output di ranking long-form non valido, tentativo di correzione", { attempt, issues: validation.error.issues });
@@ -141,6 +192,7 @@ export async function rankLongformClips(
     });
   }
 
+  logRankingCost();
   throw new Error("Il passaggio di ranking AI long-form non ha prodotto un output valido dopo 2 tentativi");
 }
 

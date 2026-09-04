@@ -1,6 +1,6 @@
 import type { TranscriptSegment, ClipCandidateWindow, RankedClip } from "@clipforge/shared";
-import { rankedClipsResponseSchema, TEMPLATE_NAMES, EDITING_STYLES, CLIP_BADGES } from "@clipforge/shared";
-import { getAnthropicClient } from "./anthropic-client.js";
+import { rankedClipsResponseSchema, TEMPLATE_NAMES, EDITING_STYLES, CLIP_BADGES, CLIP_DURATION_TARGET } from "@clipforge/shared";
+import { getAnthropicClient, cachedSystemPrompt } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
 import { extractCandidateFrameJpegs } from "./frame-sampler.js";
 import { buildPerformanceFeedback } from "./performance-feedback.js";
@@ -64,10 +64,17 @@ const RANKING_TOOL_SCHEMA = {
         items: {
           type: "object",
           properties: {
-            start: { type: "number" },
-            end: { type: "number" },
-            duration: { type: "number" },
-            hook: { type: "string" },
+            start: {
+              type: "number",
+              description:
+                "Timestamp di inizio: puoi e DEVI spostarlo rispetto al candidato ricevuto se questo include ancora setup/preambolo prima della vera frase-gancio — usa il transcript con contesto per trovare il punto esatto in cui inizia il contenuto forte, non l'introduzione che ci porta. Le prime parole della clip da questo punto devono essere già il succo.",
+            },
+            end: {
+              type: "number",
+              description: `Timestamp di fine — end - start non deve MAI superare ${CLIP_DURATION_TARGET.hardMax}s. Se il payoff naturale del momento richiede più tempo, taglia più aggressivamente (accorcia il finale o rimuovi rilanci/ripetizioni) invece di sforare.`,
+            },
+            duration: { type: "number", description: `In secondi, deve coincidere con end - start e non superare ${CLIP_DURATION_TARGET.hardMax}.` },
+            hook: { type: "string", description: "Le PRIME parole esatte con cui la clip si apre (non un riassunto) — devono già essere il contenuto forte." },
             title: {
               type: "string",
               description:
@@ -138,18 +145,20 @@ const RANKING_TOOL_SCHEMA = {
 const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il primo passaggio (economico) ha già scremato molto, ma tende comunque a lasciar passare momenti "energici ma vuoti" — rumorosi o pieni di parolacce senza un vero payoff comico/narrativo dietro. Il tuo lavoro è il controllo qualità finale. Ricevi una lista di finestre candidate con il transcript di contesto e, per ognuna, alcuni frame campionati dal video — usali per giudicare anche ciò che il testo non cattura (espressioni, reazioni, energia visiva, cosa sta succedendo a schermo), non solo le parole. Per ogni candidato devi:
 
 1. Scartare senza pietà i candidati deboli: poco hook, poco comprensibili da soli, ripetitivi, o semplicemente "rumorosi" (esclamazioni/parolacce) senza una battuta, una svolta o un fatto concreto dietro. Presta attenzione in particolare al "botta e risposta circolare": due persone che si scambiano domande/reazioni confuse ("che significa?" "boh" "cioè?" "dio") SENZA che nessuna delle due arrivi mai a una risposta, un fatto o una svolta concreta — non è "clarity" solo perché le battute si capiscono singolarmente, è un giro a vuoto e va scartato o comunque penalizzato pesantemente su payoff e clarity, anche se l'energia/reazione fisica è alta (quella al massimo giustifica "high_energy" come badge, non un punteggio alto). Un vero botta e risposta forte HA una progressione (qualcuno spiega, sbaglia, viene corretto, arriva a una battuta) — se rileggendo il transcript la conversazione potrebbe continuare all'infinito senza cambiare nulla, è debole. Meglio restituire 2 clip forti che 6 mediocri — non riempire la lista per riempirla.
-2. Per ognuno dei rimanenti, assegnare 6 punteggi da 0 a 100 (hook, retention, emotion, clarity, payoff, virality) usando l'INTERA scala in modo calibrato, non ammassata in una fascia stretta:
+2. Rifinire start/end di ogni candidato superstite PRIMA di assegnare i punteggi: il passaggio precedente (economico) individua la finestra giusta ma può sbagliare il punto esatto. Usa il transcript con contesto (hai ~20s in più prima e dopo il candidato) per verificare che "start" cada ESATTAMENTE sulla prima parola della frase-gancio, non su un preambolo/setup che la precede ("allora ragazzi", "quindi vi dicevo", introduzioni, pause morte) — sposta start in avanti se serve, anche se il candidato originale iniziava prima. Le prime parole della clip risultante devono già essere il contenuto forte: un'affermazione controintuitiva, un fatto/numero sorprendente, o l'attacco di una reazione emotiva forte.
+   ATTENZIONE su "end" (errore osservato in produzione: molte clip finivano subito dopo il gancio, 10-15s totali, senza spazio per lo sviluppo — risultato piatto, non divertente): "end" NON deve fermarsi appena finisce la frase-gancio. Deve includere il payoff che segue — la reazione, la battuta, l'escalation, la spiegazione assurda — fino a riempire con contenuto vero l'intervallo ${CLIP_DURATION_TARGET.min}-${CLIP_DURATION_TARGET.max}s, non fermarsi al primo punto utile. Poi imponi il tetto di durata: end - start non deve MAI superare ${CLIP_DURATION_TARGET.hardMax} secondi — se il payoff naturale è più lungo, accorcia il finale o taglia rilanci/ripetizioni invece di sforare, ma preferisci sempre tenere il payoff piuttosto che tagliarlo per stare più corti del necessario: il tetto è un MASSIMO, non un obiettivo da raggiungere il prima possibile.
+3. Per ognuno dei rimanenti, assegnare 6 punteggi da 0 a 100 (hook, retention, emotion, clarity, payoff, virality) usando l'INTERA scala in modo calibrato, non ammassata in una fascia stretta:
    - 90-100: eccezionale, tra i migliori momenti possibili per quel tipo di contenuto — riservalo a ciò che è realmente il top, non usarlo come default per "molto buono".
    - 75-89: forte, chiaramente sopra la media, funzionerebbe bene come Short.
    - 55-74: discreto, ha potenziale ma non è memorabile.
    - Sotto 55: debole — se un candidato scende sistematicamente sotto 50 su più dimensioni, scartalo invece di includerlo con punteggi bassi.
    Differenzia davvero il candidato migliore dagli altri: se 5 clip diverse meritano tutte "80" su ogni dimensione, non stai valutando abbastanza a fondo — quasi sempre alcune si distinguono nettamente dalle altre.
-3. Scrivere un titolo (vedi "Stile titoli" sotto) e il motivo (reason) per cui la clip funziona — reason è un campo INTERNO, mostrato solo nella dashboard per capire la scelta, non finisce mai pubblicato.
-4. Scegliere un editing_style (dynamic, clean, high_energy, calm) e un template coerente tra PODCAST_DYNAMIC, PODCAST_CLEAN, STREAMER, STORYTELLING, MOTIVATIONAL.
-5. Generare una Edit Decision List (EDL) con eventi "zoom" (sui momenti di enfasi), "highlight_word" (sulle 2-5 parole chiave più importanti della clip), "speaker_switch" (se cambia chi parla) e opzionalmente "punch_in" su un climax. I timestamp degli eventi devono cadere DENTRO l'intervallo [start, end] della clip e sono relativi al video originale (stessa timeline del transcript), non relativi all'inizio della clip.
-6. Generare 5-8 hashtag pertinenti per la pubblicazione su YouTube Shorts (senza #, minuscolo, senza spazi: es. "podcast", "funnymoments", non "Funny Moments"). Mescola hashtag generici ad alto volume di ricerca (es. "shorts", "viral") con 2-3 specifici al contenuto della clip.
-7. Scrivere una caption pubblica: 1-2 frasi brevi in italiano colloquiale/slang naturale (il linguaggio vero usato nei titoli/descrizioni di Shorts/TikTok italiani), divertente o ad effetto, MAI cringe, MAI un riassunto o una spiegazione — è il testo che un utente reale legge sotto il video, non l'analisi della clip.
-8. Assegnare (opzionalmente) uno o più badge tra: "gotcha" (un'affermazione viene fatta e poi smentita/corretta in diretta — es. "a volte le aragoste perdono le zampe da sole" seguito da "questa l'hai inventata"/"gliele hai staccate tu": funziona perché crea un momento di giudizio/rivincita, non solo un fatto curioso), "cliffhanger" (la clip si chiude su una domanda aperta o una svolta non risolta), "controversial" (un'opinione netta e divisiva, il tipo di cosa che genera commenti "vero"/"falso"), "relatable" (una situazione/dolore quotidiano riconoscibile, non un fatto astratto), "high_energy" (reazione fisica/vocale molto marcata, non solo parlato normale). Un candidato può avere zero badge: è normale, NON è un difetto e non deve influenzare i punteggi al ribasso — i badge sono un segnale aggiuntivo per la dashboard, mai un filtro. Non forzare un badge se non calza davvero: meglio nessun badge che uno finto.
+4. Scrivere un titolo (vedi "Stile titoli" sotto) e il motivo (reason) per cui la clip funziona — reason è un campo INTERNO, mostrato solo nella dashboard per capire la scelta, non finisce mai pubblicato.
+5. Scegliere un editing_style (dynamic, clean, high_energy, calm) e un template coerente tra PODCAST_DYNAMIC, PODCAST_CLEAN, STREAMER, STORYTELLING, MOTIVATIONAL.
+6. Generare una Edit Decision List (EDL) con eventi "zoom" (sui momenti di enfasi), "highlight_word" (sulle 2-5 parole chiave più importanti della clip), "speaker_switch" (se cambia chi parla) e opzionalmente "punch_in" su un climax. I timestamp degli eventi devono cadere DENTRO l'intervallo [start, end] della clip (quello RIFINITO al punto 2) e sono relativi al video originale (stessa timeline del transcript), non relativi all'inizio della clip.
+7. Generare 5-8 hashtag pertinenti per la pubblicazione su YouTube Shorts (senza #, minuscolo, senza spazi: es. "podcast", "funnymoments", non "Funny Moments"). Mescola hashtag generici ad alto volume di ricerca (es. "shorts", "viral") con 2-3 specifici al contenuto della clip.
+8. Scrivere una caption pubblica: 1-2 frasi brevi in italiano colloquiale/slang naturale (il linguaggio vero usato nei titoli/descrizioni di Shorts/TikTok italiani), divertente o ad effetto, MAI cringe, MAI un riassunto o una spiegazione — è il testo che un utente reale legge sotto il video, non l'analisi della clip.
+9. Assegnare (opzionalmente) uno o più badge tra: "gotcha" (un'affermazione viene fatta e poi smentita/corretta in diretta — es. "a volte le aragoste perdono le zampe da sole" seguito da "questa l'hai inventata"/"gliele hai staccate tu": funziona perché crea un momento di giudizio/rivincita, non solo un fatto curioso), "cliffhanger" (la clip si chiude su una domanda aperta o una svolta non risolta), "controversial" (un'opinione netta e divisiva, il tipo di cosa che genera commenti "vero"/"falso"), "relatable" (una situazione/dolore quotidiano riconoscibile, non un fatto astratto), "high_energy" (reazione fisica/vocale molto marcata, non solo parlato normale). Un candidato può avere zero badge: è normale, NON è un difetto e non deve influenzare i punteggi al ribasso — i badge sono un segnale aggiuntivo per la dashboard, mai un filtro. Non forzare un badge se non calza davvero: meglio nessun badge che uno finto.
 
 Calibrazione: non premiare automaticamente contenuto "corretto ma piatto" (spiegazioni fluide, tono pacato, fatti ordinati) solo perché è ben espresso — su questo formato vince quasi sempre il momento di attrito reale (un gotcha, una reazione fisica forte, un'opinione netta), non la clip più "educata". Se stai esitando tra una clip pulita ma poco mordente e una più caotica/diretta che genera davvero una reazione, preferisci la seconda.
 
@@ -204,7 +213,7 @@ export async function rankAndBuildEdl(
     const message = await client.messages.create({
       model: options.model,
       max_tokens: 8000,
-      system: SYSTEM_PROMPT,
+      system: cachedSystemPrompt(SYSTEM_PROMPT),
       messages,
       tools: [RANKING_TOOL_SCHEMA],
       tool_choice: { type: "tool", name: TOOL_NAME },

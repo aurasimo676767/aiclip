@@ -1,8 +1,8 @@
 import { z } from "zod";
 import type { TranscriptSegment } from "@clipforge/shared";
 import { clipCandidateSchema, type ClipCandidatesResponse } from "@clipforge/shared";
-import { CANDIDATE_CHUNK_OVERLAP_SECONDS, CANDIDATE_CHUNK_WINDOW_SECONDS } from "@clipforge/shared";
-import { getAnthropicClient } from "./anthropic-client.js";
+import { CANDIDATE_CHUNK_OVERLAP_SECONDS, CANDIDATE_CHUNK_WINDOW_SECONDS, CLIP_DURATION_TARGET } from "@clipforge/shared";
+import { getAnthropicClient, cachedSystemPrompt } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
 import { logger } from "../../lib/logger.js";
 
@@ -25,9 +25,17 @@ const CANDIDATES_TOOL_SCHEMA = {
         items: {
           type: "object",
           properties: {
-            start: { type: "number", description: "Timestamp di inizio in secondi dall'inizio del video." },
+            start: {
+              type: "number",
+              description:
+                "Timestamp di inizio in secondi dall'inizio del video — DEVE cadere esattamente all'inizio della frase-gancio (vedi 'hook'), MAI prima. Scarta tutto il setup/contesto che la precede nel parlato originale, anche se rilevante: chi guarda deve capire il succo entro le prime 3 parole, non dopo un preambolo.",
+            },
             end: { type: "number", description: "Timestamp di fine in secondi dall'inizio del video." },
-            hook: { type: "string", description: "La frase/momento che cattura l'attenzione nei primi secondi." },
+            hook: {
+              type: "string",
+              description:
+                "Le PRIME parole effettive della clip (non una descrizione del momento): devono essere già il contenuto forte — l'affermazione sorprendente/assurda, la reazione esplosiva, il numero scioccante — non l'introduzione che porta ad esso.",
+            },
             reason: { type: "string", description: "Perché questo momento funzionerebbe come clip virale, in una frase." },
           },
           required: ["start", "end", "hook", "reason"],
@@ -55,7 +63,16 @@ Scarta senza pietà (anche se "suonano" energici):
 
 Il criterio finale: se leggessi solo la trascrizione di questo momento SENZA aver visto il video, capiresti perché è divertente/interessante e vorresti guardarlo? Se la risposta è "boh, forse, se c'eri" — scartalo. È molto meglio restituire 2 candidati davvero forti che 6 mediocri.
 
-Ogni clip candidata deve durare idealmente tra 30 e 60 secondi (accettabile una leggera deviazione se serve a preservare il senso compiuto). Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito: non inventare tempi. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
+DOVE INIZIA IL TAGLIO — questa è la parte più importante: la clip NON inizia da dove inizia l'argomento nel discorso originale, inizia dalla frase-gancio stessa. Se lo streamer dice "allora vi devo raccontare una cosa, ieri ho letto che a volte le aragoste perdono le zampe quando sono stressate", il taglio comincia da "a volte le aragoste perdono le zampe...", NON da "allora vi devo raccontare" — quel setup va scartato anche se nel parlato originale veniva prima e dava contesto. Entro le prime 3 parole della clip deve già iniziare il succo. Segnali di una buona frase-gancio, in ordine di priorità:
+1. Affermazione controintuitiva o fatto sorprendente/assurdo
+2. Reazione emotiva forte e improvvisa (shock, urla, risata esplosiva) — un cambio di tono brusco rispetto a quello che c'era prima nel transcript è un segnale forte
+3. Frase con un numero o una statistica sorprendente
+4. Svolta/rivelazione che ribalta quello che si pensava un attimo prima
+Il campo "hook" deve contenere le parole ESATTE con cui la clip si apre, non un riassunto — e "start" deve corrispondere al timestamp di quelle parole, non a quello del preambolo che le precede.
+
+DOVE FINISCE IL TAGLIO — ERRORE DA NON RIPETERE (osservato in produzione): tagliare "senza pietà" NON significa fermarsi subito dopo la frase-gancio. Una clip che è solo hook e poi finisce di colpo non fa ridere/non colpisce, perché manca lo sviluppo: la reazione di chi ascolta, la battuta che segue, l'escalation, la spiegazione che rende la cosa ancora più assurda. "end" deve includere tutto questo, non solo il gancio — punta a riempire l'intervallo ${CLIP_DURATION_TARGET.min}-${CLIP_DURATION_TARGET.max}s con contenuto vero (non riempitivo), non a chiudere il prima possibile. Il "taglia senza pietà" si applica al SETUP prima del gancio e ai momenti morti in mezzo, MAI al payoff dopo.
+
+Ogni clip candidata deve durare al massimo ${CLIP_DURATION_TARGET.hardMax} secondi, idealmente ${CLIP_DURATION_TARGET.min}-${CLIP_DURATION_TARGET.max}s — non fermarti prima solo perché il gancio è già stato detto. Se il momento naturale attorno al gancio (gancio + sviluppo/payoff) è più lungo del tetto, allora sì taglia aggressivamente per starci dentro, ma sempre preferendo tenere il payoff piuttosto che tagliarlo per accorciare. Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito: non inventare tempi. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
 export interface CandidateDetectionOptions {
   apiKey: string;
@@ -90,7 +107,7 @@ ${formatSegments(windowSegments)}`;
     const message = await client.messages.create({
       model: options.model,
       max_tokens: 1500,
-      system: SYSTEM_PROMPT,
+      system: cachedSystemPrompt(SYSTEM_PROMPT),
       messages: [{ role: "user", content: userPrompt }],
       tools: [CANDIDATES_TOOL_SCHEMA],
       tool_choice: { type: "tool", name: TOOL_NAME },
