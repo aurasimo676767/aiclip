@@ -2,6 +2,7 @@ import { requireUser } from "@/lib/auth";
 import { YoutubeConnectionPanel } from "@/components/youtube-connection-panel";
 import { FollowedChannelsPanel } from "@/components/followed-channels-panel";
 import { FollowedTwitchChannelsPanel } from "@/components/followed-twitch-channels-panel";
+import { PublishSchedulePanel } from "@/components/publish-schedule-panel";
 
 // Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
 // cachati anche col polling attivo.
@@ -29,6 +30,11 @@ export default async function SettingsPage({
     .select("id, display_name")
     .eq("user_id", user.id)
     .order("created_at", { ascending: true });
+  const { data: publishSchedule } = await supabase
+    .from("publish_schedules")
+    .select("short_times, longform_times")
+    .eq("user_id", user.id)
+    .maybeSingle();
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -89,6 +95,14 @@ export default async function SettingsPage({
         </p>
         <FollowedTwitchChannelsPanel
           channels={(followedTwitchChannels ?? []).map((c) => ({ id: c.id, displayName: c.display_name }))}
+        />
+      </div>
+
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <h2 className="mb-1 text-sm font-semibold text-zinc-300">Programmazione automatica</h2>
+        <PublishSchedulePanel
+          initialShortTimes={publishSchedule?.short_times ?? []}
+          initialLongformTimes={publishSchedule?.longform_times ?? []}
         />
       </div>
 
