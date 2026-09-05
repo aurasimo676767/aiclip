@@ -153,6 +153,16 @@ ${formatSegments(windowSegments)}`;
     costUsd: computeModelCostUsd("haiku", usage).toFixed(4),
   });
 
+  // Log diagnostico dei candidati GREZZI (prima di dedupe/merge): serve a distinguere, quando un
+  // segmento risulta troncato, se il problema è che Haiku non ha proposto la continuazione oltre
+  // il confine di una finestra, o se l'ha proposta ma dedupe/merge non l'ha riconosciuta come
+  // la stessa attività (vedi mergeNearbyCandidates) — senza questo log i due casi sono
+  // indistinguibili guardando solo il risultato finale.
+  logger.info("Candidati long-form grezzi (prima di dedupe/merge)", {
+    count: allCandidates.length,
+    candidates: allCandidates.map((c) => ({ start: c.start, end: c.end, topic: c.topic })),
+  });
+
   return {
     candidates: mergeNearbyCandidates(dedupeCandidates(allCandidates)),
     usage,

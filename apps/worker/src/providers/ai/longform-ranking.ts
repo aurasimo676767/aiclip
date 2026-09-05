@@ -25,9 +25,17 @@ const RANKING_TOOL_SCHEMA = {
         items: {
           type: "object",
           properties: {
-            start: { type: "number" },
-            end: { type: "number" },
-            duration: { type: "number" },
+            start: {
+              type: "number",
+              description:
+                "Deve coincidere con l'inizio dell'intervallo ASSEGNATO al candidato (vedi il messaggio utente), salvo rifinire di pochi secondi/decina di secondi un residuo di setup — MAI spostarlo in avanti per 'iniziare dal pezzo migliore' scartando la prima parte del candidato.",
+            },
+            end: {
+              type: "number",
+              description:
+                "Deve coincidere con la fine dell'intervallo ASSEGNATO al candidato, salvo rifinire di pochi secondi/decina di secondi una coda morta — MAI accorciarlo per tenere solo 'il momento migliore': un candidato lungo con più giochi/eventi va tenuto per intero, non ridotto a un sottoinsieme.",
+            },
+            duration: { type: "number", description: "end - start, quindi quasi identica alla durata originale del candidato assegnato." },
             title: {
               type: "string",
               description:
@@ -75,7 +83,9 @@ const RANKING_TOOL_SCHEMA = {
 
 const SYSTEM_PROMPT = `Sei un editor esperto che seleziona i segmenti finali di un video long-form da pubblicare su YouTube, a partire da un VOD di live Twitch già diviso in candidati per argomento dal primo passaggio. Ricevi i candidati con il transcript di contesto. Per ognuno:
 
-1. Scarta i candidati deboli: argomento troppo vago, segmento che non regge da solo, durata sproporzionata rispetto al contenuto reale (es. 15 minuti per un argomento esaurito in 3). Meglio pochi segmenti forti che tanti mediocri.
+REGOLA PIÙ IMPORTANTE SU start/end — ERRORE OSSERVATO IN PRODUZIONE DA NON RIPETERE: questo NON è il passaggio Shorts, non stai scegliendo il momento migliore DENTRO un candidato. Un candidato di 45 minuti con 4 giochi diversi (es. Rocket League + Trackmania + Super Animal Royale + Battaglia Navale) va tenuto TUTTO INTERO se la sessione regge — NON va spezzettato in 3-4 clip più corte da 6-15 minuti ciascuna scegliendo "i pezzi migliori". Osservato esattamente questo errore: un candidato da 45 minuti è uscito come 4 mini-clip separate che coprivano solo una frazione del blocco originale, perdendo la maggior parte del contenuto. start ed end del tuo output devono coincidere con l'intervallo ASSEGNATO al candidato (vedi sotto), con AL MASSIMO qualche decina di secondi di rifinitura ai due estremi (togliere un residuo di setup o di coda morta) — mai un taglio che elimina una parte sostanziale del candidato per "tenere solo il meglio".
+
+1. Scarta (intero candidato, non accorciarlo) quelli deboli: argomento troppo vago, segmento che non regge da solo, oppure — questo è un motivo di SCARTO COMPLETO, non di accorciamento — la maggior parte del candidato è morta/ripetitiva rispetto al poco contenuto reale (es. un candidato di 15 minuti che è per il 90% silenzio o chiacchiere a vuoto attorno a 3 minuti di contenuto: qui il candidato va scartato del tutto, MAI ridotto a quei 3 minuti tagliando il resto). Meglio scartare un candidato intero che restituirne una versione tagliata a pezzi.
 2. Assegna 6 punteggi da 0 a 100 (hook, retention, emotion, clarity, payoff, virality), calibrati sull'INTERA scala — usa lo stesso criterio di calibrazione di un editor Shorts esperto: 90-100 eccezionale/riservato al vero top, 75-89 forte, 55-74 discreto, sotto 55 debole (scarta invece di includere con punteggi bassi).
 3. Scrivi title, hook, reason (vedi "Stile titoli" sotto per title — hook/reason restano interni, solo per la dashboard).
 4. Genera 5-8 hashtag pertinenti (senza #, minuscolo, senza spazi).
@@ -220,7 +230,8 @@ function buildUserContent(
       type: "text",
       text: `### Candidato ${index + 1}
 Argomento individuato (dal primo passaggio): ${candidate.topic}
-Transcript con contesto (${(candidate.start - CONTEXT_PADDING_SECONDS).toFixed(0)}s - ${(candidate.end + CONTEXT_PADDING_SECONDS).toFixed(0)}s):
+Intervallo ASSEGNATO a questo candidato: ${candidate.start.toFixed(0)}s - ${candidate.end.toFixed(0)}s (${((candidate.end - candidate.start) / 60).toFixed(1)} minuti) — vedi le regole sopra su start/end: NON è un intervallo da cui estrarre un momento più corto, è il blocco che devi valutare/scartare così com'è.
+Transcript con contesto (include ${CONTEXT_PADDING_SECONDS}s in più su ciascun lato SOLO per capire se il confine va rifinito di pochi secondi, non per scegliere un sotto-segmento): ${(candidate.start - CONTEXT_PADDING_SECONDS).toFixed(0)}s - ${(candidate.end + CONTEXT_PADDING_SECONDS).toFixed(0)}s:
 ${formatSegments(contextSegments)}`,
     });
   }
