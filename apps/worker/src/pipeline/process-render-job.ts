@@ -71,7 +71,7 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
       if (projectError || !project) {
         throw new Error(`Progetto non trovato per il video ${videoRow.id}: impossibile riscaricare la sorgente ripulita`);
       }
-      localSourcePath = await redownloadSourceVideo(videoRow, project.user_id, jobDir);
+      localSourcePath = await redownloadSourceVideo(videoRow, project.user_id);
     }
     if (await cancelled()) return;
 
