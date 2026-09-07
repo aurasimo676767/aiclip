@@ -59,6 +59,10 @@ export async function invalidateSourceCache(storagePath: string): Promise<void> 
   await fsp.rm(localPath, { force: true }).catch((err) => {
     logger.warn("Rimozione cache locale sorgente fallita", { storagePath, localPath, error: err instanceof Error ? err.message : String(err) });
   });
+  // Marcatore di completamento del download a blocchi paralleli (vedi r2-storage-provider.ts) —
+  // va ripulito insieme al file, altrimenti un futuro download con lo stesso path locale (hash
+  // deterministico su storagePath) potrebbe trovarlo e credersi già completo.
+  await fsp.rm(`${localPath}.complete`, { force: true }).catch(() => undefined);
 }
 
 /**

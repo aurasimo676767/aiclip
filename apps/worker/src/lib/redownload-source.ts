@@ -4,7 +4,7 @@ import { supabase } from "./supabase.js";
 import { storageProvider } from "./providers.js";
 import { downloadYoutubeVideo } from "../pipeline/download-youtube.js";
 import { ensureEnoughDiskSpaceForDownload } from "./disk-space.js";
-import { getOrRedownloadFromPlatform, invalidateRedownloadCache } from "./source-download-cache.js";
+import { getOrRedownloadFromPlatform } from "./source-download-cache.js";
 import { env } from "../env.js";
 import { logger } from "./logger.js";
 
@@ -49,9 +49,10 @@ export async function redownloadSourceVideo(video: VideoRow, projectUserId: stri
     throw new Error(`Aggiornamento video (ri-download sorgente) fallito: ${error.message}`);
   }
 
-  // Non serve più: da qui in poi video.storage_path è di nuovo valorizzato, i render successivi
-  // passano dalla cache R2 normale (getOrDownloadSourceFile), non da questa.
-  await invalidateRedownloadCache(video.id);
-
+  // NON invalidare la cache di redownload qui: il chiamante (process-render-job.ts) deve ancora
+  // USARE filePath per renderizzare la clip — cancellarla adesso lo lascerebbe puntare a un file
+  // appena eliminato (bug reale osservato: ffprobe falliva con "No such file or directory" subito
+  // dopo un redownload+upload riusciti). La pulizia della cartella di redownload avviene più tardi,
+  // a render concluso, in cleanup-source.ts.
   return filePath;
 }

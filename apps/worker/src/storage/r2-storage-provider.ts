@@ -12,6 +12,21 @@ import { logger } from "../lib/logger.js";
 const DOWNLOAD_MAX_ATTEMPTS = 5;
 const DOWNLOAD_RETRY_DELAY_MS = 5000;
 
+// Sopra questa soglia il download passa da un singolo stream HTTP a più richieste Range in
+// parallelo (stesso principio dell'upload multipart già usato in uploadFile) — un singolo stream
+// su un VOD da 20GB era osservato fermarsi a ~3MB/s pur avendo una connessione capace di molto di
+// più, perché una sola connessione TCP non satura la banda disponibile verso R2.
+const PARALLEL_DOWNLOAD_THRESHOLD_BYTES = 200 * 1024 * 1024; // 200MB
+// Dimensione FISSA di ogni blocco, non "remoteSize / concorrenza": bug reale osservato con blocchi
+// da remoteSize/6 (su un VOD da 21GB, ~3.6GB l'uno) — una richiesta Range così a lungo tenuta
+// aperta va in "aborted" (stesso problema del vecchio stream singolo, vedi sopra) e il retry
+// ributtava via GIGABYTE di progresso per rifare l'intero blocco. Con blocchi piccoli un "aborted"
+// costa secondi, non ore.
+const PARALLEL_PART_SIZE_BYTES = 64 * 1024 * 1024; // 64MB
+const PARALLEL_DOWNLOAD_CONCURRENCY = 6;
+const PARALLEL_PART_MAX_ATTEMPTS = 5;
+const PARALLEL_PART_RETRY_DELAY_MS = 3000;
+
 export interface R2Config {
   accountId: string;
   accessKeyId: string;
@@ -66,6 +81,27 @@ export class R2StorageProvider implements StorageProvider {
       // chiaro (es. file non trovato) se il problema è reale.
     }
 
+    if (remoteSize !== null && remoteSize >= PARALLEL_DOWNLOAD_THRESHOLD_BYTES) {
+      // Percorso a blocchi paralleli: la dimensione del file NON è un indicatore affidabile di
+      // "quanto è stato scaricato davvero", perché il file viene preallocato (troncato) alla
+      // dimensione finale prima ancora di scrivere i blocchi — un riavvio a metà lo troverebbe
+      // già della dimensione giusta ma pieno di zeri non scaricati. Per questo qui il "già fatto"
+      // si verifica con un marcatore scritto SOLO a download completato, non con fs.stat.
+      await this.downloadInParallelParts(storagePath, localFilePath, remoteSize);
+      return;
+    }
+
+    let existingBytesUpfront = 0;
+    try {
+      existingBytesUpfront = (await fsp.stat(localFilePath)).size;
+    } catch {
+      existingBytesUpfront = 0;
+    }
+    if (remoteSize !== null && existingBytesUpfront >= remoteSize) {
+      // Già tutto scaricato in un tentativo precedente: nessun byte in più da chiedere.
+      return;
+    }
+
     let lastError: unknown;
     for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt++) {
       let existingBytes = 0;
@@ -111,6 +147,118 @@ export class R2StorageProvider implements StorageProvider {
 
     throw new Error(
       `Download da storage fallito per "${storagePath}" dopo ${DOWNLOAD_MAX_ATTEMPTS} tentativi: ${
+        lastError instanceof Error ? lastError.message : String(lastError)
+      }`,
+    );
+  }
+
+  /**
+   * Scarica un file grande a blocchi in parallelo (richieste Range concorrenti su connessioni TCP
+   * separate) invece che con un unico stream sequenziale — su un VOD da 20+GB, un singolo stream
+   * era osservato bloccarsi a ~3MB/s. Ogni blocco scrive alla propria posizione nel file (via
+   * `start` di createWriteStream su un file preallocato con la dimensione finale) e viene ritentato
+   * autonomamente in caso di errore, senza dover rifare i blocchi già completati.
+   */
+  private async downloadInParallelParts(storagePath: string, localFilePath: string, remoteSize: number): Promise<void> {
+    const markerPath = `${localFilePath}.complete`;
+
+    // Il marcatore si scrive SOLO a download riuscito (vedi in fondo): se combacia con la
+    // dimensione remota attuale, il file locale è per davvero completo e non c'è nulla da rifare.
+    try {
+      const markerContent = await fsp.readFile(markerPath, "utf8");
+      if (Number(markerContent.trim()) === remoteSize) {
+        const stat = await fsp.stat(localFilePath).catch(() => null);
+        if (stat && stat.size === remoteSize) {
+          return;
+        }
+      }
+    } catch {
+      // Nessun marcatore: procedi con il download.
+    }
+
+    // Non tentiamo di riprendere un download a blocchi interrotto a metà (richiederebbe tracciare
+    // quali blocchi erano già completi): un riavvio a metà semplicemente ricomincia il download
+    // parallelo da capo, accettabile perché è comunque molto più veloce di un singolo stream.
+    // "w" tronca subito il file a 0 byte prima di riallocarlo alla dimensione finale.
+    const fh = await fsp.open(localFilePath, "w");
+    await fh.truncate(remoteSize);
+    await fh.close();
+    await fsp.rm(markerPath, { force: true });
+
+    const ranges: Array<[number, number]> = [];
+    for (let start = 0; start < remoteSize; start += PARALLEL_PART_SIZE_BYTES) {
+      ranges.push([start, Math.min(start + PARALLEL_PART_SIZE_BYTES, remoteSize) - 1]);
+    }
+
+    logger.info("Download parallelo a blocchi avviato", {
+      storagePath,
+      remoteSize,
+      parts: ranges.length,
+      partSize: PARALLEL_PART_SIZE_BYTES,
+      concurrency: PARALLEL_DOWNLOAD_CONCURRENCY,
+    });
+
+    let nextIndex = 0;
+    let completedParts = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const index = nextIndex++;
+        const range = ranges[index];
+        if (!range) return;
+        const [start, end] = range;
+        await this.downloadRangeWithRetry(storagePath, localFilePath, start, end);
+        completedParts++;
+        if (completedParts % 50 === 0 || completedParts === ranges.length) {
+          logger.info("Download parallelo a blocchi: avanzamento", {
+            storagePath,
+            completedParts,
+            totalParts: ranges.length,
+            percent: Math.round((completedParts / ranges.length) * 100),
+          });
+        }
+      }
+    };
+
+    const concurrency = Math.min(PARALLEL_DOWNLOAD_CONCURRENCY, ranges.length);
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+    // Marca il download come davvero completo SOLO ora che ogni blocco è stato scritto: è quello
+    // che il controllo in cima a questa funzione verifica prima di saltare un futuro tentativo.
+    await fsp.writeFile(markerPath, String(remoteSize), "utf8");
+
+    logger.info("Download parallelo a blocchi completato", { storagePath, remoteSize });
+  }
+
+  private async downloadRangeWithRetry(storagePath: string, localFilePath: string, start: number, end: number): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= PARALLEL_PART_MAX_ATTEMPTS; attempt++) {
+      try {
+        const response = await this.client.send(
+          new GetObjectCommand({ Bucket: this.bucket, Key: storagePath, Range: `bytes=${start}-${end}` }),
+        );
+        if (!response.Body) {
+          throw new Error(`Blocco vuoto per "${storagePath}" (bytes ${start}-${end})`);
+        }
+        const writeStream = fs.createWriteStream(localFilePath, { flags: "r+", start });
+        await pipeline(response.Body as NodeJS.ReadableStream, writeStream);
+        return;
+      } catch (err) {
+        lastError = err;
+        logger.warn("Blocco di download parallelo fallito, ritento", {
+          storagePath,
+          start,
+          end,
+          attempt,
+          maxAttempts: PARALLEL_PART_MAX_ATTEMPTS,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        if (attempt < PARALLEL_PART_MAX_ATTEMPTS) {
+          await sleep(PARALLEL_PART_RETRY_DELAY_MS);
+        }
+      }
+    }
+    throw new Error(
+      `Download del blocco ${start}-${end} fallito per "${storagePath}" dopo ${PARALLEL_PART_MAX_ATTEMPTS} tentativi: ${
         lastError instanceof Error ? lastError.message : String(lastError)
       }`,
     );
