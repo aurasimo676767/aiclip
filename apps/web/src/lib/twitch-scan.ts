@@ -91,6 +91,19 @@ interface TwitchVideosResponse {
     created_at: string;
     duration: string; // es. "3h24m10s" oppure "45m2s" oppure "58s"
   }>;
+  pagination?: { cursor?: string };
+}
+
+function mapTwitchVideos(data: TwitchVideosResponse): TwitchVod[] {
+  return (data.data ?? []).map((v) => ({
+    vodId: v.id,
+    title: v.title,
+    url: v.url,
+    // Il template ha {width}x{height} letterali da sostituire con una risoluzione reale.
+    thumbnailUrl: v.thumbnail_url.replace("{width}", "440").replace("{height}", "248"),
+    createdAt: v.created_at,
+    durationSeconds: parseTwitchDuration(v.duration),
+  }));
 }
 
 /** Gli ultimi `maxResults` VOD (type=archive, esclude highlight/clip caricati) di un canale. */
@@ -110,15 +123,50 @@ export async function fetchLatestVods(twitchUserId: string, maxResults: number):
     throw new Error("Lettura VOD del canale fallita");
   }
 
-  return (data.data ?? []).map((v) => ({
-    vodId: v.id,
-    title: v.title,
-    url: v.url,
-    // Il template ha {width}x{height} letterali da sostituire con una risoluzione reale.
-    thumbnailUrl: v.thumbnail_url.replace("{width}", "440").replace("{height}", "248"),
-    createdAt: v.created_at,
-    durationSeconds: parseTwitchDuration(v.duration),
-  }));
+  return mapTwitchVideos(data);
+}
+
+const HELIX_MAX_PAGE_SIZE = 100;
+// Twitch tiene i VOD per ~60 giorni (più per i partner): con VOD tipicamente non giornalieri,
+// 5 pagine da 100 (500 VOD) coprono ampiamente qualunque canale prima che l'API smetta di
+// restituire risultati da sola — un limite di sicurezza contro un loop, non un vincolo reale.
+const MAX_PAGES = 5;
+
+/**
+ * TUTTI i VOD disponibili di un canale (non solo gli ultimi N) — pagina l'API Helix con `after`
+ * finché non ci sono più risultati. Usato dalla pagina "tutti i VOD di questo canale", per poter
+ * generare in blocco l'intero storico ancora disponibile (limitato dalla retention di Twitch
+ * stessa, ~2 mesi), invece di doverli aprire uno alla volta dal feed misto.
+ */
+export async function fetchAllVods(twitchUserId: string): Promise<TwitchVod[]> {
+  const clientId = process.env.TWITCH_CLIENT_ID;
+  if (!clientId) {
+    throw new Error("Configurazione Twitch mancante lato server (TWITCH_CLIENT_ID)");
+  }
+
+  const accessToken = await getTwitchAppAccessToken();
+  const allVods: TwitchVod[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const params = new URLSearchParams({ user_id: twitchUserId, type: "archive", first: String(HELIX_MAX_PAGE_SIZE) });
+    if (cursor) params.set("after", cursor);
+
+    const res = await fetch(`https://api.twitch.tv/helix/videos?${params.toString()}`, {
+      headers: { "Client-Id": clientId, Authorization: `Bearer ${accessToken}` },
+    });
+    const data = (await res.json()) as TwitchVideosResponse;
+    if (!res.ok) {
+      throw new Error("Lettura VOD del canale fallita");
+    }
+
+    allVods.push(...mapTwitchVideos(data));
+
+    cursor = data.pagination?.cursor;
+    if (!cursor || (data.data?.length ?? 0) === 0) break;
+  }
+
+  return allVods;
 }
 
 /** Converte il formato durata di Twitch ("3h24m10s", "45m2s", "58s") in secondi. */

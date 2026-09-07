@@ -8,7 +8,7 @@ export default async function FeedPage() {
 
   const { data: connection } = await supabase.from("youtube_connections").select("channel_title").eq("user_id", user.id).maybeSingle();
   const { data: channels } = await supabase.from("followed_channels").select("id, channel_title").eq("user_id", user.id);
-  const { data: twitchChannels } = await supabase.from("followed_twitch_channels").select("id").eq("user_id", user.id);
+  const { data: twitchChannels } = await supabase.from("followed_twitch_channels").select("id, display_name").eq("user_id", user.id);
 
   return (
     <div className="mx-auto max-w-5xl space-y-10">
@@ -51,7 +51,20 @@ export default async function FeedPage() {
             (nessuna connessione richiesta).
           </div>
         ) : (
-          <TwitchVideoFeed />
+          <>
+            <div className="flex flex-wrap gap-2">
+              {twitchChannels.map((c) => (
+                <Link
+                  key={c.id}
+                  href={`/dashboard/feed/twitch/${c.id}`}
+                  className="rounded-full border border-zinc-700 px-3 py-1 text-xs font-medium text-zinc-300 hover:border-brand-400/50 hover:text-brand-300"
+                >
+                  {c.display_name} →
+                </Link>
+              ))}
+            </div>
+            <TwitchVideoFeed />
+          </>
         )}
       </section>
     </div>
