@@ -135,6 +135,7 @@ export interface Database {
           streamer_name: string | null;
           streamer_login: string | null;
           usage_stats: unknown | null;
+          delete_source_requested_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -156,6 +157,7 @@ export interface Database {
           streamer_name?: string | null;
           streamer_login?: string | null;
           usage_stats?: unknown | null;
+          delete_source_requested_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -177,6 +179,7 @@ export interface Database {
           streamer_name?: string | null;
           streamer_login?: string | null;
           usage_stats?: unknown | null;
+          delete_source_requested_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

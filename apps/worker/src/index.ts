@@ -14,6 +14,7 @@ import { processThumbnailJob } from "./pipeline/process-thumbnail-job.js";
 import { refreshYoutubeStats } from "./pipeline/refresh-youtube-stats.js";
 import { pauseControlLoop } from "./pipeline/pause-control-loop.js";
 import { isWorkerPaused } from "./lib/pause-control.js";
+import { processSourceDeleteRequests } from "./lib/cleanup-source.js";
 
 let shuttingDown = false;
 
@@ -140,6 +141,18 @@ async function statsRefreshLoop(): Promise<void> {
   }
 }
 
+/** Loop di polling per le richieste manuali di "Elimina sorgente" dalla dashboard. */
+async function sourceDeleteLoop(): Promise<void> {
+  while (!shuttingDown) {
+    try {
+      await processSourceDeleteRequests();
+    } catch (err) {
+      logger.error("Errore nel loop di cancellazione sorgente", { error: err instanceof Error ? err.message : String(err) });
+    }
+    await sleep(env.QUEUE_POLL_INTERVAL_MS);
+  }
+}
+
 function handleShutdown(signal: string): void {
   logger.info(`Ricevuto ${signal}, arresto in corso dopo il job corrente...`);
   shuttingDown = true;
@@ -168,4 +181,5 @@ await Promise.all([
   thumbnailQueueLoop(),
   statsRefreshLoop(),
   pauseControlLoop(),
+  sourceDeleteLoop(),
 ]);

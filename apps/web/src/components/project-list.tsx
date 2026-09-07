@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ProjectSummary } from "@/lib/data/projects";
 import { StatusBadge, isProcessingStatus } from "./status-badge";
 import { CancelProjectButton } from "./cancel-project-button";
+import { DeleteSourceButton } from "./delete-source-button";
 
 export function ProjectList({ summaries, emptyMessage }: { summaries: ProjectSummary[]; emptyMessage: string }) {
   if (summaries.length === 0) {
@@ -46,7 +47,10 @@ export function ProjectList({ summaries, emptyMessage }: { summaries: ProjectSum
               <dd className="text-zinc-300">{new Date(project.created_at).toLocaleDateString("it-IT")}</dd>
             </div>
           </dl>
-          {isProcessingStatus(project.status) && <CancelProjectButton projectId={project.id} compact />}
+          <div className="flex items-center gap-2">
+            {isProcessingStatus(project.status) && <CancelProjectButton projectId={project.id} compact />}
+            {video?.storage_path && <DeleteSourceButton projectId={project.id} compact />}
+          </div>
         </Link>
       ))}
     </div>

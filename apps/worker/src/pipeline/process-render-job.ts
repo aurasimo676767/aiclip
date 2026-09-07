@@ -8,7 +8,6 @@ import { supabase } from "../lib/supabase.js";
 import { storageProvider, faceTracker } from "../lib/providers.js";
 import { getOrDownloadSourceFile } from "../lib/source-download-cache.js";
 import { redownloadSourceVideo } from "../lib/redownload-source.js";
-import { maybeCleanupSourceAfterClips } from "../lib/cleanup-source.js";
 import { renderClip } from "../render/render-clip.js";
 import { renderLongformClip } from "../render/render-longform-clip.js";
 import { runFfmpeg } from "../lib/ffmpeg.js";
@@ -27,9 +26,6 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
   // "Aggiornamento status render_job fallito: TypeError: fetch failed" dopo un render andato
   // a buon fine).
   let clipMarkedCompleted = false;
-  // Serve anche nel finally per l'eventuale pulizia del sorgente (video_id) — dichiarata qui
-  // perché nel try è nel suo scope, non raggiungibile da finally.
-  let videoIdForCleanup: string | null = null;
 
   // true se l'utente ha annullato: render_jobs/clips sono già stati marcati FAILED dal
   // pulsante "Annulla" lato web, il worker deve solo smettere di lavorarci senza
@@ -48,7 +44,6 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
 
     const clipRow = await fetchClip(job.clip_id);
     const videoRow = await fetchVideo(clipRow.video_id);
-    videoIdForCleanup = videoRow.id;
 
     if (await cancelled()) return;
 
@@ -173,19 +168,8 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
     }
   } finally {
     await fsp.rm(jobDir, { recursive: true, force: true }).catch(() => undefined);
-
-    // Se questo render_job era l'ultimo lavoro pendente per il video (tutte le clip ormai
-    // terminali), il sorgente originale non serve più a breve — libera spazio da R2 e dalla
-    // cache locale. Girato SEMPRE (successo o fallimento): una clip fallita è comunque "finita"
-    // finché qualcuno non la riprova a mano (a quel punto il sorgente viene ri-scaricato, vedi sopra).
-    if (videoIdForCleanup) {
-      await maybeCleanupSourceAfterClips(videoIdForCleanup).catch((err) => {
-        logger.warn("Pulizia sorgente post-render fallita, non bloccante", {
-          videoId: videoIdForCleanup,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    }
+    // Il sorgente NON viene più ripulito automaticamente da qui: vedi cleanup-source.ts — è
+    // l'utente a decidere quando liberare lo spazio, dal tasto "Elimina sorgente" in dashboard.
   }
 }
 
