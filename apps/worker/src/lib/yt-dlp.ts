@@ -15,26 +15,40 @@ export interface YtDlpResult {
   stderr: string;
 }
 
-/** Esegue yt-dlp e ne raccoglie stdout/stderr, con timeout (il download di un video lungo può richiedere minuti). */
-export function runYtDlp(args: string[], options: { timeoutMs?: number } = {}): Promise<YtDlpResult> {
-  const timeoutMs = options.timeoutMs ?? 20 * 60 * 1000;
+/**
+ * Esegue yt-dlp e ne raccoglie stdout/stderr, con un timeout di INATTIVITÀ (non totale): il
+ * cronometro si azzera a ogni output ricevuto. Prima era un timeout fisso di 20 minuti sull'intera
+ * chiamata — bug reale osservato: un VOD Twitch di 5h13m (~23GB) veniva ucciso a metà ogni volta,
+ * anche mentre stava scaricando normalmente, sprecando i tentativi disponibili. Con l'inattività,
+ * un download lungo ma attivo non scade mai; solo un vero blocco (nessun output per tutta la
+ * finestra) lo termina.
+ */
+export function runYtDlp(args: string[], options: { inactivityTimeoutMs?: number } = {}): Promise<YtDlpResult> {
+  const inactivityTimeoutMs = options.inactivityTimeoutMs ?? 5 * 60 * 1000;
 
   return new Promise((resolve, reject) => {
     const child = spawn("yt-dlp", args, { windowsHide: true });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let timer: ReturnType<typeof setTimeout>;
 
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeoutMs);
+    function resetTimer(): void {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, inactivityTimeoutMs);
+    }
+    resetTimer();
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
+      resetTimer();
     });
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
+      resetTimer();
     });
 
     child.on("error", (err) => {
@@ -45,7 +59,7 @@ export function runYtDlp(args: string[], options: { timeoutMs?: number } = {}): 
     child.on("close", (code) => {
       clearTimeout(timer);
       if (timedOut) {
-        reject(new YtDlpError(`yt-dlp ha superato il timeout di ${timeoutMs}ms ed è stato terminato`, stderr));
+        reject(new YtDlpError(`yt-dlp fermo (nessun output) per più di ${inactivityTimeoutMs}ms, terminato`, stderr));
         return;
       }
       if (code !== 0) {

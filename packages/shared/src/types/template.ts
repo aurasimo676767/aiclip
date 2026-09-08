@@ -55,7 +55,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     description: "Sottotitoli word-by-word, zoom frequenti, alta energia. Ideale per estratti podcast/interviste.",
     captionStyle: {
       fontFamily: "Montserrat ExtraBold",
-      fontSize: 72,
+      fontSize: 96,
       position: "smart",
       textColor: "#FFFFFF",
       highlightColor: "#FFD400",
@@ -74,7 +74,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     description: "Sottotitoli a frase, editing minimale, tono professionale.",
     captionStyle: {
       fontFamily: "Inter SemiBold",
-      fontSize: 60,
+      fontSize: 84,
       position: "bottom",
       textColor: "#FFFFFF",
       highlightColor: "#FFFFFF",
@@ -93,7 +93,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     description: "Stile gaming/streaming: caption grandi e colorate, zoom aggressivi.",
     captionStyle: {
       fontFamily: "Poppins Black",
-      fontSize: 78,
+      fontSize: 100,
       position: "smart",
       textColor: "#FFFFFF",
       highlightColor: "#00E5FF",
@@ -112,7 +112,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     description: "Ritmo più lento, caption a frase, zoom morbidi per momenti narrativi/emotivi.",
     captionStyle: {
       fontFamily: "Merriweather Bold",
-      fontSize: 58,
+      fontSize: 80,
       position: "bottom",
       textColor: "#FFFFFF",
       highlightColor: "#FFD400",
@@ -131,7 +131,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     description: "Caption bold centrali, forte enfasi sulle parole chiave, zoom marcati sui payoff.",
     captionStyle: {
       fontFamily: "Anton",
-      fontSize: 80,
+      fontSize: 104,
       position: "bottom",
       textColor: "#FFFFFF",
       highlightColor: "#FF3B30",
