@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getValidYoutubeAccessToken, filterExistingYoutubeVideoIds } from "@/lib/youtube-scan";
 import { pickNextFixedSlots } from "@/lib/publish-schedule";
+import { buildLongformDescription } from "@/lib/longform-description";
 
 const MIN_INTERVAL_MS = 2 * 60 * 60 * 1000; // 2h
 const MAX_INTERVAL_MS = 2.5 * 60 * 60 * 1000; // 2h30
@@ -63,12 +64,20 @@ export async function POST(request: Request) {
 
   const { data: clips, error: clipsError } = await supabase
     .from("clips")
-    .select("id, status, title, caption, hashtags, format")
+    .select("id, status, title, caption, hashtags, format, video_id")
     .in("id", clipIds);
   if (clipsError) {
     return NextResponse.json({ error: `Lettura clip fallita: ${clipsError.message}` }, { status: 500 });
   }
   const clipById = new Map((clips ?? []).map((c) => [c.id, c]));
+
+  // Streamer del video sorgente di ogni clip long-form, per la descrizione fissa (vedi
+  // longform-description.ts) — non serve per le clip Shorts, che restano sulla sola caption AI.
+  const longformVideoIds = [...new Set((clips ?? []).filter((c) => c.format === "longform").map((c) => c.video_id))];
+  const { data: sourceVideos } = longformVideoIds.length
+    ? await supabase.from("videos").select("id, streamer_name, streamer_login").in("id", longformVideoIds)
+    : { data: [] };
+  const streamerByVideoId = new Map((sourceVideos ?? []).map((v) => [v.id, v]));
 
   const { data: scheduleSettings } = await supabase
     .from("publish_schedules")
@@ -211,10 +220,18 @@ export async function POST(request: Request) {
     const clip = clipById.get(clipId)!;
     const publishAt = publishAtDate.toISOString();
 
+    let description = clip.caption ?? "";
+    if (clip.format === "longform") {
+      const streamer = streamerByVideoId.get(clip.video_id);
+      if (streamer?.streamer_name) {
+        description = buildLongformDescription(streamer.streamer_name, streamer.streamer_login);
+      }
+    }
+
     const { error: insertError } = await supabase.from("youtube_publish_jobs").insert({
       clip_id: clipId,
       title: clip.title.slice(0, 100),
-      description: clip.caption ?? "",
+      description,
       tags: (clip.hashtags as string[] | null) ?? [],
       privacy_status: "private",
       publish_at: publishAt,
