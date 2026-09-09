@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 
   const { data: clips, error: clipsError } = await supabase
     .from("clips")
-    .select("id, status, title, caption, hashtags, format, video_id")
+    .select("id, status, title, caption, hashtags, format, video_id, publish_description")
     .in("id", clipIds);
   if (clipsError) {
     return NextResponse.json({ error: `Lettura clip fallita: ${clipsError.message}` }, { status: 500 });
@@ -220,8 +220,11 @@ export async function POST(request: Request) {
     const clip = clipById.get(clipId)!;
     const publishAt = publishAtDate.toISOString();
 
-    let description = clip.caption ?? "";
-    if (clip.format === "longform") {
+    // Una descrizione scritta a mano dall'utente vince su tutto (vedi clips.publish_description):
+    // e' il motivo per cui esiste quel campo, poter correggere il testo dell'IA prima che la
+    // programmazione automatica lo pubblichi cosi' com'e'.
+    let description = clip.publish_description ?? clip.caption ?? "";
+    if (!clip.publish_description && clip.format === "longform") {
       const streamer = streamerByVideoId.get(clip.video_id);
       if (streamer?.streamer_name) {
         description = buildLongformDescription(streamer.streamer_name, streamer.streamer_login);

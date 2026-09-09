@@ -237,6 +237,7 @@ export interface Database {
           edl: unknown;
           hashtags: unknown;
           caption: string;
+          publish_description: string | null;
           badges: unknown;
           format: ClipFormat;
           status: ClipStatus;
@@ -262,6 +263,7 @@ export interface Database {
           edl: unknown;
           hashtags?: unknown;
           caption?: string;
+          publish_description?: string | null;
           badges?: unknown;
           format?: ClipFormat;
           status?: ClipStatus;
@@ -287,6 +289,7 @@ export interface Database {
           edl?: unknown;
           hashtags?: unknown;
           caption?: string;
+          publish_description?: string | null;
           badges?: unknown;
           format?: ClipFormat;
           status?: ClipStatus;

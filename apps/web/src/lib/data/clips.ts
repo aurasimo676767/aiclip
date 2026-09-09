@@ -46,7 +46,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       .in("project_id", projectIds),
     supabase
       .from("clips")
-      .select("id, project_id, title, hook, reason, duration, scores, status, error_message, hashtags, caption, badges, format")
+      .select("id, project_id, title, hook, reason, duration, scores, status, error_message, hashtags, caption, publish_description, badges, format")
       .in("project_id", projectIds),
   ]);
 
@@ -93,8 +93,10 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
   for (const c of clipsRaw ?? []) {
     const publish = latestPublishByClip.get(c.id);
     const streamer = streamerByProject.get(c.project_id);
+    // Una descrizione scritta a mano vince sul testo generato (vedi clips.publish_description).
     const publishDescription =
-      c.format === "longform" ? buildLongformDescriptionPreset(streamer?.name ?? null, streamer?.login ?? null) : (c.caption ?? "");
+      c.publish_description ??
+      (c.format === "longform" ? buildLongformDescriptionPreset(streamer?.name ?? null, streamer?.login ?? null) : (c.caption ?? ""));
     const clip: ClipViewModel = {
       id: c.id,
       title: c.title,

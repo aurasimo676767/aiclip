@@ -47,6 +47,10 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
   const [retryingClipId, setRetryingClipId] = useState<string | null>(null);
   const [cancellingClipId, setCancellingClipId] = useState<string | null>(null);
   const [regeneratingTitleClipId, setRegeneratingTitleClipId] = useState<string | null>(null);
+  const [editingClipId, setEditingClipId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<{ title: string; description: string; hashtags: string } | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editMessage, setEditMessage] = useState<string | null>(null);
   const [selectedForSchedule, setSelectedForSchedule] = useState<Set<string>>(new Set());
   const [submittingSchedule, setSubmittingSchedule] = useState(false);
   const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
@@ -178,6 +182,49 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
     }
   }
 
+  function startEditing(clip: ClipViewModel) {
+    setEditingClipId(clip.id);
+    setEditDraft({ title: clip.title, description: clip.publishDescription, hashtags: clip.hashtags.join(" ") });
+    setEditMessage(null);
+    setError(null);
+  }
+
+  async function saveEdit(clipId: string) {
+    if (!editDraft) return;
+    setSavingEdit(true);
+    setError(null);
+    setEditMessage(null);
+    try {
+      const res = await fetch(`/api/clips/${clipId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: editDraft.title.trim(),
+          publishDescription: editDraft.description,
+          // Si accettano sia "#tag" sia "tag", separati da spazi o virgole.
+          hashtags: editDraft.hashtags
+            .split(/[\s,]+/)
+            .map((h) => h.replace(/^#/, "").trim())
+            .filter(Boolean),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Salvataggio fallito");
+      setEditingClipId(null);
+      setEditDraft(null);
+      setEditMessage(
+        data.pendingJobsUpdated > 0
+          ? "Salvato, e aggiornata anche la pubblicazione già programmata."
+          : "Salvato.",
+      );
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore imprevisto");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   async function loadPreview(clipId: string) {
     setPreviewLoading(clipId);
     setError(null);
@@ -202,6 +249,7 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
     <div className="space-y-4">
       {error && <p className="text-sm text-red-400">{error}</p>}
       {scheduleMessage && <p className="text-sm text-emerald-400">{scheduleMessage}</p>}
+      {editMessage && <p className="text-sm text-emerald-400">{editMessage}</p>}
 
       {selectableCount > 0 && (
         <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3">
@@ -269,14 +317,72 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
                       <StatusBadge status={clip.status} />
                     </div>
                   </div>
-                  {clip.format === "longform" && (
+                  <div className="flex flex-wrap items-center gap-3">
                     <button
-                      onClick={() => regenerateTitle(clip.id)}
-                      disabled={regeneratingTitleClipId === clip.id}
-                      className="text-xs text-zinc-500 underline decoration-dotted hover:text-zinc-300 disabled:opacity-50"
+                      onClick={() => (editingClipId === clip.id ? setEditingClipId(null) : startEditing(clip))}
+                      className="text-xs text-zinc-500 underline decoration-dotted hover:text-zinc-300"
                     >
-                      {regeneratingTitleClipId === clip.id ? "Rigenero titolo..." : "Rigenera titolo"}
+                      {editingClipId === clip.id ? "Chiudi" : "✏️ Modifica titolo e descrizione"}
                     </button>
+                    {clip.format === "longform" && (
+                      <button
+                        onClick={() => regenerateTitle(clip.id)}
+                        disabled={regeneratingTitleClipId === clip.id}
+                        className="text-xs text-zinc-500 underline decoration-dotted hover:text-zinc-300 disabled:opacity-50"
+                      >
+                        {regeneratingTitleClipId === clip.id ? "Rigenero titolo..." : "Rigenera titolo"}
+                      </button>
+                    )}
+                  </div>
+
+                  {editingClipId === clip.id && editDraft && (
+                    <div className="space-y-3 rounded-xl border border-zinc-700 bg-zinc-900/60 p-3">
+                      <label className="block space-y-1">
+                        <span className="text-xs font-medium text-zinc-400">Titolo ({editDraft.title.length}/100)</span>
+                        <input
+                          value={editDraft.title}
+                          maxLength={100}
+                          onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })}
+                          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white"
+                        />
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-xs font-medium text-zinc-400">Descrizione</span>
+                        <textarea
+                          value={editDraft.description}
+                          rows={5}
+                          onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
+                          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white"
+                        />
+                        <span className="block text-[11px] text-zinc-500">
+                          Svuota il campo per tornare alla descrizione generata automaticamente.
+                        </span>
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-xs font-medium text-zinc-400">Hashtag</span>
+                        <input
+                          value={editDraft.hashtags}
+                          onChange={(e) => setEditDraft({ ...editDraft, hashtags: e.target.value })}
+                          placeholder="blur reaction gtavi"
+                          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white"
+                        />
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => saveEdit(clip.id)}
+                          disabled={savingEdit || editDraft.title.trim().length === 0}
+                          className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-400 disabled:opacity-50"
+                        >
+                          {savingEdit ? "Salvo..." : "Salva"}
+                        </button>
+                        <button
+                          onClick={() => setEditingClipId(null)}
+                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-500"
+                        >
+                          Annulla
+                        </button>
+                      </div>
+                    </div>
                   )}
                   <p className="text-sm text-zinc-400">
                     {Math.round(clip.duration)}s — Hook: &ldquo;{clip.hook}&rdquo;
