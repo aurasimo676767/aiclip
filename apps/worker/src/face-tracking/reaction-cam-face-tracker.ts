@@ -7,6 +7,7 @@ import { centeredCrop } from "./crop-geometry.js";
 import { CenterCropFaceTracker } from "./center-crop-face-tracker.js";
 import { detectSceneCuts } from "./scene-detect.js";
 import { detectWebcamRect } from "./webcam-rect.js";
+import { detectContentRegion } from "./content-region.js";
 import { logger } from "../lib/logger.js";
 
 const SEGMENT_LENGTH_SECONDS = 1.5; // granularità con cui si ricontrolla CHI sta parlando. Non influenza più la stabilità dell'inquadratura (il crop di una persona è fisso, vedi sotto), quindi non serve scendere a 1s come prima: 1.5s dimezza i frame da estrarre a parità di reattività percepita
@@ -20,7 +21,7 @@ const WEBCAM_CENTER_MARGIN = 0.3; // centro del volto fuori dal 30%-70% centrale
 const TOP_RATIO = 0.35; // frazione di altezza dedicata alla webcam nel layout split
 const MOTION_NOISE_FLOOR = 4; // sotto questa soglia il "movimento" è rumore/compressione, non parlato reale
 /** Fotogrammi campionati per trovare il riquadro della webcam: è la loro media a far emergere i bordi fermi. */
-const RECT_SAMPLE_COUNT = 8;
+const RECT_SAMPLE_COUNT = 14;
 const MIN_SEGMENT_SECONDS = 0.3; // un taglio di scena troppo vicino al confine della griglia (o a un altro taglio) verrebbe scartato invece di creare un segmento degenere: sotto questa durata SAMPLES_PER_SEGMENT frame ravvicinatissimi non danno una stima affidabile
 const MIN_CONSECUTIVE_SEGMENTS_TO_SWITCH_SPEAKER = 2; // segmenti di fila in cui un'ANCORA DIVERSA da quella attualmente mostrata deve avere più movimento prima di "rubarle" il pannello — senza, basta un istante in cui un ascoltatore reagisce (ride, annuisce) più vistosamente del narratore per far sparire chi sta davvero parlando. Verificato su un caso reale: un solo narratore per un'intera clip di 22s, ma il pannello continuava a saltare tra 3 co-host diversi segmento per segmento.
 
@@ -163,7 +164,18 @@ export class ReactionCamFaceTracker implements FaceTracker {
 
 
     const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - TOP_RATIO));
-    const bottom = centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
+    // Inquadratura del contenuto: dove sta davvero succedendo qualcosa, non il centro geometrico
+    // del frame (vedi content-region.ts). Le webcam sono escluse dal conteggio: si muovono anche
+    // loro, ma il pannello sotto deve inquadrare il contenuto, non di nuovo una webcam.
+    const contentRegion = await detectContentRegion(
+      sourceVideoPath,
+      sampleTimes,
+      sourceWidth,
+      sourceHeight,
+      bottomAspect,
+      [...cropByAnchor.values()],
+    );
+    const bottom = contentRegion ?? centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
     // Ogni ancora valida è, per definizione, un overlay webcam fisso nel frame sorgente — e
     // il pannello "contenuto" sotto è un crop dell'INTERO frame sorgente, quindi la mostra
     // di nuovo, piccola (e spesso tagliata dal bordo del crop). Sfochiamo quelle zone nel
