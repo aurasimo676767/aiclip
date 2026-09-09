@@ -1,4 +1,4 @@
-import { extractRawFrameBGR } from "../face-tracking/frame-extractor.js";
+import { extractRawFrameBGR, extractRawFrameBGRScaled, DETECTOR_INPUT_WIDTH, DETECTOR_INPUT_HEIGHT } from "../face-tracking/frame-extractor.js";
 import { detectFaces } from "../face-tracking/onnx-face-detector.js";
 import { computeMouthMotion } from "../face-tracking/mouth-motion.js";
 
@@ -30,7 +30,7 @@ async function main() {
     const frameB = await extractRawFrameBGR(videoPath, t + 0.15);
 
     for (const box of boxes) {
-      const motion = computeMouthMotion(frameA, frameB, box, sourceWidth, sourceHeight);
+      const motion = computeMouthMotion(frameA, frameB, box, sourceWidth, sourceHeight, DETECTOR_INPUT_WIDTH, DETECTOR_INPUT_HEIGHT);
       const areaRatio = (box.width * box.height) / (sourceWidth * sourceHeight);
       const ncx = (box.x + box.width / 2) / sourceWidth;
       const ncy = (box.y + box.height / 2) / sourceHeight;

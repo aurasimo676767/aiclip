@@ -1,6 +1,6 @@
 import { OUTPUT_RESOLUTION } from "@clipforge/shared";
 import type { CropWindow, FaceTracker, Layout, TimedCrop } from "./face-tracker.js";
-import { extractRawFrameBGR } from "./frame-extractor.js";
+import { extractRawFrameBGR, extractRawFrameBGRScaled } from "./frame-extractor.js";
 import { detectFaces, type FaceBox } from "./onnx-face-detector.js";
 import { computeMouthMotion } from "./mouth-motion.js";
 import { centeredCrop } from "./crop-geometry.js";
@@ -14,6 +14,8 @@ const SEGMENT_LENGTH_SECONDS = 1.5; // granularità con cui si ricontrolla CHI s
 const MAX_SEGMENTS = 40;
 const SAMPLES_PER_SEGMENT = 3;
 const MOTION_FRAME_DELAY_SECONDS = 0.15; // distanza tra i due frame usati per stimare il movimento della bocca
+/** Larghezza dei fotogrammi usati per misurare il movimento della bocca: vedi mouth-motion.ts. */
+const MOTION_FRAME_WIDTH = 960;
 
 const MIN_STABLE_RATIO = 0.5; // il cluster deve comparire in almeno metà dei sample (del segmento) con un volto
 const WEBCAM_MAX_AREA_RATIO = 0.05; // il volto occupa <5% dell'area del frame
@@ -24,6 +26,11 @@ const MOTION_NOISE_FLOOR = 4; // sotto questa soglia il "movimento" è rumore/co
 const RECT_SAMPLE_COUNT = 14;
 const MIN_SEGMENT_SECONDS = 0.3; // un taglio di scena troppo vicino al confine della griglia (o a un altro taglio) verrebbe scartato invece di creare un segmento degenere: sotto questa durata SAMPLES_PER_SEGMENT frame ravvicinatissimi non danno una stima affidabile
 const MIN_CONSECUTIVE_SEGMENTS_TO_SWITCH_SPEAKER = 2; // segmenti di fila in cui un'ANCORA DIVERSA da quella attualmente mostrata deve avere più movimento prima di "rubarle" il pannello — senza, basta un istante in cui un ascoltatore reagisce (ride, annuisce) più vistosamente del narratore per far sparire chi sta davvero parlando. Verificato su un caso reale: un solo narratore per un'intera clip di 22s, ma il pannello continuava a saltare tra 3 co-host diversi segmento per segmento.
+
+/** Altezza corrispondente a MOTION_FRAME_WIDTH, pari (ffmpeg rifiuta dimensioni dispari con alcuni formati). */
+function motionFrameHeight(sourceWidth: number, sourceHeight: number): number {
+  return Math.round((sourceHeight * (MOTION_FRAME_WIDTH / sourceWidth)) / 2) * 2;
+}
 
 interface DetectionEntry {
   box: FaceBox;
@@ -222,26 +229,43 @@ export class ReactionCamFaceTracker implements FaceTracker {
       timestamps.push(absStart + (duration * i) / (SAMPLES_PER_SEGMENT + 1));
     }
 
+    // Rilevamento volti: basta la risoluzione del modello. Il MOVIMENTO della bocca invece si
+    // misura su una coppia di fotogrammi molto più grandi, estratta una sola volta per segmento:
+    // a 320x240 la bocca di una webcam piccola è larga pochi pixel e il valore è rumore (vedi
+    // mouth-motion.ts). Costa anche meno di prima, che estraeva una coppia per OGNI campione.
+    const motionAt = absStart + duration / 2;
+    let motionPair: { a: Buffer; b: Buffer } | null = null;
+    try {
+      const a = await extractRawFrameBGRScaled(videoPath, motionAt, MOTION_FRAME_WIDTH, motionFrameHeight(sourceWidth, sourceHeight));
+      const b = await extractRawFrameBGRScaled(
+        videoPath,
+        motionAt + MOTION_FRAME_DELAY_SECONDS,
+        MOTION_FRAME_WIDTH,
+        motionFrameHeight(sourceWidth, sourceHeight),
+      );
+      motionPair = { a, b };
+    } catch {
+      motionPair = null; // senza movimento i volti restano validi, si sceglie per stabilità/dimensione
+    }
+
     const samples: DetectionEntry[][] = [];
     for (const t of timestamps) {
-      const frameA = await extractRawFrameBGR(videoPath, t);
-      const boxes = await detectFaces(frameA, sourceWidth, sourceHeight);
-      if (boxes.length === 0) {
-        samples.push([]);
-        continue;
-      }
-      // Il secondo frame serve solo a stimare il movimento: se fallisce (es. sample troppo
-      // vicino alla fine del video), i volti restano comunque validi con motion=0.
-      let frameB: Buffer | null = null;
-      try {
-        frameB = await extractRawFrameBGR(videoPath, t + MOTION_FRAME_DELAY_SECONDS);
-      } catch {
-        frameB = null;
-      }
+      const frame = await extractRawFrameBGR(videoPath, t);
+      const boxes = await detectFaces(frame, sourceWidth, sourceHeight);
       samples.push(
         boxes.map((box) => ({
           box,
-          motion: frameB ? computeMouthMotion(frameA, frameB, box, sourceWidth, sourceHeight) : 0,
+          motion: motionPair
+            ? computeMouthMotion(
+                motionPair.a,
+                motionPair.b,
+                box,
+                sourceWidth,
+                sourceHeight,
+                MOTION_FRAME_WIDTH,
+                motionFrameHeight(sourceWidth, sourceHeight),
+              )
+            : 0,
         })),
       );
     }
@@ -293,6 +317,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
       (g) => g.segIndices.size >= minAnchorCoverage && g.maxMotion > MOTION_NOISE_FLOOR,
     );
 
+    const speakerTrace: Array<{ t: string; motion: string; scelto: number | null }> = [];
     // Stato "sticky" dello speaker attualmente mostrato: portato avanti da un segmento al
     // successivo (vedi MIN_CONSECUTIVE_SEGMENTS_TO_SWITCH_SPEAKER) — per questo il ciclo è un
     // map con closure mutabile, non stateless come il resto del file.
@@ -353,8 +378,18 @@ export class ReactionCamFaceTracker implements FaceTracker {
       // (calcolato dal chiamante) e resta quindi identico al pixel per tutti i segmenti in cui
       // parla la stessa persona — l'inquadratura non si muove finché non cambia chi parla. Il
       // movimento del singolo segmento serve solo a decidere CHI mostrare, non DOVE inquadrare.
+      speakerTrace.push({
+        t: seg.startSeconds.toFixed(1),
+        motion: anchoredHere.map((c) => `${Math.round(c.anchor.avg.x)}:${c.meta.motion.toFixed(1)}`).join(" "),
+        scelto: chosen ? Math.round(chosen.anchor.avg.x) : null,
+      });
+
       return { startSeconds: seg.startSeconds, endSeconds: seg.endSeconds, anchor: chosen?.anchor ?? null };
     });
+
+    // Una riga sola per clip: davanti a un pannello che non cambia mai serve a distinguere "ha
+    // parlato una persona sola" da "il movimento della bocca non distingue nessuno".
+    logger.info("Chi parla, segmento per segmento (posizione:movimento -> scelto)", { speakerTrace });
 
     return { decisions, anchorGroups };
   }
@@ -529,11 +564,13 @@ function isWebcamLike(box: FaceBox, sourceWidth: number, sourceHeight: number): 
   const ncy = (box.y + box.height / 2) / sourceHeight;
   const offCenterX = ncx < WEBCAM_CENTER_MARGIN || ncx > 1 - WEBCAM_CENTER_MARGIN;
   const offCenterY = ncy < WEBCAM_CENTER_MARGIN || ncy > 1 - WEBCAM_CENTER_MARGIN;
-  // Richiede spostamento dal centro su ENTRAMBI gli assi (un vero angolo), non uno solo.
-  // Verificato su un caso reale: un volto centrato orizzontalmente ma spostato in alto (tipico
-  // di un volto "principale" dentro un video reagito, non un overlay in un angolo) passava il
-  // filtro con l'OR, e - muovendosi di più essendo un contenuto pre-registrato continuo -
-  // batteva quasi sempre la vera webcam del reactor (piccola, in un angolo vero) nel confronto
-  // sul movimento. Con l'AND quel volto non qualifica nemmeno come candidato.
-  return offCenterX && offCenterY;
+  // Basta essere lontano dal centro su UN asse: una webcam attaccata al bordo destro a metà
+  // altezza è comunque una webcam. Prima si pretendeva un angolo vero (fuori centro su entrambi
+  // gli assi) per evitare che un volto dentro il contenuto reagito rubasse il pannello — ma in
+  // una call con tre o quattro persone le webcam stanno incolonnate lungo un lato, a metà
+  // altezza, e venivano scartate quasi tutte: verificato su una clip reale con 4 webcam, il
+  // tracker ne teneva UNA sola e l'inquadratura non cambiava mai. A escludere i volti del
+  // contenuto ci pensa ora il riconoscimento del riquadro (vedi webcam-rect.ts), che è un
+  // criterio molto più solido della posizione sullo schermo.
+  return offCenterX || offCenterY;
 }
