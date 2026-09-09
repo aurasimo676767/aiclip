@@ -106,7 +106,10 @@ function buildKaraokeEvents(
  * override: resta il fallback (basso) definito nell'header.
  */
 function resolveSmartOverride(layout: Layout | undefined): string {
-  if (!layout || layout.type === "single") return "";
+  // Nel layout "scenes" la composizione cambia da una scena all'altra (a volte c'è una linea di
+  // separazione, a volte no) e i sottotitoli sono invece un unico blocco per tutta la clip: non
+  // esiste una posizione "sulla giunzione" valida ovunque, quindi resta il fallback in basso.
+  if (!layout || layout.type === "scenes") return "";
 
   const x = Math.round(OUTPUT_RESOLUTION.width / 2);
   const y = Math.round(OUTPUT_RESOLUTION.height * layout.topRatio);

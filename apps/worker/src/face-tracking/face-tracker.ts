@@ -23,14 +23,14 @@ export interface TimedCrop {
  * riquadro di qualche pixel a ogni campionamento anche su una persona immobile, e il crop
  * inseguiva quel rumore — e un primo piano quasi mai centrato bene. Rimosso del tutto.
  *
- * - "single": crop 9:16 del frame sorgente, usato quando non c'è nessuna webcam riconoscibile.
- *   Un crop FISSO PER SCENA, non uno solo per tutta la clip: molti VOD sono video già montati che
- *   staccano ogni pochi secondi fra streamer a schermo intero, gameplay a schermo intero e
- *   condivisione schermo. Un unico crop per l'intera clip non può andare bene per tutti e tre —
- *   verificato su una clip reale, ne usciva il gioco ingrandito e tagliato per l'intera durata.
- *   I confini fra un crop e il successivo coincidono con gli STACCHI del montaggio originale
- *   (vedi scene-detect.ts), quindi il cambio d'inquadratura cade dove lo spettatore se lo aspetta
- *   e non si vede come un movimento. Dentro una scena il crop resta identico.
+ * - "scenes": una composizione FISSA PER OGNI SCENA del montaggio originale. Usato quando la clip
+ *   non ha un'unica webcam fissa per tutta la durata. Molti VOD non sono stream grezzi ma video
+ *   GIÀ MONTATI, che staccano ogni pochi secondi fra streamer a schermo intero, gameplay a schermo
+ *   intero e condivisione schermo con la cam in un angolo: una composizione sola non può andare
+ *   bene per tutte e tre — verificato su una clip reale, ne usciva il gioco ingrandito e tagliato
+ *   per l'intera durata. Ogni scena sceglie quindi la sua (vedi SceneComposition), e i confini
+ *   coincidono con gli STACCHI veri del montaggio (scene-detect.ts), così il cambio cade dove lo
+ *   spettatore già se lo aspetta invece di sembrare un movimento.
  * - "split_vertical": due fasce impilate — webcam in alto, contenuto principale in basso. Il
  *   contenuto è un crop STATICO centrato del frame intero (mai centrato su un volto, mai
  *   zoomato). `topCrops` è una sequenza temporale solo perché la webcam mostrata cambia quando
@@ -40,8 +40,31 @@ export interface TimedCrop {
  *   frame, quindi senza sfocarle mostrerebbe due volte la stessa webcam — una in alto e una
  *   piccola (spesso tagliata) dentro l'area "contenuto".
  */
+/**
+ * Come si compone UNA scena. Tre casi, che coprono quello che si trova davvero in un VOD montato:
+ *
+ * - "crop": ritaglio 9:16 del frame sorgente. Per le scene con un soggetto a schermo intero:
+ *   riempie lo schermo e la persona resta centrata.
+ * - "fit": il frame sorgente INTERO, rimpicciolito al centro, con sopra e sotto lo stesso frame
+ *   sfocato a riempire. Per il gameplay a schermo intero senza nessuna cam: ritagliarlo a 9:16
+ *   butterebbe via due terzi dell'immagine, e cosa serve vedere dipende dal gioco — un ritaglio
+ *   "sull'azione" indovina, questo non deve indovinare niente.
+ * - "split": il template — cam sopra, contenuto sotto. Per le scene con la cam in un angolo
+ *   (tipicamente condivisione schermo), che senza questo finivano ritagliate a caso.
+ */
+export type SceneComposition =
+  | { kind: "crop"; crop: CropWindow }
+  | { kind: "fit" }
+  | { kind: "split"; cam: CropWindow; content: CropWindow; topRatio: number };
+
+export interface Scene {
+  startSeconds: number;
+  endSeconds: number;
+  composition: SceneComposition;
+}
+
 export type Layout =
-  | { type: "single"; crops: TimedCrop[] }
+  | { type: "scenes"; scenes: Scene[] }
   | { type: "split_vertical"; topCrops: TimedCrop[]; bottom: CropWindow; topRatio: number; blurRegions: CropWindow[] };
 
 /**

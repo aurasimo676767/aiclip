@@ -16,9 +16,13 @@ async function main() {
   const layout = await tracker.computeLayout({ sourceVideoPath: videoPath, sourceWidth, sourceHeight, startSeconds, endSeconds });
 
   console.log("\n=== LAYOUT TYPE:", layout.type, "===");
-  if (layout.type === "single") {
-    for (const c of layout.crops) {
-      console.log(`  [${c.startSeconds.toFixed(1)}-${c.endSeconds.toFixed(1)}] crop x=${c.crop.x} y=${c.crop.y} w=${c.crop.width} h=${c.crop.height}`);
+  if (layout.type === "scenes") {
+    for (const s of layout.scenes) {
+      const t = `  [${s.startSeconds.toFixed(1)}-${s.endSeconds.toFixed(1)}]`;
+      const c = s.composition;
+      if (c.kind === "crop") console.log(`${t} ritaglio x=${c.crop.x} w=${c.crop.width} h=${c.crop.height}`);
+      else if (c.kind === "fit") console.log(`${t} frame intero su sfondo sfocato`);
+      else console.log(`${t} template: cam ${c.cam.width}x${c.cam.height}@${c.cam.x},${c.cam.y} | contenuto ${c.content.width}x${c.content.height}@${c.content.x} | topRatio ${c.topRatio.toFixed(3)}`);
     }
     return;
   }

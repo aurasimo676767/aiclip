@@ -1,5 +1,5 @@
 import { OUTPUT_RESOLUTION } from "@clipforge/shared";
-import type { CropWindow, FaceTracker, Layout, TimedCrop } from "./face-tracker.js";
+import type { CropWindow, FaceTracker, Layout, Scene, SceneComposition, TimedCrop } from "./face-tracker.js";
 import { extractRawFrameBGR, extractRawFrameBGRScaled } from "./frame-extractor.js";
 import { detectFaces, type FaceBox } from "./onnx-face-detector.js";
 import { computeMouthMotion } from "./mouth-motion.js";
@@ -83,7 +83,7 @@ interface SegmentDetections {
   endSeconds: number;
   webcamCandidates: ClusterMeta[]; // tutti i volti "webcam-like" trovati in QUESTO segmento, non ancora filtrati
   /** TUTTI i volti stabili del segmento, anche quelli non webcam-like: servono a inquadrare
-   * ogni scena quando non c'e' nessuna webcam (vedi perSceneCrops). */
+   * ogni scena quando non c'e' nessuna webcam (vedi perSceneCompositions). */
   allFaces: ClusterMeta[];
 }
 
@@ -151,46 +151,52 @@ const MIN_ANCHOR_SEGMENT_COVERAGE_RATIO = 0.4; // un volto deve ricomparire in a
  */
 const SCENE_SUBJECT_MIN_HEIGHT_RATIO = 0.25;
 
-/** Sotto questo spostamento (frazione della larghezza) due scene di fila tengono la stessa inquadratura. */
-const SCENE_CROP_DEAD_ZONE_RATIO = 0.03;
+/** Fotogrammi campionati DENTRO una scena per cercarci la cam e il contenuto. Poche: le scene sono corte. */
+const SCENE_SAMPLE_COUNT = 6;
 
 /**
- * Un'inquadratura 9:16 a piena altezza PER OGNI SCENA del montaggio originale, centrata sul
- * soggetto quando la scena ne ha uno a schermo intero.
+ * Sceglie la composizione di OGNI SCENA del montaggio originale.
  *
- * Perché per scena e non una sola per clip: molti VOD non sono stream grezzi ma video GIÀ MONTATI,
- * che staccano ogni pochi secondi fra streamer a schermo intero, gameplay a schermo intero e
- * condivisione schermo. Un crop unico non può andare bene per tutte e tre le cose — su una clip
- * reale ne usciva il gioco ingrandito e tagliato per l'intera durata.
+ * Perche' per scena e non una sola per clip: molti VOD non sono stream grezzi ma video GIA'
+ * MONTATI, che staccano ogni pochi secondi fra streamer a schermo intero, gameplay a schermo
+ * intero e condivisione schermo con la cam in un angolo. Una composizione sola non puo' andare
+ * bene per tutte e tre — su una clip reale ne usciva il gioco ingrandito e tagliato per l'intera
+ * durata, con lo streamer mai inquadrato.
  *
- * Perché FISSO dentro la scena e non un inseguimento continuo del volto: misurato sulla stessa
+ * Perche' FISSA dentro la scena e non un inseguimento continuo del volto: misurato su quella
  * clip, dentro un'inquadratura il volto si sposta di 1-38 px, fra un'inquadratura e l'altra di
- * 700-1500 px. Un inseguimento morbido non avrebbe quindi niente da seguire dove la persona sta
- * ferma, e scivolerebbe per mezzo schermo proprio sugli stacchi — dove invece si deve tagliare
- * netto. I confini delle scene qui sono gli stacchi VERI del montaggio (vedi scene-detect.ts),
- * quindi il cambio d'inquadratura cade dove lo spettatore già se lo aspetta.
- *
- * Ritorna null se non c'è nessun volto da cui guadagnare qualcosa: decide il chiamante.
+ * 700-1500 px. Un inseguimento morbido non avrebbe niente da seguire dove la persona sta ferma, e
+ * scivolerebbe per mezzo schermo proprio sugli stacchi — dove invece si taglia netto. I confini
+ * qui sono gli stacchi VERI del montaggio (vedi scene-detect.ts), quindi il cambio cade dove lo
+ * spettatore gia' se lo aspetta.
  */
-function perSceneCrops(
+async function perSceneCompositions(
+  sourceVideoPath: string,
+  clipStartSeconds: number,
   segments: SegmentDetections[],
   cutTimes: number[],
   clipDuration: number,
   sourceWidth: number,
   sourceHeight: number,
-): TimedCrop[] | null {
-  const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
-  const centered = centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect);
-
+): Promise<Scene[]> {
+  const fullAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
   const boundaries = [0, ...cutTimes.filter((t) => t > 0.01 && t < clipDuration - 0.01), clipDuration];
-  const crops: TimedCrop[] = [];
 
+  interface RawScene {
+    startSeconds: number;
+    endSeconds: number;
+    subject: FaceBox | null;
+    isSubjectShot: boolean;
+    cam: CropWindow | null;
+  }
+
+  const raw: RawScene[] = [];
   for (let i = 0; i < boundaries.length - 1; i++) {
     const startSeconds = boundaries[i]!;
     const endSeconds = boundaries[i + 1]!;
 
-    // Il volto PIÙ GRANDE visto nei segmenti che cadono in questa scena, non la media: dentro una
-    // scena il soggetto è sempre lo stesso, e mediare con qualche rilevamento spurio più piccolo
+    // Il volto PIU' GRANDE visto nei segmenti che cadono in questa scena, non la media: dentro una
+    // scena il soggetto e' sempre lo stesso, e mediare con qualche rilevamento spurio piu' piccolo
     // sposterebbe l'inquadratura senza motivo.
     let subject: FaceBox | null = null;
     for (const seg of segments) {
@@ -199,32 +205,120 @@ function perSceneCrops(
         if (!subject || meta.avg.height > subject.height) subject = meta.avg;
       }
     }
-
     const isSubjectShot = subject !== null && subject.height >= sourceHeight * SCENE_SUBJECT_MIN_HEIGHT_RATIO;
-    const crop =
-      isSubjectShot && subject
-        ? centeredCrop(subject.x + subject.width / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect)
-        : centered;
-    crops.push({ startSeconds, endSeconds, crop });
+
+    let cam: CropWindow | null = null;
+    if (subject && !isSubjectShot) {
+      const duration = Math.max(0.1, endSeconds - startSeconds);
+      const sampleTimes = Array.from(
+        { length: SCENE_SAMPLE_COUNT },
+        (_, k) => clipStartSeconds + startSeconds + (duration * (k + 0.5)) / SCENE_SAMPLE_COUNT,
+      );
+      const found = await detectWebcamRect(sourceVideoPath, sampleTimes, subject, sourceWidth, sourceHeight);
+      if (found && !rejectionReasonForWebcamRect(found, sourceWidth, sourceHeight)) cam = found;
+    }
+    raw.push({ startSeconds, endSeconds, subject, isSubjectShot, cam });
   }
 
-  if (!crops.length) return null;
-  // Se nessuna scena ha trovato un soggetto, questo non aggiunge niente al crop centrato.
-  if (crops.every((c) => c.crop.x === centered.x)) return null;
+  // UN SOLO riquadro cam per tutta la clip, non uno per scena. Le scene con la cam sono lo stesso
+  // momento di stream ripreso piu' volte, quindi la cam sta sempre nello stesso punto: rilevarla
+  // scena per scena dava riquadri leggermente diversi (526x296 contro 548x310), che facevano
+  // "respirare" il pannello a ogni stacco, e su una scena il rilevamento falliva del tutto
+  // lasciandola senza template. Si prende quindi il riquadro piu' ricorrente e si riusa ovunque.
+  const canonicalCam = mostRecurrentRect(raw.map((r) => r.cam).filter((c): c is CropWindow => c !== null));
 
-  // Due scene di fila inquadrate quasi uguale: si tiene la prima, così uno spostamento
-  // impercettibile non diventa comunque uno stacco visibile.
+  let topRatio = 0;
+  let content: CropWindow | null = null;
+  if (canonicalCam) {
+    topRatio = topRatioForWebcam([canonicalCam]);
+    const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - topRatio));
+    const clipSamples = Array.from(
+      { length: RECT_SAMPLE_COUNT },
+      (_, k) => clipStartSeconds + (clipDuration * (k + 0.5)) / RECT_SAMPLE_COUNT,
+    );
+    const region = await detectContentRegion(sourceVideoPath, clipSamples, sourceWidth, sourceHeight, bottomAspect, [canonicalCam]);
+    content = region ?? centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
+  }
+
+  const scenes: Scene[] = raw.map((r) => {
+    // 1) Soggetto a schermo intero: ritaglio 9:16 centrato su di lui, riempie lo schermo.
+    if (r.isSubjectShot && r.subject) {
+      const crop = centeredCrop(r.subject.x + r.subject.width / 2, sourceHeight / 2, sourceWidth, sourceHeight, fullAspect);
+      return { startSeconds: r.startSeconds, endSeconds: r.endSeconds, composition: { kind: "crop", crop } };
+    }
+    // 2) La cam della clip e' visibile anche in questa scena: il template, cam sopra e contenuto
+    //    sotto. Basta che ci sia un volto dentro il riquadro noto — non serve che il rilevamento
+    //    del riquadro riesca di nuovo proprio qui.
+    if (canonicalCam && content && r.subject && faceCenterInside(r.subject, canonicalCam)) {
+      return {
+        startSeconds: r.startSeconds,
+        endSeconds: r.endSeconds,
+        composition: { kind: "split", cam: canonicalCam, content, topRatio },
+      };
+    }
+    // 3) Niente cam e niente soggetto: gameplay/schermo a tutto campo. Si mostra INTERO su sfondo
+    //    sfocato invece di ritagliarlo — cosa serva vedere dipende dal gioco, e un ritaglio
+    //    "sull'azione" tirerebbe a indovinare (scelta esplicita dell'utente).
+    return { startSeconds: r.startSeconds, endSeconds: r.endSeconds, composition: { kind: "fit" } };
+  });
+
+  return mergeAdjacentScenes(scenes, sourceWidth);
+}
+
+function faceCenterInside(face: FaceBox, rect: CropWindow): boolean {
+  const cx = face.x + face.width / 2;
+  const cy = face.y + face.height / 2;
+  return cx >= rect.x && cx <= rect.x + rect.width && cy >= rect.y && cy <= rect.y + rect.height;
+}
+
+/** Quanto due riquadri possono differire (px) e contare comunque come lo stesso overlay. */
+const SAME_RECT_TOLERANCE_PX = 40;
+
+/** Il riquadro che ricorre di piu' fra quelli trovati; a parita', il piu' grande. */
+function mostRecurrentRect(rects: CropWindow[]): CropWindow | null {
+  if (!rects.length) return null;
+  let best: { rect: CropWindow; votes: number } | null = null;
+  for (const candidate of rects) {
+    const votes = rects.filter(
+      (other) => Math.abs(other.x - candidate.x) <= SAME_RECT_TOLERANCE_PX && Math.abs(other.y - candidate.y) <= SAME_RECT_TOLERANCE_PX,
+    ).length;
+    const better =
+      !best || votes > best.votes || (votes === best.votes && candidate.width * candidate.height > best.rect.width * best.rect.height);
+    if (better) best = { rect: candidate, votes };
+  }
+  return best?.rect ?? null;
+}
+
+/** Sotto questo spostamento (frazione della larghezza) due ritagli di fila contano come uguali. */
+const SCENE_CROP_DEAD_ZONE_RATIO = 0.03;
+
+/**
+ * Fonde scene consecutive composte allo stesso modo. Serve a due cose: non trasformare uno
+ * spostamento impercettibile in uno stacco visibile, e non gonfiare il filtergraph con decine di
+ * pezzi identici da concatenare.
+ */
+function mergeAdjacentScenes(scenes: Scene[], sourceWidth: number): Scene[] {
   const deadZone = sourceWidth * SCENE_CROP_DEAD_ZONE_RATIO;
-  const merged: TimedCrop[] = [];
-  for (const c of crops) {
+  const merged: Scene[] = [];
+  for (const scene of scenes) {
     const last = merged[merged.length - 1];
-    if (last && Math.abs(last.crop.x - c.crop.x) <= deadZone) {
-      last.endSeconds = c.endSeconds;
+    if (last && sameComposition(last.composition, scene.composition, deadZone)) {
+      last.endSeconds = scene.endSeconds;
       continue;
     }
-    merged.push({ ...c, crop: { ...c.crop } });
+    merged.push({ ...scene });
   }
   return merged;
+}
+
+function sameComposition(a: SceneComposition, b: SceneComposition, deadZone: number): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "fit") return true;
+  if (a.kind === "crop" && b.kind === "crop") return Math.abs(a.crop.x - b.crop.x) <= deadZone;
+  if (a.kind === "split" && b.kind === "split") {
+    return Math.abs(a.cam.x - b.cam.x) <= deadZone && Math.abs(a.cam.y - b.cam.y) <= deadZone && a.topRatio === b.topRatio;
+  }
+  return false;
 }
 
 /**
@@ -341,15 +435,14 @@ export class ReactionCamFaceTracker implements FaceTracker {
     // Nessuna webcam riconoscibile: non c'è niente da affiancare, quindi un crop 9:16 a piena
     // altezza — ma inquadrato SCENA PER SCENA, non uno solo per tutta la clip (vedi perSceneCrops).
     if (!decisions.some((d) => d.anchor !== null)) {
-      const scenes = perSceneCrops(rawSegments, cutTimes, clipDuration, sourceWidth, sourceHeight);
-      if (scenes) {
-        logger.info("Nessuna webcam: inquadratura fissa per scena", {
-          scene: scenes.length,
-          crops: scenes.map((s) => `${s.startSeconds.toFixed(1)}-${s.endSeconds.toFixed(1)} x=${s.crop.x}`),
+      const scenes = await perSceneCompositions(sourceVideoPath, startSeconds, rawSegments, cutTimes, clipDuration, sourceWidth, sourceHeight);
+      if (scenes.length) {
+        logger.info("Nessuna webcam fissa per l'intera clip: composizione scelta scena per scena", {
+          scene: scenes.map((s) => `${s.startSeconds.toFixed(1)}-${s.endSeconds.toFixed(1)} ${s.composition.kind}`),
         });
-        return { type: "single", crops: scenes };
+        return { type: "scenes", scenes };
       }
-      logger.info("Nessuna webcam e nessun volto: crop centrato statico", { segments: segmentCount });
+      logger.info("Nessuna scena individuata: crop centrato statico", { segments: segmentCount });
       return this.fallback.computeLayout(params);
     }
 

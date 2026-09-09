@@ -12,6 +12,15 @@ export class CenterCropFaceTracker implements FaceTracker {
   async computeLayout(params: { sourceWidth: number; sourceHeight: number; startSeconds: number; endSeconds: number }): Promise<Layout> {
     const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
     const crop = centeredCrop(params.sourceWidth / 2, params.sourceHeight / 2, params.sourceWidth, params.sourceHeight, targetAspect);
-    return { type: "single", crops: [{ startSeconds: 0, endSeconds: Math.max(0.1, params.endSeconds - params.startSeconds), crop }] };
+    return {
+      type: "scenes",
+      scenes: [
+        {
+          startSeconds: 0,
+          endSeconds: Math.max(0.1, params.endSeconds - params.startSeconds),
+          composition: { kind: "crop", crop },
+        },
+      ],
+    };
   }
 }
