@@ -55,11 +55,11 @@ function buildSplitVerticalSteps(layout: Extract<Layout, { type: "split_vertical
   const bottomHeight = OUTPUT_RESOLUTION.height - topHeight;
   const { topCrops, bottom, blurRegions } = layout;
 
-  // Webcam CONTENUTA nel pannello, non stirata a riempirlo: il crop conserva l'inquadratura
-  // naturale della webcam (16:9, vedi WEBCAM_CROP_ASPECT), quindi forzarlo alle proporzioni del
-  // pannello la ritaglierebbe. Con force_original_aspect_ratio=decrease + pad si vede la webcam
-  // INTERA, esattamente al centro del pannello, con una banda nera dove avanza spazio.
-  const topSteps = buildCroppedSteps(topCrops, totalDuration, OUTPUT_RESOLUTION.width, topHeight, `${prefix}top`, "fit");
+  // Webcam a RIEMPIRE il pannello, senza bande nere: l'altezza del pannello è già calcolata dalle
+  // proporzioni del riquadro webcam rilevato (vedi topRatioForWebcam), quindi qui resta al massimo
+  // una differenza di pochi pixel da rifilare. Prima si usava "contieni e centra", che con una
+  // webcam di forma diversa dal pannello lasciava bande spesse sopra e sotto — brutte in uno Short.
+  const topSteps = buildCroppedSteps(topCrops, totalDuration, OUTPUT_RESOLUTION.width, topHeight, `${prefix}top`, "cover");
 
   const steps = [
     // Webcam: cambia solo quando cambia chi parla (stacco netto), nessuno zoom.
@@ -164,18 +164,19 @@ function buildCroppedSteps(
   outputWidth: number,
   outputHeight: number,
   label: string,
-  mode: "fill" | "fit" = "fill",
+  mode: "fill" | "cover" = "fill",
 ): string[] {
   const filled = fillCropGaps(crops, totalDuration);
   const collapsed = collapseIdenticalCrops(filled);
 
-  // "fit": l'immagine viene rimpicciolita finché ci sta TUTTA nel riquadro e poi centrata con
-  // bande nere sui lati che avanzano (niente ritaglio, centratura esatta). "fill": scalata
-  // esattamente alle dimensioni richieste, come prima.
+  // "cover": l'immagine viene ingrandita finché COPRE tutto il riquadro e poi rifilata al centro —
+  // riempie sempre, senza bande nere e senza deformare, al costo di qualche pixel tagliato sul lato
+  // più lungo. "fill": scalata esattamente alle dimensioni richieste (il crop ha già le proporzioni
+  // giuste, quindi non deforma).
   const scaleFilter =
-    mode === "fit"
-      ? `scale=${outputWidth}:${outputHeight}:force_original_aspect_ratio=decrease:flags=lanczos,` +
-        `pad=${outputWidth}:${outputHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`
+    mode === "cover"
+      ? `scale=${outputWidth}:${outputHeight}:force_original_aspect_ratio=increase:flags=lanczos,` +
+        `crop=${outputWidth}:${outputHeight},setsar=1`
       : `scale=${outputWidth}:${outputHeight}:flags=lanczos,setsar=1`;
 
   if (collapsed.length === 1) {

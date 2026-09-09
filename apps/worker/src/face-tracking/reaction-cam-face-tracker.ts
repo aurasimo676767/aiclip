@@ -20,7 +20,23 @@ const MOTION_FRAME_WIDTH = 960;
 const MIN_STABLE_RATIO = 0.5; // il cluster deve comparire in almeno metà dei sample (del segmento) con un volto
 const WEBCAM_MAX_AREA_RATIO = 0.05; // il volto occupa <5% dell'area del frame
 const WEBCAM_CENTER_MARGIN = 0.3; // centro del volto fuori dal 30%-70% centrale (orizz. o vert.)
-const TOP_RATIO = 0.35; // frazione di altezza dedicata alla webcam nel layout split
+/**
+ * Frazione di altezza dedicata alla webcam. Non è fissa: viene calcolata dalle PROPORZIONI del
+ * riquadro webcam rilevato, così la webcam riempie il pannello senza bande nere e senza essere
+ * tagliata. Con un pannello di forma fissa, una webcam con proporzioni diverse lasciava bande
+ * spesse sopra e sotto — brutte da vedere in uno Short. I limiti servono a non prendersi mezzo
+ * schermo (webcam molto quadrate) né una striscia inguardabile (webcam molto larghe).
+ */
+const MIN_TOP_RATIO = 0.22;
+const MAX_TOP_RATIO = 0.45;
+
+function topRatioForWebcam(rects: CropWindow[]): number {
+  const aspects = rects.map((r) => r.width / r.height).sort((a, b) => a - b);
+  const median = aspects[Math.floor(aspects.length / 2)];
+  if (!median || !Number.isFinite(median)) return 0.35;
+  const paneHeight = OUTPUT_RESOLUTION.width / median;
+  return Math.min(MAX_TOP_RATIO, Math.max(MIN_TOP_RATIO, paneHeight / OUTPUT_RESOLUTION.height));
+}
 const MOTION_NOISE_FLOOR = 4; // sotto questa soglia il "movimento" è rumore/compressione, non parlato reale
 /** Fotogrammi campionati per trovare il riquadro della webcam: è la loro media a far emergere i bordi fermi. */
 const RECT_SAMPLE_COUNT = 14;
@@ -60,7 +76,12 @@ interface SegmentDetections {
   startSeconds: number;
   endSeconds: number;
   webcamCandidates: ClusterMeta[]; // tutti i volti "webcam-like" trovati in QUESTO segmento, non ancora filtrati
+  /** TUTTI i volti stabili del segmento, anche quelli non webcam-like: servono a capire se un riquadro contiene più persone (vedi computeLayout). */
+  allFaces: ClusterMeta[];
 }
+
+/** Di quanto un volto può sbordare dal riquadro e contare comunque come "dentro" (frazione della sua dimensione). */
+const FACE_CONTAINMENT_TOLERANCE = 0.1;
 
 const MIN_ANCHOR_SEGMENT_COVERAGE_RATIO = 0.4; // un volto deve ricomparire in almeno questa frazione dei segmenti per essere considerato "la webcam reale" e non un volto di passaggio nel contenuto reagito
 
@@ -139,7 +160,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
         logger.warn("Face detection fallita per un segmento, nessun candidato webcam per quel tratto", {
           error: err instanceof Error ? err.message : String(err),
         });
-        rawSegments.push({ startSeconds: segStart, endSeconds: segEnd, webcamCandidates: [] });
+        rawSegments.push({ startSeconds: segStart, endSeconds: segEnd, webcamCandidates: [], allFaces: [] });
       }
     }
 
@@ -158,6 +179,46 @@ export class ReactionCamFaceTracker implements FaceTracker {
       else logger.info("Volto scartato: non ha attorno un riquadro da webcam (probabile contenuto reagito)", { face: anchor.avg });
     }
 
+    // Un riquadro che contiene PIÙ volti non è una webcam: è una scena. Una webcam inquadra una
+    // persona sola, mentre il player del video reagito — che è anch'esso un rettangolo fermo con
+    // bordi netti, quindi supera gli altri controlli — ne contiene diverse. Verificato su una clip
+    // reale dove il video reagito riempiva quasi tutto lo schermo: cinque volti al suo interno
+    // producevano riquadri "validi", e uno di questi rubava il pannello alla webcam vera.
+    // Si contano TUTTI i volti rilevati, non solo quelli candidati a webcam: i volti dentro il
+    // video reagito vengono scartati prima come candidati, quindi contando solo quelli il
+    // riquadro del player sembrava contenere una persona sola e passava lo stesso.
+    const everyFace = clusterByPosition(
+      rawSegments.flatMap((seg, segIndex) => seg.allFaces.map((meta) => ({ segIndex, meta }))),
+    );
+
+    for (const anchor of candidateAnchors) {
+      const rect = cropByAnchor.get(anchor);
+      if (!rect) continue;
+      // Conta solo i volti INTERAMENTE dentro il riquadro (con una piccola tolleranza): un volto
+      // del contenuto che sborda oltre il bordo della webcam non è "dentro la webcam", ci finisce
+      // solo sopra. Verificato: bastava il centro dentro il riquadro e la webcam vera veniva
+      // scartata perché il protagonista di un TikTok le passava davanti a metà.
+      const inside = everyFace.filter((other) => {
+        const tolX = other.avg.width * FACE_CONTAINMENT_TOLERANCE;
+        const tolY = other.avg.height * FACE_CONTAINMENT_TOLERANCE;
+        return (
+          other.avg.x >= rect.x - tolX &&
+          other.avg.y >= rect.y - tolY &&
+          other.avg.x + other.avg.width <= rect.x + rect.width + tolX &&
+          other.avg.y + other.avg.height <= rect.y + rect.height + tolY
+        );
+      });
+      const facesInside = countDistinctPeople(inside);
+      if (facesInside > 1) {
+        cropByAnchor.delete(anchor);
+        logger.info("Volto scartato: il suo riquadro contiene più persone, è una scena non una webcam", {
+          face: anchor.avg,
+          rect,
+          facesInside,
+        });
+      }
+    }
+
     const anchorGroups = candidateAnchors.filter((a) => cropByAnchor.has(a));
     const decisions = rawDecisions.map((d) => ({ ...d, anchor: d.anchor && cropByAnchor.has(d.anchor) ? d.anchor : null }));
 
@@ -170,7 +231,8 @@ export class ReactionCamFaceTracker implements FaceTracker {
     }
 
 
-    const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - TOP_RATIO));
+    const topRatio = topRatioForWebcam([...cropByAnchor.values()]);
+    const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - topRatio));
     // Inquadratura del contenuto: dove sta davvero succedendo qualcosa, non il centro geometrico
     // del frame (vedi content-region.ts). Le webcam sono escluse dal conteggio: si muovono anche
     // loro, ma il pannello sotto deve inquadrare il contenuto, non di nuovo una webcam.
@@ -208,7 +270,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
       speakers: anchorGroups.length,
       blurRegions: blurRegions.length,
     });
-    return { type: "split_vertical", topCrops, bottom, topRatio: TOP_RATIO, blurRegions };
+    return { type: "split_vertical", topCrops, bottom, topRatio, blurRegions };
   }
 
   /**
@@ -222,7 +284,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     sourceHeight: number,
     absStart: number,
     absEnd: number,
-  ): Promise<{ webcamCandidates: ClusterMeta[] }> {
+  ): Promise<{ webcamCandidates: ClusterMeta[]; allFaces: ClusterMeta[] }> {
     const duration = Math.max(0.1, absEnd - absStart);
     const timestamps: number[] = [];
     for (let i = 1; i <= SAMPLES_PER_SEGMENT; i++) {
@@ -271,12 +333,12 @@ export class ReactionCamFaceTracker implements FaceTracker {
     }
 
     const framesWithDetection = samples.filter((s) => s.length > 0).length;
-    if (framesWithDetection === 0) return { webcamCandidates: [] };
+    if (framesWithDetection === 0) return { webcamCandidates: [], allFaces: [] };
 
     const clusters = clusterDetections(samples);
     const minCount = Math.max(1, Math.ceil(framesWithDetection * MIN_STABLE_RATIO));
     const stable = clusters.filter((c) => c.sampleIndices.size >= minCount);
-    if (stable.length === 0) return { webcamCandidates: [] };
+    if (stable.length === 0) return { webcamCandidates: [], allFaces: [] };
 
     const withMeta: ClusterMeta[] = stable.map((c) => ({
       avg: averageBox(c.entries.map((e) => e.box)),
@@ -284,7 +346,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
       motion: c.entries.reduce((sum, e) => sum + e.motion, 0) / c.entries.length,
     }));
 
-    return { webcamCandidates: withMeta.filter((m) => isWebcamLike(m.avg, sourceWidth, sourceHeight)) };
+    return { webcamCandidates: withMeta.filter((m) => isWebcamLike(m.avg, sourceWidth, sourceHeight)), allFaces: withMeta };
   }
 
   /**
@@ -495,6 +557,30 @@ function clusterByPosition(items: Array<{ segIndex: number; meta: ClusterMeta }>
   }
 
   return groups;
+}
+
+/**
+ * Quante PERSONE diverse ci sono in un gruppo di volti rilevati. Non basta contarli: la stessa
+ * persona che si sposta nell'inquadratura produce più gruppi di posizione distinti (verificato: lo
+ * streamer che si alza e si riabbassa contava come due persone, e la sua webcam veniva scartata
+ * come se fosse una scena). Volti più vicini di così, rispetto alla loro dimensione, non possono
+ * essere due individui affiancati.
+ */
+const SAME_PERSON_DISTANCE_FACES = 1.5;
+
+function countDistinctPeople(faces: PositionGroup[]): number {
+  const centers = faces.map((f) => ({
+    cx: f.avg.x + f.avg.width / 2,
+    cy: f.avg.y + f.avg.height / 2,
+    size: Math.max(f.avg.width, f.avg.height),
+  }));
+
+  const groups: Array<{ cx: number; cy: number; size: number }> = [];
+  for (const c of centers) {
+    const merged = groups.find((g) => Math.hypot(g.cx - c.cx, g.cy - c.cy) < Math.max(g.size, c.size) * SAME_PERSON_DISTANCE_FACES);
+    if (!merged) groups.push(c);
+  }
+  return groups.length;
 }
 
 function isNearBox(a: FaceBox, b: FaceBox): boolean {
