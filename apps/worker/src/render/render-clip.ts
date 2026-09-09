@@ -133,8 +133,7 @@ function segmentIsShorterThanClip(segment: TimeSegment, clipDuration: number): b
  * ma il filtergraph ffmpeg gira sul file GIÀ tagliato (senza silenzi), con `t` che riparte da 0.
  */
 function remapLayout(layout: Layout, timeRemap: (t: number) => number, finalDuration: number): Layout {
-  // "single" è un crop statico: non ha confini temporali da rimappare.
-  if (layout.type === "single") return layout;
+  if (layout.type === "single") return { ...layout, crops: remapTimedCrops(layout.crops, timeRemap, finalDuration) };
   return { ...layout, topCrops: remapTimedCrops(layout.topCrops, timeRemap, finalDuration) };
 }
 

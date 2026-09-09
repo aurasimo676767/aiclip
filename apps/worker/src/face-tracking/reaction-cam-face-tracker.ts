@@ -82,6 +82,9 @@ interface SegmentDetections {
   startSeconds: number;
   endSeconds: number;
   webcamCandidates: ClusterMeta[]; // tutti i volti "webcam-like" trovati in QUESTO segmento, non ancora filtrati
+  /** TUTTI i volti stabili del segmento, anche quelli non webcam-like: servono a inquadrare
+   * ogni scena quando non c'e' nessuna webcam (vedi perSceneCrops). */
+  allFaces: ClusterMeta[];
 }
 
 /**
@@ -139,6 +142,90 @@ function rejectionReasonForWebcamRect(rect: CropWindow, sourceWidth: number, sou
 }
 
 const MIN_ANCHOR_SEGMENT_COVERAGE_RATIO = 0.4; // un volto deve ricomparire in almeno questa frazione dei segmenti per essere considerato "la webcam reale" e non un volto di passaggio nel contenuto reagito
+
+/**
+ * Un volto alto almeno questa frazione del frame è il SOGGETTO di quell'inquadratura (streamer a
+ * schermo intero), non una faccia dentro il contenuto. Misurato su un VOD già montato: nelle
+ * inquadrature a schermo intero il volto era alto il 43-69% del frame, mentre nelle inquadrature
+ * con condivisione schermo la cam nell'angolo stava al 10-15%. La soglia sta comoda in mezzo.
+ */
+const SCENE_SUBJECT_MIN_HEIGHT_RATIO = 0.25;
+
+/** Sotto questo spostamento (frazione della larghezza) due scene di fila tengono la stessa inquadratura. */
+const SCENE_CROP_DEAD_ZONE_RATIO = 0.03;
+
+/**
+ * Un'inquadratura 9:16 a piena altezza PER OGNI SCENA del montaggio originale, centrata sul
+ * soggetto quando la scena ne ha uno a schermo intero.
+ *
+ * Perché per scena e non una sola per clip: molti VOD non sono stream grezzi ma video GIÀ MONTATI,
+ * che staccano ogni pochi secondi fra streamer a schermo intero, gameplay a schermo intero e
+ * condivisione schermo. Un crop unico non può andare bene per tutte e tre le cose — su una clip
+ * reale ne usciva il gioco ingrandito e tagliato per l'intera durata.
+ *
+ * Perché FISSO dentro la scena e non un inseguimento continuo del volto: misurato sulla stessa
+ * clip, dentro un'inquadratura il volto si sposta di 1-38 px, fra un'inquadratura e l'altra di
+ * 700-1500 px. Un inseguimento morbido non avrebbe quindi niente da seguire dove la persona sta
+ * ferma, e scivolerebbe per mezzo schermo proprio sugli stacchi — dove invece si deve tagliare
+ * netto. I confini delle scene qui sono gli stacchi VERI del montaggio (vedi scene-detect.ts),
+ * quindi il cambio d'inquadratura cade dove lo spettatore già se lo aspetta.
+ *
+ * Ritorna null se non c'è nessun volto da cui guadagnare qualcosa: decide il chiamante.
+ */
+function perSceneCrops(
+  segments: SegmentDetections[],
+  cutTimes: number[],
+  clipDuration: number,
+  sourceWidth: number,
+  sourceHeight: number,
+): TimedCrop[] | null {
+  const targetAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
+  const centered = centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect);
+
+  const boundaries = [0, ...cutTimes.filter((t) => t > 0.01 && t < clipDuration - 0.01), clipDuration];
+  const crops: TimedCrop[] = [];
+
+  for (let i = 0; i < boundaries.length - 1; i++) {
+    const startSeconds = boundaries[i]!;
+    const endSeconds = boundaries[i + 1]!;
+
+    // Il volto PIÙ GRANDE visto nei segmenti che cadono in questa scena, non la media: dentro una
+    // scena il soggetto è sempre lo stesso, e mediare con qualche rilevamento spurio più piccolo
+    // sposterebbe l'inquadratura senza motivo.
+    let subject: FaceBox | null = null;
+    for (const seg of segments) {
+      if (seg.endSeconds <= startSeconds + 0.01 || seg.startSeconds >= endSeconds - 0.01) continue;
+      for (const meta of seg.allFaces) {
+        if (!subject || meta.avg.height > subject.height) subject = meta.avg;
+      }
+    }
+
+    const isSubjectShot = subject !== null && subject.height >= sourceHeight * SCENE_SUBJECT_MIN_HEIGHT_RATIO;
+    const crop =
+      isSubjectShot && subject
+        ? centeredCrop(subject.x + subject.width / 2, sourceHeight / 2, sourceWidth, sourceHeight, targetAspect)
+        : centered;
+    crops.push({ startSeconds, endSeconds, crop });
+  }
+
+  if (!crops.length) return null;
+  // Se nessuna scena ha trovato un soggetto, questo non aggiunge niente al crop centrato.
+  if (crops.every((c) => c.crop.x === centered.x)) return null;
+
+  // Due scene di fila inquadrate quasi uguale: si tiene la prima, così uno spostamento
+  // impercettibile non diventa comunque uno stacco visibile.
+  const deadZone = sourceWidth * SCENE_CROP_DEAD_ZONE_RATIO;
+  const merged: TimedCrop[] = [];
+  for (const c of crops) {
+    const last = merged[merged.length - 1];
+    if (last && Math.abs(last.crop.x - c.crop.x) <= deadZone) {
+      last.endSeconds = c.endSeconds;
+      continue;
+    }
+    merged.push({ ...c, crop: { ...c.crop } });
+  }
+  return merged;
+}
 
 /**
  * FaceTracker che usa rilevamento volto reale (ONNX, vedi onnx-face-detector.ts), campionato
@@ -215,7 +302,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
         logger.warn("Face detection fallita per un segmento, nessun candidato webcam per quel tratto", {
           error: err instanceof Error ? err.message : String(err),
         });
-        rawSegments.push({ startSeconds: segStart, endSeconds: segEnd, webcamCandidates: [] });
+        rawSegments.push({ startSeconds: segStart, endSeconds: segEnd, webcamCandidates: [], allFaces: [] });
       }
     }
 
@@ -251,11 +338,18 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const anchorGroups = candidateAnchors.filter((a) => cropByAnchor.has(a));
     const decisions = rawDecisions.map((d) => ({ ...d, anchor: d.anchor && cropByAnchor.has(d.anchor) ? d.anchor : null }));
 
-    // Nessuna webcam riconoscibile (gameplay puro, contenuto solo visivo, o volti presenti ma
-    // tutti dentro il contenuto reagito): un unico crop centrato statico. Niente primo piano
-    // inseguito sul volto — vedi il commento sul tipo Layout in face-tracker.ts.
+    // Nessuna webcam riconoscibile: non c'è niente da affiancare, quindi un crop 9:16 a piena
+    // altezza — ma inquadrato SCENA PER SCENA, non uno solo per tutta la clip (vedi perSceneCrops).
     if (!decisions.some((d) => d.anchor !== null)) {
-      logger.info("Nessun pattern webcam sostenuto: layout statico a schermo intero", { segments: segmentCount });
+      const scenes = perSceneCrops(rawSegments, cutTimes, clipDuration, sourceWidth, sourceHeight);
+      if (scenes) {
+        logger.info("Nessuna webcam: inquadratura fissa per scena", {
+          scene: scenes.length,
+          crops: scenes.map((s) => `${s.startSeconds.toFixed(1)}-${s.endSeconds.toFixed(1)} x=${s.crop.x}`),
+        });
+        return { type: "single", crops: scenes };
+      }
+      logger.info("Nessuna webcam e nessun volto: crop centrato statico", { segments: segmentCount });
       return this.fallback.computeLayout(params);
     }
 
@@ -313,7 +407,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     sourceHeight: number,
     absStart: number,
     absEnd: number,
-  ): Promise<{ webcamCandidates: ClusterMeta[] }> {
+  ): Promise<{ webcamCandidates: ClusterMeta[]; allFaces: ClusterMeta[] }> {
     const duration = Math.max(0.1, absEnd - absStart);
     const timestamps: number[] = [];
     for (let i = 1; i <= SAMPLES_PER_SEGMENT; i++) {
@@ -362,12 +456,12 @@ export class ReactionCamFaceTracker implements FaceTracker {
     }
 
     const framesWithDetection = samples.filter((s) => s.length > 0).length;
-    if (framesWithDetection === 0) return { webcamCandidates: [] };
+    if (framesWithDetection === 0) return { webcamCandidates: [], allFaces: [] };
 
     const clusters = clusterDetections(samples);
     const minCount = Math.max(1, Math.ceil(framesWithDetection * MIN_STABLE_RATIO));
     const stable = clusters.filter((c) => c.sampleIndices.size >= minCount);
-    if (stable.length === 0) return { webcamCandidates: [] };
+    if (stable.length === 0) return { webcamCandidates: [], allFaces: [] };
 
     const withMeta: ClusterMeta[] = stable.map((c) => ({
       avg: averageBox(c.entries.map((e) => e.box)),
@@ -375,7 +469,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
       motion: c.entries.reduce((sum, e) => sum + e.motion, 0) / c.entries.length,
     }));
 
-    return { webcamCandidates: withMeta.filter((m) => isWebcamLike(m.avg, sourceWidth, sourceHeight)) };
+    return { webcamCandidates: withMeta.filter((m) => isWebcamLike(m.avg, sourceWidth, sourceHeight)), allFaces: withMeta };
   }
 
   /**

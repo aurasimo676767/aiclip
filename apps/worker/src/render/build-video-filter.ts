@@ -24,7 +24,9 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
   const { layout, assSubtitlesPath, showProgressBar, clipDurationSeconds } = params;
 
   const steps =
-    layout.type === "single" ? buildStaticFullFrameSteps(layout.crop) : buildSplitVerticalSteps(layout, clipDurationSeconds);
+    layout.type === "single"
+      ? buildCroppedSteps(layout.crops, clipDurationSeconds, OUTPUT_RESOLUTION.width, OUTPUT_RESOLUTION.height, "scaled")
+      : buildSplitVerticalSteps(layout, clipDurationSeconds);
 
   const subtitlesFilterPath = toFfmpegFilterPath(assSubtitlesPath);
   const lastLabel = "subbed";
@@ -40,14 +42,6 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
   }
 
   return steps.join(";\n");
-}
-
-/** Un unico crop statico del frame sorgente, scalato a piena canvas verticale. */
-function buildStaticFullFrameSteps(crop: CropWindow): string[] {
-  return [
-    `[0:v]crop=w=${crop.width}:h=${crop.height}:x=${crop.x}:y=${crop.y},` +
-      `scale=${OUTPUT_RESOLUTION.width}:${OUTPUT_RESOLUTION.height}:flags=lanczos,setsar=1[scaled]`,
-  ];
 }
 
 function buildSplitVerticalSteps(layout: Extract<Layout, { type: "split_vertical" }>, totalDuration: number, prefix = ""): string[] {

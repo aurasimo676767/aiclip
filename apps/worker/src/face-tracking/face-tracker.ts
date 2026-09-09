@@ -23,9 +23,14 @@ export interface TimedCrop {
  * riquadro di qualche pixel a ogni campionamento anche su una persona immobile, e il crop
  * inseguiva quel rumore — e un primo piano quasi mai centrato bene. Rimosso del tutto.
  *
- * - "single": un unico crop 9:16 STATICO del frame sorgente, per l'intera clip. Usato quando non
- *   c'è nessuna webcam riconoscibile (gameplay puro, contenuto solo visivo). Un solo CropWindow,
- *   non una sequenza temporale: l'immobilità è garantita dal tipo, non da una convenzione.
+ * - "single": crop 9:16 del frame sorgente, usato quando non c'è nessuna webcam riconoscibile.
+ *   Un crop FISSO PER SCENA, non uno solo per tutta la clip: molti VOD sono video già montati che
+ *   staccano ogni pochi secondi fra streamer a schermo intero, gameplay a schermo intero e
+ *   condivisione schermo. Un unico crop per l'intera clip non può andare bene per tutti e tre —
+ *   verificato su una clip reale, ne usciva il gioco ingrandito e tagliato per l'intera durata.
+ *   I confini fra un crop e il successivo coincidono con gli STACCHI del montaggio originale
+ *   (vedi scene-detect.ts), quindi il cambio d'inquadratura cade dove lo spettatore se lo aspetta
+ *   e non si vede come un movimento. Dentro una scena il crop resta identico.
  * - "split_vertical": due fasce impilate — webcam in alto, contenuto principale in basso. Il
  *   contenuto è un crop STATICO centrato del frame intero (mai centrato su un volto, mai
  *   zoomato). `topCrops` è una sequenza temporale solo perché la webcam mostrata cambia quando
@@ -36,7 +41,7 @@ export interface TimedCrop {
  *   piccola (spesso tagliata) dentro l'area "contenuto".
  */
 export type Layout =
-  | { type: "single"; crop: CropWindow }
+  | { type: "single"; crops: TimedCrop[] }
   | { type: "split_vertical"; topCrops: TimedCrop[]; bottom: CropWindow; topRatio: number; blurRegions: CropWindow[] };
 
 /**

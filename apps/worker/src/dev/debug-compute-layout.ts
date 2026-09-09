@@ -17,8 +17,9 @@ async function main() {
 
   console.log("\n=== LAYOUT TYPE:", layout.type, "===");
   if (layout.type === "single") {
-    const c = layout.crop;
-    console.log(`  crop statico x=${c.x} y=${c.y} w=${c.width} h=${c.height}`);
+    for (const c of layout.crops) {
+      console.log(`  [${c.startSeconds.toFixed(1)}-${c.endSeconds.toFixed(1)}] crop x=${c.crop.x} y=${c.crop.y} w=${c.crop.width} h=${c.crop.height}`);
+    }
     return;
   }
 
