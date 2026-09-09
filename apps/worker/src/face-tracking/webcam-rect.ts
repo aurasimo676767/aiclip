@@ -47,8 +47,14 @@ const MIN_RECT_SCORE = 4;
  */
 const MIN_FACE_TO_RECT_RATIO = 0.18;
 
-/** Entro questa frazione del punteggio migliore due rettangoli si considerano equivalenti (vedi sotto). */
-const NEAR_TIE_RATIO = 0.85;
+/**
+ * Entro questa frazione del punteggio migliore due rettangoli si considerano equivalenti (vedi sotto).
+ * La fascia è stretta di proposito: deve coprire i ritagli interni che battono di poco il riquadro
+ * vero (misurati -5% e -12%), ma NON arrivare a -15%, dove ricadono i rettangoli che sbordano oltre
+ * la webcam e si portano dentro una striscia del video reagito (misurato -14.8% su una clip vera,
+ * che con la fascia larga vinceva e metteva una banda di alberi sotto la faccia).
+ */
+const NEAR_TIE_RATIO = 0.88;
 
 export interface WebcamRectDebug {
   rect: CropWindow | null;
@@ -161,6 +167,14 @@ export async function detectWebcamRectDebug(
   // quasi verticale (che in uno Short si vedrebbe malissimo). Con questa tolleranza vincono
   // entrambi i riquadri veri, e su tutti i video provati non è mai passato un rettangolo più
   // largo del vero.
+  //
+  // ERRORE DA NON RIPETERE: ordinare invece per "proporzioni più vicine a 4:3/16:9" sembra più
+  // furbo e sistema un caso (un 432x412 scelto al posto del 432x300 giusto, con una striscia di
+  // contenuto sotto la faccia), ma ne rompe uno peggiore: su una clip dove il video reagito riempie
+  // lo schermo, un volto DENTRO quel video otteneva così un riquadro 588x442 — proporzioni 4:3
+  // perfette — che superava tutti i controlli e rubava il pannello alla webcam vera. Con l'ordine
+  // per dimensione quello stesso volto ottiene un riquadro enorme (44.9% dello schermo) che viene
+  // scartato subito. Meglio una striscia di troppo che il video reagito spacciato per webcam.
   const sortedByScore = [...evaluated].sort((a, b) => b.score - a.score);
   const topScore = sortedByScore[0]?.score ?? 0;
   const contenders = sortedByScore.filter((e) => e.score >= topScore * NEAR_TIE_RATIO);
