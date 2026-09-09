@@ -4,6 +4,7 @@ import { clipCandidateSchema, type ClipCandidatesResponse } from "@clipforge/sha
 import { CANDIDATE_CHUNK_OVERLAP_SECONDS, CANDIDATE_CHUNK_WINDOW_SECONDS, CLIP_DURATION_TARGET } from "@clipforge/shared";
 import { getAnthropicClient, cachedSystemPrompt } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
+import type { LoudMoment } from "../../pipeline/vocal-energy.js";
 import { logger } from "../../lib/logger.js";
 
 // Estrae solo l'array grezzo (senza validare ancora ogni candidato): serve a distinguere un
@@ -70,6 +71,8 @@ DOVE INIZIA IL TAGLIO — questa è la parte più importante: la clip NON inizia
 4. Svolta/rivelazione che ribalta quello che si pensava un attimo prima
 Il campo "hook" deve contenere le parole ESATTE con cui la clip si apre, non un riassunto — e "start" deve corrispondere al timestamp di quelle parole, non a quello del preambolo che le precede.
 
+MOMENTI URLATI — usa questo segnale: quando nel messaggio ti vengono indicati dei "momenti in cui qualcuno alza nettamente la voce", sono misurati sull'audio VERO, non dedotti dal testo. Sono il segnale più affidabile che hai per capire dove il video si accende davvero: qualcuno che urla, si infuria, esplode a ridere o reagisce di scatto è esattamente ciò che tiene incollato uno spettatore su uno Short, e leggendo il solo transcript quel momento sembra una frase qualunque. Vai a controllare per primi quei punti: quasi sempre lì attorno c'è un candidato migliore di quelli che troveresti leggendo il testo in modo neutro. Attenzione però: il volume alto da solo NON basta a rendere un momento buono — se attorno all'urlo non c'è comunque una battuta, una svolta o un fatto comprensibile, resta un momento "energico ma vuoto" e va scartato come tutti gli altri. Il volume ti dice DOVE guardare, non COSA tenere.
+
 DOVE FINISCE IL TAGLIO — ERRORE DA NON RIPETERE (osservato in produzione): tagliare "senza pietà" NON significa fermarsi subito dopo la frase-gancio. Una clip che è solo hook e poi finisce di colpo non fa ridere/non colpisce, perché manca lo sviluppo: la reazione di chi ascolta, la battuta che segue, l'escalation, la spiegazione che rende la cosa ancora più assurda. "end" deve includere tutto questo, non solo il gancio — punta a riempire l'intervallo ${CLIP_DURATION_TARGET.min}-${CLIP_DURATION_TARGET.max}s con contenuto vero (non riempitivo), non a chiudere il prima possibile. Il "taglia senza pietà" si applica al SETUP prima del gancio e ai momenti morti in mezzo, MAI al payoff dopo.
 
 Ogni clip candidata deve durare al massimo ${CLIP_DURATION_TARGET.hardMax} secondi, idealmente ${CLIP_DURATION_TARGET.min}-${CLIP_DURATION_TARGET.max}s — non fermarti prima solo perché il gancio è già stato detto. Se il momento naturale attorno al gancio (gancio + sviluppo/payoff) è più lungo del tetto, allora sì taglia aggressivamente per starci dentro, ma sempre preferendo tenere il payoff piuttosto che tagliarlo per accorciare. Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito: non inventare tempi. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
@@ -79,6 +82,13 @@ export interface CandidateDetectionOptions {
   model: string;
   videoTitle: string;
   videoDurationSeconds: number;
+  /**
+   * Momenti in cui le voci si alzano nettamente (urla, reazioni concitate) — vedi
+   * vocal-energy.ts. Il transcript dice COSA viene detto ma non COME: una battuta urlata e una
+   * detta piano hanno lo stesso testo, e per uno Short la differenza è enorme. Passati al
+   * modello come indizio su dove guardare, non come vincolo.
+   */
+  loudMoments?: LoudMoment[];
 }
 
 /**
@@ -98,9 +108,17 @@ export async function detectClipCandidates(
     const windowSegments = segmentsInWindow(segments, window.start, window.end);
     if (windowSegments.length === 0) continue;
 
+    const loudHere = (options.loudMoments ?? []).filter((m) => m.end > window.start && m.start < window.end);
+    const loudHint =
+      loudHere.length > 0
+        ? `\nMomenti in cui qualcuno ALZA NETTAMENTE LA VOCE in questa finestra (urla/reazioni concitate, misurati sull'audio reale): ${loudHere
+            .map((m) => `${m.start.toFixed(0)}s`)
+            .join(", ")}\n`
+        : "";
+
     const userPrompt = `Video: "${options.videoTitle}" (durata totale ${Math.round(options.videoDurationSeconds)}s)
 Finestra analizzata: ${window.start.toFixed(0)}s - ${window.end.toFixed(0)}s
-
+${loudHint}
 Transcript della finestra:
 ${formatSegments(windowSegments)}`;
 

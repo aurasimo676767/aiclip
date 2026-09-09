@@ -31,6 +31,8 @@ import { detectClipCandidates } from "../providers/ai/candidates.js";
 import { rankAndBuildEdl } from "../providers/ai/ranking.js";
 import { detectLongformCandidates } from "../providers/ai/longform-candidates.js";
 import { rankLongformClips } from "../providers/ai/longform-ranking.js";
+import { sanitizeShortClips } from "./short-clip-boundaries.js";
+import { detectLoudMoments } from "./vocal-energy.js";
 import { updateVideoStatus } from "../queue/video-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
 import { isVideoCancelled } from "../lib/cancellation.js";
@@ -386,11 +388,17 @@ async function buildShortClipsToInsert(
   userId: string,
   localVideoPath: string,
 ): Promise<ClipToInsert[]> {
+  // Segnale audio (urla/reazioni concitate) calcolato una volta sola sul video: costa mezzo
+  // secondo di ffmpeg e dice al modello dove il video si accende davvero, cosa che leggendo il
+  // solo transcript non può sapere. Vedi vocal-energy.ts.
+  const loudMoments = await detectLoudMoments(localVideoPath, segments);
+
   const candidates = await detectClipCandidates(segments, {
     apiKey: env.ANTHROPIC_API_KEY,
     model: env.ANTHROPIC_MODEL_CHEAP,
     videoTitle,
     videoDurationSeconds,
+    loudMoments,
   });
   logger.info("Candidati Shorts individuati", { videoId: video.id, count: candidates.length });
 
@@ -402,7 +410,9 @@ async function buildShortClipsToInsert(
     userId,
   });
 
-  return rankedClips
+  // Correzione deterministica dei confini PRIMA di tagliare ai primi N: senza, le clip scartate
+  // (troppo corte, sovrapposte) avrebbero comunque occupato uno slot dei suggerimenti.
+  return sanitizeShortClips(rankedClips, segments, video.id)
     .slice(0, MAX_SUGGESTED_CLIPS)
     .map((clip) => enforceHardDurationCap(clip, video.id))
     .map((clip) =>
