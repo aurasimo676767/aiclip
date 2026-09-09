@@ -63,6 +63,10 @@ for (const face of faces) {
     `  volto x=${face.x.toFixed(0)} y=${face.y.toFixed(0)} w=${face.width.toFixed(0)} h=${face.height.toFixed(0)} ` +
       `(${(areaRatio * 100).toFixed(2)}% del frame) -> ${result.rect ? JSON.stringify(result.rect) : "NIENTE"} [${result.reason}]`,
   );
+  for (const alt of result.alternatives) {
+    const r = alt.rect;
+    console.log(`      alt: ${r.width}x${r.height} @ ${r.x},${r.y}  aspetto ${(r.width / r.height).toFixed(2)}  punteggio ${alt.score.toFixed(1)}`);
+  }
 
   boxes.push(`drawbox=x=${Math.round(face.x)}:y=${Math.round(face.y)}:w=${Math.round(face.width)}:h=${Math.round(face.height)}:color=red:t=3`);
   if (result.rect) {

@@ -47,9 +47,14 @@ const MIN_RECT_SCORE = 4;
  */
 const MIN_FACE_TO_RECT_RATIO = 0.18;
 
+/** Entro questa frazione del punteggio migliore due rettangoli si considerano equivalenti (vedi sotto). */
+const NEAR_TIE_RATIO = 0.85;
+
 export interface WebcamRectDebug {
   rect: CropWindow | null;
   reason: string;
+  /** I migliori rettangoli valutati, dal più convincente: serve agli script di verifica per capire perché ha scelto quello. */
+  alternatives: Array<{ rect: CropWindow; score: number }>;
 }
 
 /**
@@ -89,7 +94,7 @@ export async function detectWebcamRectDebug(
   const height = Math.round((sourceHeight * scale) / 2) * 2;
 
   const edges = await buildPersistentEdgeMap(videoPath, sampleTimes, width, height);
-  if (!edges) return { rect: null, reason: "estrazione fotogrammi fallita" };
+  if (!edges) return { rect: null, reason: "estrazione fotogrammi fallita", alternatives: [] };
 
   const f = { x: face.x * scale, y: face.y * scale, width: face.width * scale, height: face.height * scale };
 
@@ -126,7 +131,7 @@ export async function detectWebcamRectDebug(
   // misurato lungo l'intera lunghezza del lato. Così vince solo un rettangolo i cui quattro lati
   // sono tutti bordi veri e continui — che è esattamente ciò che distingue il riquadro di un
   // overlay da uno stacco qualsiasi dentro l'immagine.
-  let best: { rect: CropWindow; score: number } | null = null;
+  const evaluated: Array<{ rect: CropWindow; score: number }> = [];
   for (const x0 of leftCandidates) {
     for (const x1 of rightCandidates) {
       if (x1 - x0 < 8) continue;
@@ -142,21 +147,37 @@ export async function detectWebcamRectDebug(
           };
           if (implausibleReason(rect, face, sourceWidth, sourceHeight)) continue;
 
-          const score = rectangleScore(edges, width, height, x0, x1, y0, y1);
-          // A parità di punteggio vince il rettangolo più piccolo: è quasi sempre l'overlay vero,
-          // mentre quello più grande ci ha inglobato attorno un pezzo di contenuto.
-          const isBetter = !best || score > best.score || (score === best.score && rect.width * rect.height < best.rect.width * best.rect.height);
-          if (isBetter) best = { rect, score };
+          evaluated.push({ rect, score: rectangleScore(edges, width, height, x0, x1, y0, y1) });
         }
       }
     }
   }
 
-  if (!best) return { rect: null, reason: "nessun rettangolo plausibile attorno al volto" };
+  // A parità SOSTANZIALE di punteggio vince il rettangolo più grande. Un rettangolo contenuto
+  // dentro quello vero prende quasi lo stesso punteggio — i suoi lati cadono su bordi interni alla
+  // webcam (lo schienale, un mobile) che sono comunque netti — ma taglia via una fetta di
+  // inquadratura. Verificato su due webcam reali dello stesso VOD: i riquadri giusti perdevano
+  // rispettivamente del 5% e del 12% contro un proprio ritaglio interno, e uno dei due usciva
+  // quasi verticale (che in uno Short si vedrebbe malissimo). Con questa tolleranza vincono
+  // entrambi i riquadri veri, e su tutti i video provati non è mai passato un rettangolo più
+  // largo del vero.
+  const sortedByScore = [...evaluated].sort((a, b) => b.score - a.score);
+  const topScore = sortedByScore[0]?.score ?? 0;
+  const contenders = sortedByScore.filter((e) => e.score >= topScore * NEAR_TIE_RATIO);
+  const ranked = [
+    ...contenders.sort((a, b) => b.rect.width * b.rect.height - a.rect.width * a.rect.height),
+    ...sortedByScore.filter((e) => e.score < topScore * NEAR_TIE_RATIO),
+  ].slice(0, 5);
+  const best = ranked[0];
+  if (!best) return { rect: null, reason: "nessun rettangolo plausibile attorno al volto", alternatives: [] };
   if (best.score < MIN_RECT_SCORE) {
-    return { rect: null, reason: `bordi troppo deboli per essere un riquadro (${best.score.toFixed(1)} < ${MIN_RECT_SCORE})` };
+    return {
+      rect: null,
+      reason: `bordi troppo deboli per essere un riquadro (${best.score.toFixed(1)} < ${MIN_RECT_SCORE})`,
+      alternatives: ranked,
+    };
   }
-  return { rect: best.rect, reason: `ok (bordo più debole ${best.score.toFixed(1)})` };
+  return { rect: best.rect, reason: `ok (bordo più debole ${best.score.toFixed(1)})`, alternatives: ranked };
 }
 
 /**
