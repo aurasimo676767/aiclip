@@ -3,9 +3,10 @@ import type { CropWindow, FaceTracker, Layout, TimedCrop } from "./face-tracker.
 import { extractRawFrameBGR } from "./frame-extractor.js";
 import { detectFaces, type FaceBox } from "./onnx-face-detector.js";
 import { computeMouthMotion } from "./mouth-motion.js";
-import { centeredCrop, subjectCentricCrop } from "./crop-geometry.js";
+import { centeredCrop } from "./crop-geometry.js";
 import { CenterCropFaceTracker } from "./center-crop-face-tracker.js";
 import { detectSceneCuts } from "./scene-detect.js";
+import { detectWebcamRect } from "./webcam-rect.js";
 import { logger } from "../lib/logger.js";
 
 const SEGMENT_LENGTH_SECONDS = 1.5; // granularità con cui si ricontrolla CHI sta parlando. Non influenza più la stabilità dell'inquadratura (il crop di una persona è fisso, vedi sotto), quindi non serve scendere a 1s come prima: 1.5s dimezza i frame da estrarre a parità di reattività percepita
@@ -16,23 +17,10 @@ const MOTION_FRAME_DELAY_SECONDS = 0.15; // distanza tra i due frame usati per s
 const MIN_STABLE_RATIO = 0.5; // il cluster deve comparire in almeno metà dei sample (del segmento) con un volto
 const WEBCAM_MAX_AREA_RATIO = 0.05; // il volto occupa <5% dell'area del frame
 const WEBCAM_CENTER_MARGIN = 0.3; // centro del volto fuori dal 30%-70% centrale (orizz. o vert.)
-/**
- * Quanto allargare il crop attorno al volto per ottenere l'inquadratura della webcam. Volutamente
- * generoso: l'obiettivo è mostrare la webcam INTERA (persona, sfondo della stanza, cornice
- * dell'overlay), non un primo piano sul viso. Meglio includere qualche pixel di gioco attorno che
- * tagliare la webcam — un ritaglio troppo stretto è esattamente il "primo piano zoomato" che
- * l'utente ha chiesto di eliminare.
- */
-const WEBCAM_PADDING_FACTOR = 4.5;
-/**
- * Aspetto del crop webcam: 16:9, l'inquadratura naturale di una webcam, NON l'aspetto del
- * pannello. Il pannello poi la contiene per intero e la centra (vedi build-video-filter.ts):
- * forzare qui l'aspetto del pannello significherebbe ritagliare la webcam per farcela stare.
- */
-const WEBCAM_CROP_ASPECT = 16 / 9;
 const TOP_RATIO = 0.35; // frazione di altezza dedicata alla webcam nel layout split
 const MOTION_NOISE_FLOOR = 4; // sotto questa soglia il "movimento" è rumore/compressione, non parlato reale
-const BLUR_REGION_PADDING_FACTOR = 4; // margine generoso: l'overlay webcam reale è quasi sempre più grande del solo riquadro del volto rilevato, meglio sfocare un po' di più che lasciare una fetta visibile
+/** Fotogrammi campionati per trovare il riquadro della webcam: è la loro media a far emergere i bordi fermi. */
+const RECT_SAMPLE_COUNT = 8;
 const MIN_SEGMENT_SECONDS = 0.3; // un taglio di scena troppo vicino al confine della griglia (o a un altro taglio) verrebbe scartato invece di creare un segmento degenere: sotto questa durata SAMPLES_PER_SEGMENT frame ravvicinatissimi non danno una stima affidabile
 const MIN_CONSECUTIVE_SEGMENTS_TO_SWITCH_SPEAKER = 2; // segmenti di fila in cui un'ANCORA DIVERSA da quella attualmente mostrata deve avere più movimento prima di "rubarle" il pannello — senza, basta un istante in cui un ascoltatore reagisce (ride, annuisce) più vistosamente del narratore per far sparire chi sta davvero parlando. Verificato su un caso reale: un solo narratore per un'intera clip di 22s, ma il pannello continuava a saltare tra 3 co-host diversi segmento per segmento.
 
@@ -147,7 +135,23 @@ export class ReactionCamFaceTracker implements FaceTracker {
       }
     }
 
-    const { decisions, anchorGroups } = this.resolveWebcamAnchors(rawSegments, segmentCount);
+    const { decisions: rawDecisions, anchorGroups: candidateAnchors } = this.resolveWebcamAnchors(rawSegments, segmentCount);
+
+    // Il riquadro dell'overlay viene cercato nell'immagine (vedi webcam-rect.ts) e serve a DUE
+    // cose: dà l'inquadratura esatta da mostrare, e conferma che quel volto sia davvero una
+    // webcam. Se attorno al volto non c'è un riquadro da webcam, quel volto è contenuto reagito
+    // (tipicamente una faccia dentro un TikTok, che vive dentro il rettangolo del player) e non
+    // deve finire nel pannello webcam.
+    const sampleTimes = Array.from({ length: RECT_SAMPLE_COUNT }, (_, i) => startSeconds + (clipDuration * (i + 0.5)) / RECT_SAMPLE_COUNT);
+    const cropByAnchor = new Map<PositionGroup, CropWindow>();
+    for (const anchor of candidateAnchors) {
+      const rect = await detectWebcamRect(sourceVideoPath, sampleTimes, anchor.avg, sourceWidth, sourceHeight);
+      if (rect) cropByAnchor.set(anchor, rect);
+      else logger.info("Volto scartato: non ha attorno un riquadro da webcam (probabile contenuto reagito)", { face: anchor.avg });
+    }
+
+    const anchorGroups = candidateAnchors.filter((a) => cropByAnchor.has(a));
+    const decisions = rawDecisions.map((d) => ({ ...d, anchor: d.anchor && cropByAnchor.has(d.anchor) ? d.anchor : null }));
 
     // Nessuna webcam riconoscibile (gameplay puro, contenuto solo visivo, o volti presenti ma
     // tutti dentro il contenuto reagito): un unico crop centrato statico. Niente primo piano
@@ -157,15 +161,6 @@ export class ReactionCamFaceTracker implements FaceTracker {
       return this.fallback.computeLayout(params);
     }
 
-    // Un ritaglio per PERSONA, calcolato una volta sola dalla posizione media del suo volto: per
-    // tutti i segmenti in cui parla quella persona il ritaglio è identico al pixel, quindi
-    // l'inquadratura non si muove mai finché non cambia chi parla.
-    const cropByAnchor = new Map<PositionGroup, CropWindow>(
-      anchorGroups.map((anchor) => [
-        anchor,
-        subjectCentricCrop(anchor.avg, sourceWidth, sourceHeight, WEBCAM_CROP_ASPECT, WEBCAM_PADDING_FACTOR),
-      ]),
-    );
 
     const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - TOP_RATIO));
     const bottom = centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
@@ -173,7 +168,10 @@ export class ReactionCamFaceTracker implements FaceTracker {
     // il pannello "contenuto" sotto è un crop dell'INTERO frame sorgente, quindi la mostra
     // di nuovo, piccola (e spesso tagliata dal bordo del crop). Sfochiamo quelle zone nel
     // rendering invece di lasciarle visibili due volte.
-    const blurRegions: CropWindow[] = anchorGroups.map((g) => subjectCentricCrop(g.avg, sourceWidth, sourceHeight, 1, BLUR_REGION_PADDING_FACTOR));
+    // Si sfoca il riquadro ESATTO della webcam (quello rilevato sopra), non più un rettangolo
+    // stimato attorno al volto con un margine generoso: quello a volte lasciava scoperto un bordo
+    // della webcam e altre volte sfocava del contenuto attorno che andava lasciato visibile.
+    const blurRegions: CropWindow[] = anchorGroups.map((a) => cropByAnchor.get(a)!);
 
     // Segmenti in cui il detector non ha visto l'ancora (volto girato, mano davanti alla bocca):
     // riusano la posizione valida più vicina, così la webcam non "sparisce" per un tratto in cui
