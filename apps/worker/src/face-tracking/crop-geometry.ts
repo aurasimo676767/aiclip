@@ -78,10 +78,31 @@ export function subjectCentricCrop(
     height = width / targetAspect;
   }
 
-  const x = clamp(Math.round(cx - width / 2), 0, sourceWidth - width);
-  const y = clamp(Math.round(cy - height / 2), 0, sourceHeight - height);
+  // Stesso vincolo di maxSymmetricCropHeight ma sull'asse orizzontale: se il ritaglio è più largo
+  // dello spazio disponibile da un lato (tipico di una webcam in un angolo), il clamp finale lo
+  // spinge contro il bordo e il soggetto finisce visibilmente decentrato — osservato su un
+  // fotogramma reale con webcam in basso a destra, mostrata tutta spostata verso destra nel
+  // pannello. Limitando la larghezza a quella simmetrica possibile, il soggetto resta ESATTAMENTE
+  // al centro (il ritaglio è solo più stretto).
+  const maxSymmetricWidth = 2 * Math.min(cx, sourceWidth - cx);
+  if (maxSymmetricWidth > 0 && width > maxSymmetricWidth) {
+    width = maxSymmetricWidth;
+    height = width / targetAspect;
+  }
 
-  return { x, y, width: Math.round(width), height: Math.round(height) };
+  // Dimensioni arrotondate PRIMA di calcolare x/y: prima il clamp usava una larghezza ancora
+  // frazionaria come limite superiore, quindi anche x/y uscivano frazionari e finivano così nella
+  // stringa del filtro ffmpeg (es. crop=...:x=1295.4834486308848). Pari perché il pixel format
+  // yuv420p sottocampiona la crominanza e non gradisce dimensioni dispari.
+  const evenWidth = Math.max(2, Math.round(width / 2) * 2);
+  const evenHeight = Math.max(2, Math.round(height / 2) * 2);
+
+  return {
+    x: clamp(Math.round(cx - evenWidth / 2), 0, Math.max(0, sourceWidth - evenWidth)),
+    y: clamp(Math.round(cy - evenHeight / 2), 0, Math.max(0, sourceHeight - evenHeight)),
+    width: evenWidth,
+    height: evenHeight,
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {

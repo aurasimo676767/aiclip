@@ -19,7 +19,6 @@ const filterComplex = buildVideoFilterComplex({
       { x: 1919, y: 500, width: 100, height: 100 }, // overlap sub-pixel col bordo destro (1920), caso che causava crop w=0
     ],
   },
-  zoomExpression: "1.0",
   assSubtitlesPath: "",
   showProgressBar: false,
   clipDurationSeconds: 5,

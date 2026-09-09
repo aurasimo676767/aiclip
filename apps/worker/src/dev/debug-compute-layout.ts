@@ -15,34 +15,20 @@ async function main() {
   const tracker = new ReactionCamFaceTracker();
   const layout = await tracker.computeLayout({ sourceVideoPath: videoPath, sourceWidth, sourceHeight, startSeconds, endSeconds });
 
-  console.log(
-    "\n=== LAYOUT TYPE:",
-    layout.type,
-    layout.type !== "split_vertical" ? `backgroundFill=${layout.backgroundFill}` : "",
-    "===",
-  );
+  console.log("\n=== LAYOUT TYPE:", layout.type, "===");
   if (layout.type === "single") {
-    for (const c of layout.crops) {
-      console.log(
-        `  [${c.startSeconds.toFixed(1)}-${c.endSeconds.toFixed(1)}] crop x=${c.crop.x} y=${c.crop.y} w=${c.crop.width} h=${c.crop.height}`,
-      );
-    }
-  } else if (layout.type === "split_vertical") {
-    console.log("  topRatio:", layout.topRatio, "bottom:", JSON.stringify(layout.bottom), "blurRegions:", JSON.stringify(layout.blurRegions));
-    for (const c of layout.topCrops) {
-      console.log(
-        `  [${c.startSeconds.toFixed(1)}-${c.endSeconds.toFixed(1)}] top x=${c.crop.x} y=${c.crop.y} w=${c.crop.width} h=${c.crop.height}`,
-      );
-    }
-  } else {
-    console.log("  single (base) crops:");
-    for (const c of layout.singleCrops) {
-      console.log(`  [${c.startSeconds.toFixed(1)}-${c.endSeconds.toFixed(1)}] crop x=${c.crop.x} y=${c.crop.y} w=${c.crop.width} h=${c.crop.height}`);
-    }
-    console.log("  split (overlay) windows:");
-    for (const c of layout.splitCrops) {
-      console.log(`  [${c.startSeconds.toFixed(1)}-${c.endSeconds.toFixed(1)}] top x=${c.crop.x} y=${c.crop.y} w=${c.crop.width} h=${c.crop.height}`);
-    }
+    const c = layout.crop;
+    console.log(`  crop statico x=${c.x} y=${c.y} w=${c.width} h=${c.height}`);
+    return;
+  }
+
+  console.log("  topRatio:", layout.topRatio, "bottom:", JSON.stringify(layout.bottom), "blurRegions:", JSON.stringify(layout.blurRegions));
+  // Crop identici consecutivi = stesso speaker: se si alternano a ogni riga, la webcam sta
+  // saltando tra persone diverse troppo spesso.
+  for (const c of layout.topCrops) {
+    console.log(
+      `  [${c.startSeconds.toFixed(1)}-${c.endSeconds.toFixed(1)}] top x=${c.crop.x} y=${c.crop.y} w=${c.crop.width} h=${c.crop.height}`,
+    );
   }
 }
 

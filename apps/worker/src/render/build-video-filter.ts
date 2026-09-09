@@ -4,7 +4,6 @@ import { toFfmpegFilterPath } from "./ffmpeg-filter-utils.js";
 
 export interface VideoFilterParams {
   layout: Layout;
-  zoomExpression: string;
   assSubtitlesPath: string;
   showProgressBar: boolean;
   clipDurationSeconds: number;
@@ -12,24 +11,20 @@ export interface VideoFilterParams {
 
 /**
  * Costruisce la catena di filtri video ffmpeg per una clip:
- * crop 9:16 che segue nel tempo lo speaker/webcam (face tracking, singolo, split_vertical o
- * "mixed" per layout reaction-cam con cambio scena a metà clip) -> crop dinamico per lo
- * zoom/punch-in (EDL) -> scale finale -> sottotitoli bruciati (ASS) -> progress bar opzionale.
- * Ritorna la stringa da passare a `-filter_complex`, con output finale su label `[vout]`.
+ * composizione verticale (crop statico a schermo intero, oppure webcam sopra + contenuto sotto)
+ * -> sottotitoli bruciati (ASS) -> progress bar opzionale. Ritorna la stringa da passare a
+ * `-filter_complex`, con output finale su label `[vout]`.
+ *
+ * Nessuno zoom in nessuna delle due composizioni: gli eventi "zoom"/"punch_in" dell'EDL non
+ * vengono più applicati al video. L'inquadratura del contenuto resta identica per tutta la clip
+ * (richiesta esplicita: il gioco/la reaction devono stare fermi), e la webcam cambia solo con
+ * uno stacco netto quando cambia chi parla.
  */
 export function buildVideoFilterComplex(params: VideoFilterParams): string {
-  const { layout, zoomExpression, assSubtitlesPath, showProgressBar, clipDurationSeconds } = params;
+  const { layout, assSubtitlesPath, showProgressBar, clipDurationSeconds } = params;
 
-  let steps: string[];
-  if (layout.type === "single") {
-    steps = layout.backgroundFill
-      ? buildSingleWithBackgroundSteps(layout.crops, zoomExpression, clipDurationSeconds)
-      : buildSingleCropSteps(layout.crops, zoomExpression, clipDurationSeconds);
-  } else if (layout.type === "split_vertical") {
-    steps = buildSplitVerticalSteps(layout, zoomExpression, clipDurationSeconds);
-  } else {
-    steps = buildMixedSteps(layout, zoomExpression, clipDurationSeconds);
-  }
+  const steps =
+    layout.type === "single" ? buildStaticFullFrameSteps(layout.crop) : buildSplitVerticalSteps(layout, clipDurationSeconds);
 
   const subtitlesFilterPath = toFfmpegFilterPath(assSubtitlesPath);
   const lastLabel = "subbed";
@@ -47,61 +42,27 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
   return steps.join(";\n");
 }
 
-function buildSingleCropSteps(crops: TimedCrop[], zoomExpression: string, totalDuration: number, prefix = ""): string[] {
-  const cropSteps = buildCroppedSteps(crops, totalDuration, OUTPUT_RESOLUTION.width, OUTPUT_RESOLUTION.height, `${prefix}base`);
-
+/** Un unico crop statico del frame sorgente, scalato a piena canvas verticale. */
+function buildStaticFullFrameSteps(crop: CropWindow): string[] {
   return [
-    ...cropSteps,
-    `[${prefix}base]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[${prefix}zoomed]`,
-    `[${prefix}zoomed]scale=${OUTPUT_RESOLUTION.width}:${OUTPUT_RESOLUTION.height}:flags=lanczos,setsar=1[${prefix}scaled]`,
+    `[0:v]crop=w=${crop.width}:h=${crop.height}:x=${crop.x}:y=${crop.y},` +
+      `scale=${OUTPUT_RESOLUTION.width}:${OUTPUT_RESOLUTION.height}:flags=lanczos,setsar=1[scaled]`,
   ];
 }
 
-/**
- * Come buildSingleCropSteps, ma per i casi in cui il volto non riempie bene un crop a piena
- * canvas (Layout.backgroundFill): i crop in ingresso sono ora quadrati (BACKGROUND_FILL_ASPECT
- * in reaction-cam-face-tracker.ts, l'inquadratura naturale di una webcam) invece che forzati a
- * 9:16 — mostrati a PIENA LARGHEZZA (niente bordi laterali, solo sopra/sotto, come richiesto
- * esplicitamente) su uno sfondo ricavato dall'INTERO frame sorgente scalato "a copertura" —
- * spesso è proprio lo schermo/gioco reagito, normalmente invisibile quando il volto occupa
- * tutto lo schermo. Sfondo NITIDO, non sfocato: l'utente lo vuole visibile chiaramente.
- */
-function buildSingleWithBackgroundSteps(crops: TimedCrop[], zoomExpression: string, totalDuration: number, prefix = ""): string[] {
-  // Piena larghezza: i crop in ingresso sono quadrati, quindi altezza=larghezza mantiene
-  // l'aspect e lascia il resto della canvas (sopra/sotto) allo sfondo — mai bordi laterali.
-  const fgWidth = OUTPUT_RESOLUTION.width;
-  const fgHeight = OUTPUT_RESOLUTION.width;
-
-  const cropSteps = buildCroppedSteps(crops, totalDuration, fgWidth, fgHeight, `${prefix}fg_base`);
-
-  return [
-    // Sfondo: l'intero frame sorgente scalato "a copertura" della canvas (un lato combacia,
-    // l'altro sfora) poi tagliato al centro alle dimensioni esatte — sempre uguale per tutta
-    // la clip (non segue il volto), lasciato nitido.
-    `[0:v]scale=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}:force_original_aspect_ratio=increase,crop=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}[${prefix}bg]`,
-    // Primo piano: stesso crop/zoom del volto di buildSingleCropSteps, ma scalato a piena
-    // larghezza invece che sull'intera canvas verticale.
-    ...cropSteps,
-    `[${prefix}fg_base]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[${prefix}fg_zoomed]`,
-    `[${prefix}fg_zoomed]scale=${fgWidth}:${fgHeight}:flags=lanczos,setsar=1[${prefix}fg]`,
-    `[${prefix}bg][${prefix}fg]overlay=x='(W-w)/2':y='(H-h)/2',setsar=1[${prefix}scaled]`,
-  ];
-}
-
-function buildSplitVerticalSteps(
-  layout: Extract<Layout, { type: "split_vertical" }>,
-  zoomExpression: string,
-  totalDuration: number,
-  prefix = "",
-): string[] {
+function buildSplitVerticalSteps(layout: Extract<Layout, { type: "split_vertical" }>, totalDuration: number, prefix = ""): string[] {
   const topHeight = evenRound(OUTPUT_RESOLUTION.height * layout.topRatio);
   const bottomHeight = OUTPUT_RESOLUTION.height - topHeight;
   const { topCrops, bottom, blurRegions } = layout;
 
-  const topSteps = buildCroppedSteps(topCrops, totalDuration, OUTPUT_RESOLUTION.width, topHeight, `${prefix}top`);
+  // Webcam CONTENUTA nel pannello, non stirata a riempirlo: il crop conserva l'inquadratura
+  // naturale della webcam (16:9, vedi WEBCAM_CROP_ASPECT), quindi forzarlo alle proporzioni del
+  // pannello la ritaglierebbe. Con force_original_aspect_ratio=decrease + pad si vede la webcam
+  // INTERA, esattamente al centro del pannello, con una banda nera dove avanza spazio.
+  const topSteps = buildCroppedSteps(topCrops, totalDuration, OUTPUT_RESOLUTION.width, topHeight, `${prefix}top`, "fit");
 
   const steps = [
-    // Webcam: crop che segue nel tempo il segmento attivo, nessuno zoom EDL (l'area è già ravvicinata di suo).
+    // Webcam: cambia solo quando cambia chi parla (stacco netto), nessuno zoom.
     ...topSteps,
     // Contenuto principale: crop statico centrato dell'intero frame sorgente.
     `[0:v]crop=w=${bottom.width}:h=${bottom.height}:x=${bottom.x}:y=${bottom.y}[${prefix}bmain]`,
@@ -119,51 +80,42 @@ function buildSplitVerticalSteps(
     const patchLabel = `${prefix}bpatch${i}`;
     const nextLabel = `${prefix}bmain${i}`;
     steps.push(`[${lastLabel}]split=2[${lastLabel}_keep][${lastLabel}_src]`);
-    steps.push(`[${lastLabel}_src]crop=w=${region.width}:h=${region.height}:x=${region.x}:y=${region.y},boxblur=24:3[${patchLabel}]`);
+    steps.push(
+      `[${lastLabel}_src]crop=w=${region.width}:h=${region.height}:x=${region.x}:y=${region.y},` +
+        `boxblur=${blurRadiusFor(region)}:3[${patchLabel}]`,
+    );
     steps.push(`[${lastLabel}_keep][${patchLabel}]overlay=${region.x}:${region.y}[${nextLabel}]`);
     lastLabel = nextLabel;
   });
 
+  // Contenuto: scalato e basta, nessuno zoom — l'inquadratura del gioco/della reaction resta
+  // identica per tutta la clip.
   steps.push(
-    `[${lastLabel}]crop=w='trunc(iw/(${zoomExpression})/2)*2':h='trunc(ih/(${zoomExpression})/2)*2':x='(iw-out_w)/2':y='(ih-out_h)/2'[${prefix}bzoomed]`,
-    `[${prefix}bzoomed]scale=${OUTPUT_RESOLUTION.width}:${bottomHeight}:flags=lanczos,setsar=1[${prefix}bottom]`,
+    `[${lastLabel}]scale=${OUTPUT_RESOLUTION.width}:${bottomHeight}:flags=lanczos,setsar=1[${prefix}bottom]`,
     `[${prefix}top][${prefix}bottom]vstack=inputs=2[${prefix}scaled]`,
   );
 
   return steps;
 }
 
+// Sotto questa soglia (px) una regione da sfocare viene scartata: una striscia sottile di webcam
+// che sborda nel pannello contenuto non vale la pena di essere sfocata, e ritagli minuscoli
+// creano solo problemi al filtro (vedi blurRadiusFor).
+const MIN_BLUR_REGION_PX = 16;
+
+/** Raggio massimo di boxblur, usato quando la regione è abbastanza grande da reggerlo. */
+const MAX_BLUR_RADIUS_PX = 24;
+
 /**
- * Layout "mixed" (vedi face-tracker.ts): la scena sorgente cambia dentro la stessa clip, quindi
- * un unico layout fisso per tutta la durata romperebbe i tratti dove non vale più. Costruisce
- * ENTRAMBE le composizioni per l'intera durata (base "single" + split_vertical, con label
- * separate per non collidere) e sovrappone lo split SOLO nelle finestre `splitCrops` — fuori da
- * quelle finestre resta visibile la base. Costa il doppio in calcoli ffmpeg rispetto a un
- * layout puro, accettabile per la correttezza del risultato.
+ * Raggio di sfocatura compatibile con la dimensione della regione: ffmpeg rifiuta un boxblur il
+ * cui raggio superi metà del lato più corto ("Failed to configure input pad on Parsed_boxblur",
+ * render fallito). Bug reale osservato su una clip vera, dove la webcam sbordava nel pannello
+ * contenuto per soli 13 pixel e il raggio fisso di 24 faceva fallire l'intero render.
  */
-function buildMixedSteps(layout: Extract<Layout, { type: "mixed" }>, zoomExpression: string, totalDuration: number): string[] {
-  const baseSteps = layout.backgroundFill
-    ? buildSingleWithBackgroundSteps(layout.singleCrops, zoomExpression, totalDuration, "base_")
-    : buildSingleCropSteps(layout.singleCrops, zoomExpression, totalDuration, "base_");
-
-  const splitLayout: Extract<Layout, { type: "split_vertical" }> = {
-    type: "split_vertical",
-    topCrops: layout.splitCrops,
-    bottom: layout.bottom,
-    topRatio: layout.topRatio,
-    blurRegions: layout.blurRegions,
-  };
-  const splitSteps = buildSplitVerticalSteps(splitLayout, zoomExpression, totalDuration, "sv_");
-
-  const enableExpr = layout.splitCrops.map((c) => `between(t,${c.startSeconds.toFixed(3)},${c.endSeconds.toFixed(3)})`).join("+");
-
-  return [...baseSteps, ...splitSteps, `[base_scaled][sv_scaled]overlay=x=0:y=0:enable='${enableExpr}'[scaled]`];
+function blurRadiusFor(region: CropWindow): number {
+  const maxForRegion = Math.floor(Math.min(region.width, region.height) / 2) - 1;
+  return Math.max(1, Math.min(MAX_BLUR_RADIUS_PX, maxForRegion));
 }
-
-// Sotto questa soglia (px) una regione da sfocare viene scartata invece di generare un crop
-// ffmpeg minuscolo: un ritaglio troppo piccolo non serve a nulla, e arrotondare le coordinate
-// PRIMA di derivarne la larghezza (vedi sotto) evita comunque lo zero, ma teniamo un margine.
-const MIN_BLUR_REGION_PX = 4;
 
 /**
  * Interseca `region` (coordinate sorgente) con il rettangolo `bottom`, tradotto in coordinate
@@ -212,13 +164,23 @@ function buildCroppedSteps(
   outputWidth: number,
   outputHeight: number,
   label: string,
+  mode: "fill" | "fit" = "fill",
 ): string[] {
   const filled = fillCropGaps(crops, totalDuration);
   const collapsed = collapseIdenticalCrops(filled);
 
+  // "fit": l'immagine viene rimpicciolita finché ci sta TUTTA nel riquadro e poi centrata con
+  // bande nere sui lati che avanzano (niente ritaglio, centratura esatta). "fill": scalata
+  // esattamente alle dimensioni richieste, come prima.
+  const scaleFilter =
+    mode === "fit"
+      ? `scale=${outputWidth}:${outputHeight}:force_original_aspect_ratio=decrease:flags=lanczos,` +
+        `pad=${outputWidth}:${outputHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`
+      : `scale=${outputWidth}:${outputHeight}:flags=lanczos,setsar=1`;
+
   if (collapsed.length === 1) {
     const c = collapsed[0]!.crop;
-    return [`[0:v]crop=w=${c.width}:h=${c.height}:x=${c.x}:y=${c.y},scale=${outputWidth}:${outputHeight}:flags=lanczos,setsar=1[${label}]`];
+    return [`[0:v]crop=w=${c.width}:h=${c.height}:x=${c.x}:y=${c.y},${scaleFilter}[${label}]`];
   }
 
   const steps: string[] = [];
@@ -228,7 +190,7 @@ function buildCroppedSteps(
     const c = seg.crop;
     steps.push(
       `[0:v]trim=start=${seg.startSeconds.toFixed(3)}:end=${seg.endSeconds.toFixed(3)},setpts=PTS-STARTPTS,` +
-        `crop=w=${c.width}:h=${c.height}:x=${c.x}:y=${c.y},scale=${outputWidth}:${outputHeight}:flags=lanczos,setsar=1[${segLabel}]`,
+        `crop=w=${c.width}:h=${c.height}:x=${c.x}:y=${c.y},${scaleFilter}[${segLabel}]`,
     );
     segLabels.push(`[${segLabel}]`);
   });

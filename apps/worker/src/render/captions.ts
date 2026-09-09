@@ -93,7 +93,7 @@ function buildKaraokeEvents(
       const escaped = escapeAssText(text);
       return isHighlighted ? `{\\k${durationCentis}}{\\c${hexToAssColor(style.highlightColor)}}${escaped}{\\r} ` : `{\\k${durationCentis}}${escaped} `;
     });
-    const override = style.position === "smart" ? resolveSmartOverride(chunk.start, layout) : "";
+    const override = style.position === "smart" ? resolveSmartOverride(layout) : "";
     return `Dialogue: 0,${formatAssTime(chunk.start)},${formatAssTime(chunk.end)},Default,,0,0,0,,${override}${parts.join("")}`;
   });
 }
@@ -105,14 +105,8 @@ function buildKaraokeEvents(
  * né il volto né il contenuto), come visto in Shorts di riferimento reali. Altrimenti nessun
  * override: resta il fallback (basso) definito nell'header.
  */
-function resolveSmartOverride(timeSeconds: number, layout: Layout | undefined): string {
+function resolveSmartOverride(layout: Layout | undefined): string {
   if (!layout || layout.type === "single") return "";
-
-  const isSplitActive =
-    layout.type === "split_vertical"
-      ? true
-      : layout.splitCrops.some((c) => timeSeconds >= c.startSeconds && timeSeconds < c.endSeconds);
-  if (!isSplitActive) return "";
 
   const x = Math.round(OUTPUT_RESOLUTION.width / 2);
   const y = Math.round(OUTPUT_RESOLUTION.height * layout.topRatio);

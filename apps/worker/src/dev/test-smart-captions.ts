@@ -22,10 +22,8 @@ const segments: TranscriptSegment[] = [
 ];
 
 const layout: Layout = {
-  type: "mixed",
-  singleCrops: [{ startSeconds: 0, endSeconds: 5, crop: { x: 0, y: 0, width: 100, height: 100 } }],
-  backgroundFill: false,
-  splitCrops: [{ startSeconds: 0, endSeconds: 2, crop: { x: 0, y: 0, width: 100, height: 100 } }],
+  type: "split_vertical",
+  topCrops: [{ startSeconds: 0, endSeconds: 5, crop: { x: 0, y: 0, width: 100, height: 100 } }],
   bottom: { x: 0, y: 0, width: 100, height: 100 },
   topRatio: 0.35,
   blurRegions: [],

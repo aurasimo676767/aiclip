@@ -14,48 +14,30 @@ export interface TimedCrop {
 }
 
 /**
- * Layout del crop verticale per una clip. Entrambe le varianti sono composte da uno o più
- * segmenti temporali (`TimedCrop[]`): se la webcam/lo speaker cambia posizione durante la
- * clip (es. il feed attivo passa da una persona all'altra), il crop la segue invece di
- * restare fisso su dove si trovava all'inizio.
+ * Layout del crop verticale per una clip. Due sole varianti, entrambe volutamente STATICHE
+ * nell'inquadratura: nessuno zoom, nessun crop che insegue un volto nel tempo.
  *
- * - "single": crop 9:16 che segue nel tempo lo speaker/soggetto principale. Se il volto non
- *   riempie abbastanza il frame sorgente da poter restare centrato senza sforare i bordi (es.
- *   una webcam grande ma non centrata verticalmente: il crop "a piena inquadratura" finiva
- *   forzato in alto, mostrando sopra il volto un pezzo qualunque — spesso un'altra webcam o
- *   contenuto irrilevante — invece di restare centrato), `backgroundFill` è true: il crop del
- *   volto va mostrato più piccolo e centrato, con il resto del canvas riempito da uno sfondo
- *   NITIDO (non sfocato) ricavato dall'INTERO frame sorgente (spesso è proprio lo schermo/gioco
- *   reagito, normalmente invisibile quando il volto occupa tutto lo schermo) — vedi build-video-filter.ts.
- * - "split_vertical": due fasce impilate — webcam in alto (segue nel tempo), contenuto
- *   principale in basso (sempre centrato sul frame intero, mai su un volto — vedi
- *   reaction-cam-face-tracker.ts per il perché). `blurRegions` (coordinate del video
- *   sorgente) sono le zone note contenere una webcam reale: il contenuto in basso è un crop
- *   centrato dell'INTERO frame sorgente, quindi senza sfocarle mostrerebbe due volte la
- *   stessa webcam — una volta ravvicinata in alto, una volta piccola (e spesso tagliata) in
- *   basso, dentro l'area "contenuto".
- * - "mixed": la sorgente cambia scena OBS dentro la STESSA clip (es. da "webcam piccola +
- *   contenuto" a "webcam a schermo intero" e viceversa) — un singolo layout fisso per tutta la
- *   clip produrrebbe fotogrammi rotti nei tratti dove l'assunzione non vale più (visto in un
- *   caso reale: metà "content" pane che mostrava un pezzo casuale di volto zoomato invece del
- *   contenuto reagito). `singleCrops`+`backgroundFill` coprono l'INTERA durata come base (stessa
- *   logica del tipo "single"); `splitCrops` copre SOLO le finestre temporali in cui è stato
- *   trovato un vero pattern reaction-cam per QUEL segmento specifico (non riusato da un vicino
- *   oltre un singolo miss isolato) — il render sovrappone lo split_vertical sopra la base solo
- *   durante quelle finestre, lasciando vedere la base altrove. Vedi build-video-filter.ts.
+ * Le versioni precedenti seguivano il volto ricalcolando il crop ogni secondo (con media mobile
+ * per smussare) e passavano a un primo piano a schermo intero nei momenti di reazione forte. In
+ * pratica il risultato era un'inquadratura che non stava mai ferma — il rilevatore sposta il
+ * riquadro di qualche pixel a ogni campionamento anche su una persona immobile, e il crop
+ * inseguiva quel rumore — e un primo piano quasi mai centrato bene. Rimosso del tutto.
+ *
+ * - "single": un unico crop 9:16 STATICO del frame sorgente, per l'intera clip. Usato quando non
+ *   c'è nessuna webcam riconoscibile (gameplay puro, contenuto solo visivo). Un solo CropWindow,
+ *   non una sequenza temporale: l'immobilità è garantita dal tipo, non da una convenzione.
+ * - "split_vertical": due fasce impilate — webcam in alto, contenuto principale in basso. Il
+ *   contenuto è un crop STATICO centrato del frame intero (mai centrato su un volto, mai
+ *   zoomato). `topCrops` è una sequenza temporale solo perché la webcam mostrata cambia quando
+ *   cambia CHI PARLA: dentro il turno di una stessa persona il crop resta identico, quindi lo
+ *   stacco è un taglio netto e non un movimento continuo. `blurRegions` (coordinate del video
+ *   sorgente) sono le zone note contenere una webcam: il pannello in basso è un crop dell'INTERO
+ *   frame, quindi senza sfocarle mostrerebbe due volte la stessa webcam — una in alto e una
+ *   piccola (spesso tagliata) dentro l'area "contenuto".
  */
 export type Layout =
-  | { type: "single"; crops: TimedCrop[]; backgroundFill: boolean }
-  | { type: "split_vertical"; topCrops: TimedCrop[]; bottom: CropWindow; topRatio: number; blurRegions: CropWindow[] }
-  | {
-      type: "mixed";
-      singleCrops: TimedCrop[];
-      backgroundFill: boolean;
-      splitCrops: TimedCrop[];
-      bottom: CropWindow;
-      topRatio: number;
-      blurRegions: CropWindow[];
-    };
+  | { type: "single"; crop: CropWindow }
+  | { type: "split_vertical"; topCrops: TimedCrop[]; bottom: CropWindow; topRatio: number; blurRegions: CropWindow[] };
 
 /**
  * Astrazione sul tracking di volto/speaker usato per decidere il layout del crop verticale.

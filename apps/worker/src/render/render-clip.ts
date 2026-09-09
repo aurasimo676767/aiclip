@@ -4,7 +4,6 @@ import type { RankedClip, TranscriptSegment, TemplateConfig } from "@clipforge/s
 import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import type { FaceTracker, Layout, TimedCrop } from "../face-tracking/face-tracker.js";
-import { buildZoomExpression } from "./edl-executor.js";
 import { buildAssSubtitles } from "./captions.js";
 import { buildVideoFilterComplex } from "./build-video-filter.js";
 import { detectSilences, computeKeepSegments, buildTimeRemap, type TimeSegment } from "./silence.js";
@@ -61,12 +60,6 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
       .map((e) => e.word.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase()),
   );
 
-  const remappedEvents = clip.edl.events
-    .map((event) => ({ ...event, time: timeRemap(event.time - clip.start) }))
-    .filter((event) => event.time >= 0 && event.time <= finalDuration);
-
-  const zoomExpression = buildZoomExpression(remappedEvents, template.zoomIntensity);
-
   const rawLayout = await faceTracker.computeLayout({
     sourceVideoPath,
     sourceWidth: sourceProbe.width,
@@ -84,7 +77,6 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
 
   const filterComplex = buildVideoFilterComplex({
     layout,
-    zoomExpression,
     assSubtitlesPath: assPath,
     showProgressBar: template.showProgressBar,
     clipDurationSeconds: finalDuration,
@@ -141,27 +133,9 @@ function segmentIsShorterThanClip(segment: TimeSegment, clipDuration: number): b
  * ma il filtergraph ffmpeg gira sul file GIÀ tagliato (senza silenzi), con `t` che riparte da 0.
  */
 function remapLayout(layout: Layout, timeRemap: (t: number) => number, finalDuration: number): Layout {
-  if (layout.type === "single") {
-    return { type: "single", crops: remapTimedCrops(layout.crops, timeRemap, finalDuration), backgroundFill: layout.backgroundFill };
-  }
-  if (layout.type === "split_vertical") {
-    return { ...layout, topCrops: remapTimedCrops(layout.topCrops, timeRemap, finalDuration) };
-  }
-
-  // "mixed": singleCrops copre sempre l'intera durata (stesso trattamento di "single"), ma
-  // splitCrops è volutamente sparso — se il taglio dei silenzi fa collassare TUTTE le sue
-  // finestre, non ha senso forzarne una a coprire l'intera clip (comportamento pensato per
-  // singleCrops/topCrops, che coprono sempre tutto): la clip risultante non ha più bisogno del
-  // layer split_vertical, la base "single" basta da sola.
-  const singleCrops = remapTimedCrops(layout.singleCrops, timeRemap, finalDuration);
-  const splitCrops = layout.splitCrops
-    .map((c) => ({ startSeconds: timeRemap(c.startSeconds), endSeconds: timeRemap(c.endSeconds), crop: c.crop }))
-    .filter((c) => c.endSeconds > c.startSeconds + 0.01);
-
-  if (splitCrops.length === 0) {
-    return { type: "single", crops: singleCrops, backgroundFill: layout.backgroundFill };
-  }
-  return { ...layout, singleCrops, splitCrops };
+  // "single" è un crop statico: non ha confini temporali da rimappare.
+  if (layout.type === "single") return layout;
+  return { ...layout, topCrops: remapTimedCrops(layout.topCrops, timeRemap, finalDuration) };
 }
 
 function remapTimedCrops(crops: TimedCrop[], timeRemap: (t: number) => number, finalDuration: number): TimedCrop[] {
