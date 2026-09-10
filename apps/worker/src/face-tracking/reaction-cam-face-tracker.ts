@@ -7,7 +7,7 @@ import { centeredCrop } from "./crop-geometry.js";
 import { CenterCropFaceTracker } from "./center-crop-face-tracker.js";
 import { detectSceneCuts } from "./scene-detect.js";
 import { detectWebcamRect } from "./webcam-rect.js";
-import { detectContentRegion } from "./content-region.js";
+import { detectContentBounds, detectContentRegion } from "./content-region.js";
 import { logger } from "../lib/logger.js";
 
 const SEGMENT_LENGTH_SECONDS = 1.5; // granularità con cui si ricontrolla CHI sta parlando. Non influenza più la stabilità dell'inquadratura (il crop di una persona è fisso, vedi sotto), quindi non serve scendere a 1s come prima: 1.5s dimezza i frame da estrarre a parità di reattività percepita
@@ -236,6 +236,11 @@ async function perSceneCompositions(
       { length: RECT_SAMPLE_COUNT },
       (_, k) => clipStartSeconds + (clipDuration * (k + 0.5)) / RECT_SAMPLE_COUNT,
     );
+    // NOTA: qui si usa detectContentRegion (finestra con le proporzioni del pannello) e NON
+    // detectContentBounds come nel layout a clip intera. I bordi del contenuto vengono calcolati una
+    // volta sola per tutta la clip, ma in un video montato ogni scena inquadra una cosa diversa:
+    // provato, ne usciva una fascia 1920x540 buona per nessuna scena e il pannello restava quasi
+    // nero. La finestra con le proporzioni del pannello e' invece un compromesso che regge su tutte.
     const region = await detectContentRegion(sourceVideoPath, clipSamples, sourceWidth, sourceHeight, bottomAspect, [canonicalCam]);
     content = region ?? centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
   }
@@ -450,17 +455,17 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const topRatio = topRatioForWebcam([...cropByAnchor.values()]);
     const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - topRatio));
     // Inquadratura del contenuto: dove sta davvero succedendo qualcosa, non il centro geometrico
-    // del frame (vedi content-region.ts). Le webcam sono escluse dal conteggio: si muovono anche
-    // loro, ma il pannello sotto deve inquadrare il contenuto, non di nuovo una webcam.
-    const contentRegion = await detectContentRegion(
-      sourceVideoPath,
-      sampleTimes,
-      sourceWidth,
-      sourceHeight,
-      bottomAspect,
-      [...cropByAnchor.values()],
-    );
-    const bottom = contentRegion ?? centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
+    // del frame. Si prendono i BORDI VERI del contenuto (detectContentBounds), senza vincolo di
+    // proporzione, e il render lo mostra intero dentro il pannello. Prima si cercava una finestra
+    // con le proporzioni del pannello (detectContentRegion): su un pannello quasi quadrato quel
+    // vincolo obbligava la finestra a essere larga mezzo schermo anche quando il contenuto era una
+    // colonna stretta — verificato su una reaction a Instagram dentro un browser, dove il pannello
+    // mostrava il video a sinistra e per il resto commenti e cornice del browser.
+    // Le webcam sono escluse dal conteggio: si muovono anche loro, ma non sono il contenuto.
+    const contentBounds = await detectContentBounds(sourceVideoPath, sampleTimes, sourceWidth, sourceHeight, [
+      ...cropByAnchor.values(),
+    ]);
+    const bottom = contentBounds ?? centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
     // Ogni ancora valida è, per definizione, un overlay webcam fisso nel frame sorgente — e
     // il pannello "contenuto" sotto è un crop dell'INTERO frame sorgente, quindi la mostra
     // di nuovo, piccola (e spesso tagliata dal bordo del crop). Sfochiamo quelle zone nel

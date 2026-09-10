@@ -116,9 +116,15 @@ function buildCompositionSteps(composition: SceneComposition, inLabel: string, o
     steps.push(`[${last}k][${prefix}patch]overlay=${blur.x}:${blur.y}[${prefix}conb]`);
     last = `${prefix}conb`;
   }
+  // Contenuto intero dentro il pannello, con dietro lo stesso frame sfocato: due bande nere su un
+  // telefono sono due buchi, lo sfondo sfocato no. Stesso trattamento del pannello "contenuto" nel
+  // layout a clip intera (vedi buildSplitVerticalSteps).
   steps.push(
-    `[${last}]scale=${W}:${bottomHeight}:force_original_aspect_ratio=decrease:flags=lanczos,` +
-      `pad=${W}:${bottomHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[${prefix}bottom]`,
+    `[${last}]split=2[${prefix}bfg][${prefix}bbgsrc]`,
+    `[${prefix}bbgsrc]scale=${W}:${bottomHeight}:force_original_aspect_ratio=increase:flags=bilinear,` +
+      `crop=${W}:${bottomHeight},boxblur=${FIT_BACKGROUND_BLUR_PX}:2,setsar=1[${prefix}bbg]`,
+    `[${prefix}bfg]scale=${W}:${bottomHeight}:force_original_aspect_ratio=decrease:flags=lanczos,setsar=1[${prefix}bfgs]`,
+    `[${prefix}bbg][${prefix}bfgs]overlay=(W-w)/2:(H-h)/2[${prefix}bottom]`,
     `[${prefix}top][${prefix}bottom]vstack=inputs=2[${outLabel}]`,
   );
   return steps;
@@ -169,10 +175,21 @@ function buildSplitVerticalSteps(layout: Extract<Layout, { type: "split_vertical
     lastLabel = nextLabel;
   });
 
-  // Contenuto: scalato e basta, nessuno zoom — l'inquadratura del gioco/della reaction resta
-  // identica per tutta la clip.
+  // Contenuto: mostrato INTERO dentro il pannello, con dietro lo stesso frame allargato e sfocato
+  // a riempire quello che avanza. Nessuno zoom: l'inquadratura resta identica per tutta la clip.
+  //
+  // Prima si scalava e basta a `width x bottomHeight`: funzionava solo perché il crop veniva
+  // cercato con ESATTAMENTE le proporzioni del pannello, e quel vincolo era il problema — su un
+  // pannello quasi quadrato costringeva a un ritaglio largo mezzo schermo, che su una reaction a
+  // Instagram dentro un browser riempiva il pannello di commenti e cornice invece del video. Ora il
+  // crop segue i bordi veri del contenuto (vedi detectContentBounds) e ha proporzioni qualsiasi,
+  // quindi va contenuto, non stirato.
   steps.push(
-    `[${lastLabel}]scale=${OUTPUT_RESOLUTION.width}:${bottomHeight}:flags=lanczos,setsar=1[${prefix}bottom]`,
+    `[${lastLabel}]split=2[${prefix}bfg][${prefix}bbgsrc]`,
+    `[${prefix}bbgsrc]scale=${OUTPUT_RESOLUTION.width}:${bottomHeight}:force_original_aspect_ratio=increase:flags=bilinear,` +
+      `crop=${OUTPUT_RESOLUTION.width}:${bottomHeight},boxblur=${FIT_BACKGROUND_BLUR_PX}:2,setsar=1[${prefix}bbg]`,
+    `[${prefix}bfg]scale=${OUTPUT_RESOLUTION.width}:${bottomHeight}:force_original_aspect_ratio=decrease:flags=lanczos,setsar=1[${prefix}bfgs]`,
+    `[${prefix}bbg][${prefix}bfgs]overlay=(W-w)/2:(H-h)/2[${prefix}bottom]`,
     `[${prefix}top][${prefix}bottom]vstack=inputs=2[${prefix}scaled]`,
   );
 

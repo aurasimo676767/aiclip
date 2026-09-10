@@ -202,3 +202,104 @@ function toLuma(bgr: Buffer, width: number, height: number): Float32Array {
   }
   return luma;
 }
+
+/**
+ * Quanta parte dell'attività totale deve restare DENTRO il rettangolo scelto. Senza questo vincolo
+ * vincerebbe sempre un francobollo iper-denso (il punto che si muove di più), non il blocco di
+ * contenuto.
+ */
+const MIN_BOUNDS_ACTIVITY_SHARE = 0.35;
+
+/** Sotto questa frazione di schermo il rettangolo non è credibile come "contenuto". */
+const MIN_BOUNDS_SCREEN_SHARE = 0.04;
+
+/** Passi della ricerca: pochi, la mappa di analisi è piccola e la scansione resta istantanea. */
+const BOUNDS_SIZE_STEPS = 10;
+const BOUNDS_POSITION_STEP = 6;
+
+/**
+ * I BORDI del contenuto in movimento, di proporzioni QUALSIASI — a differenza di
+ * detectContentRegion, che cerca una finestra con le proporzioni del pannello di destinazione.
+ *
+ * Perché non basta quella: il vincolo di proporzione, su un pannello quasi quadrato, obbliga la
+ * finestra a essere larga mezzo schermo anche quando il contenuto guardato è una colonna stretta.
+ * Verificato su una reaction a Instagram dentro un browser: il pannello mostrava il reel a sinistra
+ * e per il resto i commenti e la cornice del browser.
+ *
+ * Perché si massimizza la DENSITÀ di attività e non l'estensione: prendere il rettangolo che
+ * contiene tutti i pixel attivi non funziona — provato, e su quella stessa reaction i commenti che
+ * scorrono lo allargavano al 77% dello schermo, peggio di prima. Il contenuto vero è invece
+ * attività FITTA su un'area compatta, mentre commenti e chat sono attività rada sparsa: a parità di
+ * attività racchiusa vince quindi il rettangolo più piccolo che la contiene.
+ *
+ * Ritorna null se non ne esce niente di sensato: decide il chiamante.
+ */
+export async function detectContentBounds(
+  videoPath: string,
+  sampleTimes: number[],
+  sourceWidth: number,
+  sourceHeight: number,
+  excludeRegions: CropWindow[],
+): Promise<CropWindow | null> {
+  const scale = ANALYSIS_WIDTH / sourceWidth;
+  const width = ANALYSIS_WIDTH;
+  const height = Math.max(2, Math.round(sourceHeight * scale));
+
+  const activity = await buildActivityMap(videoPath, sampleTimes, width, height);
+  if (!activity) return null;
+
+  // Le webcam si muovono quanto e più del contenuto: senza azzerarle il rettangolo va su di loro.
+  for (const region of excludeRegions) {
+    const rx0 = Math.max(0, Math.floor(region.x * scale));
+    const ry0 = Math.max(0, Math.floor(region.y * scale));
+    const rx1 = Math.min(width - 1, Math.ceil((region.x + region.width) * scale));
+    const ry1 = Math.min(height - 1, Math.ceil((region.y + region.height) * scale));
+    for (let y = ry0; y <= ry1; y++) {
+      for (let x = rx0; x <= rx1; x++) activity[y * width + x] = 0;
+    }
+  }
+
+  // Stessa scelta di detectContentRegion: si contano i pixel ATTIVI invece di sommare l'attività,
+  // così una chat che scorre (tantissima attività su poche righe) non pesa più di un video in play.
+  const threshold = activeThreshold(activity);
+  const activeMap = new Float32Array(activity.length);
+  for (let i = 0; i < activity.length; i++) activeMap[i] = activity[i]! > threshold ? 1 : 0;
+
+  const integral = buildIntegralImage(activeMap, width, height);
+  const total = regionSum(integral, width, 0, 0, width - 1, height - 1);
+  if (total <= 0) return null;
+  const required = total * MIN_BOUNDS_ACTIVITY_SHARE;
+
+  let best: { x: number; y: number; w: number; h: number; density: number } | null = null;
+  for (let wi = BOUNDS_SIZE_STEPS; wi >= 2; wi--) {
+    const winWidth = Math.round((width * wi) / BOUNDS_SIZE_STEPS);
+    for (let hi = BOUNDS_SIZE_STEPS; hi >= 2; hi--) {
+      const winHeight = Math.round((height * hi) / BOUNDS_SIZE_STEPS);
+      const area = winWidth * winHeight;
+      // Un rettangolo più piccolo del migliore trovato non potrà batterlo in densità se non
+      // racchiude comunque l'attività richiesta: il minimo resta `required`.
+      if (best && required / area <= best.density && area < winWidth * winHeight) continue;
+      for (let y = 0; y + winHeight <= height; y += BOUNDS_POSITION_STEP) {
+        for (let x = 0; x + winWidth <= width; x += BOUNDS_POSITION_STEP) {
+          const sum = regionSum(integral, width, x, y, x + winWidth - 1, y + winHeight - 1);
+          if (sum < required) continue;
+          const density = sum / area;
+          if (!best || density > best.density) best = { x, y, w: winWidth, h: winHeight, density };
+        }
+      }
+    }
+  }
+  if (!best) return null;
+
+  const rect: CropWindow = {
+    x: Math.max(0, Math.round(best.x / scale)),
+    y: Math.max(0, Math.round(best.y / scale)),
+    width: Math.min(sourceWidth, Math.round(best.w / scale)),
+    height: Math.min(sourceHeight, Math.round(best.h / scale)),
+  };
+  const screenShare = (rect.width * rect.height) / (sourceWidth * sourceHeight);
+  if (screenShare < MIN_BOUNDS_SCREEN_SHARE) return null;
+
+  logger.info("Bordi del contenuto individuati", { rect, quotaSchermo: screenShare.toFixed(2) });
+  return rect;
+}
