@@ -151,6 +151,31 @@ const MIN_ANCHOR_SEGMENT_COVERAGE_RATIO = 0.4; // un volto deve ricomparire in a
  */
 const SCENE_SUBJECT_MIN_HEIGHT_RATIO = 0.25;
 
+/**
+ * Per quanti secondi di fila la webcam puo' non essere riconosciuta prima di concludere che la
+ * scena dello streamer sia proprio cambiata. Conta il tratto CONTIGUO, non il totale: un
+ * rilevamento che fallisce qua e la' (volto girato, mano davanti alla bocca) produce buchi da un
+ * segmento, e per quelli il layout unico regge benissimo riusando l'ultima posizione valida. Un
+ * buco lungo invece e' un'altra inquadratura dello stream, dove quel ritaglio non inquadra niente.
+ */
+const MAX_ANCHOR_GAP_SECONDS = 2;
+
+/** Il tratto contiguo piu' lungo in cui nessun segmento ha un'ancora. */
+function longestAnchorGap(decisions: SegmentDecision[]): { startSeconds: number; endSeconds: number; seconds: number } | null {
+  let best: { startSeconds: number; endSeconds: number; seconds: number } | null = null;
+  let runStart: number | null = null;
+  for (const d of decisions) {
+    if (d.anchor === null) {
+      if (runStart === null) runStart = d.startSeconds;
+      const seconds = d.endSeconds - runStart;
+      if (!best || seconds > best.seconds) best = { startSeconds: runStart, endSeconds: d.endSeconds, seconds };
+    } else {
+      runStart = null;
+    }
+  }
+  return best;
+}
+
 /** Fotogrammi campionati DENTRO una scena per cercarci la cam e il contenuto. Poche: le scene sono corte. */
 const SCENE_SAMPLE_COUNT = 6;
 
@@ -188,6 +213,7 @@ async function perSceneCompositions(
     subject: FaceBox | null;
     isSubjectShot: boolean;
     cam: CropWindow | null;
+    faces: FaceBox[];
   }
 
   const raw: RawScene[] = [];
@@ -198,26 +224,32 @@ async function perSceneCompositions(
     // Il volto PIU' GRANDE visto nei segmenti che cadono in questa scena, non la media: dentro una
     // scena il soggetto e' sempre lo stesso, e mediare con qualche rilevamento spurio piu' piccolo
     // sposterebbe l'inquadratura senza motivo.
-    let subject: FaceBox | null = null;
+    const faces: FaceBox[] = [];
     for (const seg of segments) {
       if (seg.endSeconds <= startSeconds + 0.01 || seg.startSeconds >= endSeconds - 0.01) continue;
-      for (const meta of seg.allFaces) {
-        if (!subject || meta.avg.height > subject.height) subject = meta.avg;
-      }
+      for (const meta of seg.allFaces) faces.push(meta.avg);
     }
+    let subject: FaceBox | null = null;
+    for (const face of faces) if (!subject || face.height > subject.height) subject = face;
     const isSubjectShot = subject !== null && subject.height >= sourceHeight * SCENE_SUBJECT_MIN_HEIGHT_RATIO;
 
+    // Il riquadro cam si cerca attorno al volto piu' PICCOLO e defilato della scena, non attorno al
+    // piu' grande: in una scena di condivisione schermo il volto piu' grande e' quello dentro il
+    // video reagito, la cam dello streamer e' l'altro.
+    const camFace = faces
+      .filter((f) => isWebcamLike(f, sourceWidth, sourceHeight))
+      .sort((a, b) => a.height - b.height)[0];
     let cam: CropWindow | null = null;
-    if (subject && !isSubjectShot) {
+    if (camFace) {
       const duration = Math.max(0.1, endSeconds - startSeconds);
       const sampleTimes = Array.from(
         { length: SCENE_SAMPLE_COUNT },
         (_, k) => clipStartSeconds + startSeconds + (duration * (k + 0.5)) / SCENE_SAMPLE_COUNT,
       );
-      const found = await detectWebcamRect(sourceVideoPath, sampleTimes, subject, sourceWidth, sourceHeight);
+      const found = await detectWebcamRect(sourceVideoPath, sampleTimes, camFace, sourceWidth, sourceHeight);
       if (found && !rejectionReasonForWebcamRect(found, sourceWidth, sourceHeight)) cam = found;
     }
-    raw.push({ startSeconds, endSeconds, subject, isSubjectShot, cam });
+    raw.push({ startSeconds, endSeconds, subject, isSubjectShot, cam, faces });
   }
 
   // UN SOLO riquadro cam per tutta la clip, non uno per scena. Le scene con la cam sono lo stesso
@@ -246,20 +278,25 @@ async function perSceneCompositions(
   }
 
   const scenes: Scene[] = raw.map((r) => {
-    // 1) Soggetto a schermo intero: ritaglio 9:16 centrato su di lui, riempie lo schermo.
-    if (r.isSubjectShot && r.subject) {
-      const crop = centeredCrop(r.subject.x + r.subject.width / 2, sourceHeight / 2, sourceWidth, sourceHeight, fullAspect);
-      return { startSeconds: r.startSeconds, endSeconds: r.endSeconds, composition: { kind: "crop", crop } };
-    }
-    // 2) La cam della clip e' visibile anche in questa scena: il template, cam sopra e contenuto
-    //    sotto. Basta che ci sia un volto dentro il riquadro noto — non serve che il rilevamento
-    //    del riquadro riesca di nuovo proprio qui.
-    if (canonicalCam && content && r.subject && faceCenterInside(r.subject, canonicalCam)) {
+    // 1) La cam della clip e' visibile anche in questa scena: il template, cam sopra e contenuto
+    //    sotto. Basta che un volto qualsiasi cada dentro il riquadro noto — non serve che il
+    //    rilevamento del riquadro riesca di nuovo proprio qui.
+    //
+    //    Questo controllo viene PRIMA di quello sul soggetto a schermo intero, e l'ordine conta: in
+    //    una reaction il volto piu' grande della scena e' spesso quello dentro il video reagito
+    //    (un TikTok a mezzo schermo), quindi con l'ordine opposto la scena veniva ritagliata sulla
+    //    faccia del TikTok e lo streamer spariva — il contrario di una reaction.
+    if (canonicalCam && content && r.faces.some((f) => faceCenterInside(f, canonicalCam))) {
       return {
         startSeconds: r.startSeconds,
         endSeconds: r.endSeconds,
         composition: { kind: "split", cam: canonicalCam, content, topRatio },
       };
+    }
+    // 2) Soggetto a schermo intero senza cam separata: ritaglio 9:16 centrato su di lui.
+    if (r.isSubjectShot && r.subject) {
+      const crop = centeredCrop(r.subject.x + r.subject.width / 2, sourceHeight / 2, sourceWidth, sourceHeight, fullAspect);
+      return { startSeconds: r.startSeconds, endSeconds: r.endSeconds, composition: { kind: "crop", crop } };
     }
     // 3) Niente cam e niente soggetto: gameplay/schermo a tutto campo. Si mostra INTERO su sfondo
     //    sfocato invece di ritagliarlo — cosa serva vedere dipende dal gioco, e un ritaglio
@@ -451,6 +488,43 @@ export class ReactionCamFaceTracker implements FaceTracker {
       return this.fallback.computeLayout(params);
     }
 
+
+    // La clip puo' contenere PIU' scene dello streamer, non una sola: qui succede quando lo
+    // streamer alterna "webcam a schermo intero" e "condivisione schermo con la cam in un angolo".
+    // Il layout unico per l'intera clip incolla allora il ritaglio della cam piccola anche sopra i
+    // tratti a webcam intera, dove quel rettangolo non inquadra niente — verificato su una clip
+    // reale, i primi 6 secondi mostravano un muro sfocato. In quel caso si passa al percorso che
+    // sceglie la composizione scena per scena. Si rinuncia al cambio di inquadratura per speaker
+    // dentro le scene, ma e' un prezzo minore rispetto a mezza clip inquadrata su un muro.
+    const gap = longestAnchorGap(decisions);
+    if (gap && gap.seconds > MAX_ANCHOR_GAP_SECONDS) {
+      // Un buco lungo puo' voler dire due cose OPPOSTE: la webcam c'e' ancora ma il detector non
+      // ha visto il volto (girato, coperto, di spalle), oppure lo stream ha proprio cambiato
+      // inquadratura e li' non c'e' nessuna webcam. Sulla sola durata non si distinguono — provato,
+      // e la soglia che sistemava una clip ne rompeva un'altra. Si guarda quindi la cosa giusta:
+      // il RIQUADRO dell'overlay e' ancora li' in quel tratto? Il riquadro e' un bordo fermo e
+      // marcato, si vede anche senza riconoscere nessun volto.
+      const gapSamples = Array.from(
+        { length: SCENE_SAMPLE_COUNT },
+        (_, k) => startSeconds + gap.startSeconds + ((gap.endSeconds - gap.startSeconds) * (k + 0.5)) / SCENE_SAMPLE_COUNT,
+      );
+      const mainAnchor = anchorGroups[0]!;
+      const known = cropByAnchor.get(mainAnchor)!;
+      const stillThere = await detectWebcamRect(sourceVideoPath, gapSamples, mainAnchor.avg, sourceWidth, sourceHeight);
+      const overlayPersists =
+        stillThere !== null &&
+        Math.abs(stillThere.x - known.x) <= SAME_RECT_TOLERANCE_PX &&
+        Math.abs(stillThere.y - known.y) <= SAME_RECT_TOLERANCE_PX;
+
+      if (!overlayPersists) {
+        logger.info("La scena dello streamer cambia dentro la clip: composizione scelta scena per scena", {
+          trattoSenzaWebcam: gap.seconds.toFixed(1) + "s",
+          durata: clipDuration.toFixed(1) + "s",
+        });
+        const scenes = await perSceneCompositions(sourceVideoPath, startSeconds, rawSegments, cutTimes, clipDuration, sourceWidth, sourceHeight);
+        if (scenes.length) return { type: "scenes", scenes };
+      }
+    }
 
     const topRatio = topRatioForWebcam([...cropByAnchor.values()]);
     const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - topRatio));
