@@ -118,35 +118,7 @@ function buildSingleWordEvents(
   highlightWords: Set<string>,
   layout: Layout | undefined,
 ): string[] {
-  const sorted = segments
-    .flatMap((seg) => seg.words)
-    .filter((w) => w.word.trim().length > 0 && w.end > w.start)
-    .sort((a, b) => a.start - b.start);
-  // Doppioni: i transcript salvati prima della correzione del provider hanno le parole sul confine
-  // fra due frasi ripetute due volte, con gli stessi tempi.
-  const deduped = sorted.filter((w, i) => {
-    const prev = sorted[i - 1];
-    return !prev || Math.abs(prev.start - w.start) > 0.05 || normalizeWord(prev.word) !== normalizeWord(w.word);
-  });
-  // Elisioni: Whisper spezza "l'acqua" in "l" + "'acqua" e "c'ho" in "c" + "'ho", che a una parola
-  // alla volta uscivano come "L", poi "'ACQUA". Si riuniscono in una parola sola.
-  const words: TranscriptWord[] = [];
-  for (const w of deduped) {
-    const prev = words[words.length - 1];
-    if (prev && /^['’]/.test(w.word.trim())) {
-      words[words.length - 1] = {
-        ...prev,
-        word: prev.word.trim() + w.word.trim(),
-        end: w.end,
-        loudnessDb:
-          prev.loudnessDb === undefined && w.loudnessDb === undefined
-            ? undefined
-            : Math.max(prev.loudnessDb ?? -Infinity, w.loudnessDb ?? -Infinity),
-      };
-    } else {
-      words.push(w);
-    }
-  }
+  const words = spokenWords(segments);
   const shoutLevel = shoutLevels(words);
 
   const events: string[] = [];
@@ -264,6 +236,68 @@ function splitAtLayoutChanges(layout: Layout | undefined, start: number, end: nu
     .filter((t) => t > start + 0.05 && t < end - 0.05 && smartPosition(layout, t) !== smartPosition(layout, t - 0.01));
   const bounds = [start, ...cuts, end];
   return bounds.slice(0, -1).map((b, i) => ({ start: b, end: bounds[i + 1]! }));
+}
+
+/**
+ * Le parole della clip pronte per essere mostrate: ordinate, senza doppioni, con le elisioni
+ * riunite. Usata sia dai sottotitoli sia dai primi piani sugli urli (vedi screamWindows), così
+ * "urlo" vuol dire esattamente la stessa cosa nei due posti.
+ */
+export function spokenWords(segments: TranscriptSegment[]): TranscriptWord[] {
+  const sorted = segments
+    .flatMap((seg) => seg.words)
+    .filter((w) => w.word.trim().length > 0 && w.end > w.start)
+    .sort((a, b) => a.start - b.start);
+  // Doppioni: i transcript salvati prima della correzione del provider hanno le parole sul confine
+  // fra due frasi ripetute due volte, con gli stessi tempi.
+  const deduped = sorted.filter((w, i) => {
+    const prev = sorted[i - 1];
+    return !prev || Math.abs(prev.start - w.start) > 0.05 || normalizeWord(prev.word) !== normalizeWord(w.word);
+  });
+  // Elisioni: Whisper spezza "l'acqua" in "l" + "'acqua" e "c'ho" in "c" + "'ho", che a una parola
+  // alla volta uscivano come "L", poi "'ACQUA". Si riuniscono in una parola sola.
+  const words: TranscriptWord[] = [];
+  for (const w of deduped) {
+    const prev = words[words.length - 1];
+    if (prev && /^['’]/.test(w.word.trim())) {
+      words[words.length - 1] = {
+        ...prev,
+        word: prev.word.trim() + w.word.trim(),
+        end: w.end,
+        loudnessDb:
+          prev.loudnessDb === undefined && w.loudnessDb === undefined
+            ? undefined
+            : Math.max(prev.loudnessDb ?? -Infinity, w.loudnessDb ?? -Infinity),
+      };
+    } else {
+      words.push(w);
+    }
+  }
+  return words;
+}
+
+/**
+ * Tratti della clip in cui qualcuno URLA (livello 2, vedi shoutLevels): lì il render fa un
+ * primo piano netto. Urli vicini (meno di 0.4s) sono un tratto solo; ogni tratto dura almeno 0.5s
+ * e al massimo 2s, e fra due tratti passano almeno 3s — un primo piano ogni secondo non è più un
+ * accento, è un'inquadratura che salta.
+ */
+export function screamWindows(segments: TranscriptSegment[]): Array<{ start: number; end: number }> {
+  const words = spokenWords(segments);
+  const levels = shoutLevels(words);
+  const windows: Array<{ start: number; end: number }> = [];
+  for (const w of words) {
+    if (levels.get(w) !== 2) continue;
+    const last = windows[windows.length - 1];
+    if (last && w.start - last.end < 0.4) {
+      last.end = Math.min(last.start + 2, w.end + 0.25);
+      continue;
+    }
+    if (last && w.start - last.end < 3) continue;
+    const start = Math.max(0, w.start - 0.05);
+    windows.push({ start, end: Math.max(start + 0.5, Math.min(start + 2, w.end + 0.25)) });
+  }
+  return windows;
 }
 
 /** Altezza (frazione dello schermo) dei sottotitoli sui primi piani e sul frame intero. */

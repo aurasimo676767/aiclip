@@ -4,7 +4,7 @@ import type { RankedClip, TranscriptSegment, TemplateConfig } from "@clipforge/s
 import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import type { FaceTracker, Layout, TimedCrop } from "../face-tracking/face-tracker.js";
-import { buildAssSubtitles } from "./captions.js";
+import { buildAssSubtitles, screamWindows } from "./captions.js";
 import { buildVideoFilterComplex } from "./build-video-filter.js";
 import { detectSilences, computeKeepSegments, buildTimeRemap, type TimeSegment } from "./silence.js";
 import { trimToKeepSegments } from "./trim-concat.js";
@@ -19,6 +19,12 @@ export interface RenderClipParams {
   workDir: string;
   outputPath: string;
 }
+
+/**
+ * Ingrandimento del primo piano sugli urli per unità di zoomIntensity del template: STREAMER (1.5)
+ * zooma del 18%, PODCAST_DYNAMIC (1.2) del 14%, PODCAST_CLEAN (0.4) del 5%.
+ */
+const PUNCH_ZOOM_PER_INTENSITY = 0.12;
 
 /** Renderizza una singola clip end-to-end: taglio, rimozione silenzi, crop 9:16, zoom, captions, loudness. */
 export async function renderClip(params: RenderClipParams): Promise<{ durationSeconds: number }> {
@@ -83,6 +89,9 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
     assSubtitlesPath: assPath,
     showProgressBar: template.showProgressBar,
     clipDurationSeconds: finalDuration,
+    // Primo piano netto sugli urli, con l'intensità di zoom del template (0 = mai).
+    punchIns: template.zoomIntensity > 0 ? screamWindows(clipRelativeSegments) : [],
+    punchZoom: 1 + PUNCH_ZOOM_PER_INTENSITY * template.zoomIntensity,
   });
 
   const args = ["-y", "-i", workingClipPath, "-filter_complex", filterComplex, "-map", "[vout]"];

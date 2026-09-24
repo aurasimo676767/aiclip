@@ -7,6 +7,10 @@ export interface VideoFilterParams {
   assSubtitlesPath: string;
   showProgressBar: boolean;
   clipDurationSeconds: number;
+  /** Tratti (tempi della clip) con un primo piano netto: gli urli, vedi screamWindows. */
+  punchIns?: Array<{ start: number; end: number }>;
+  /** Ingrandimento del primo piano (1 = nessuno). */
+  punchZoom?: number;
 }
 
 /**
@@ -25,8 +29,16 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
 
   const steps = layout.type === "scenes" ? buildScenesSteps(layout.scenes, clipDurationSeconds) : buildSplitVerticalSteps(layout, clipDurationSeconds);
 
+  let composed = "scaled";
+  const punchIns = (params.punchIns ?? []).filter((p) => p.end > p.start + 0.1 && p.start < clipDurationSeconds);
+  if (punchIns.length > 0 && (params.punchZoom ?? 1) > 1.01) {
+    steps.push(...buildPunchInSteps(layout, punchIns, params.punchZoom!, clipDurationSeconds));
+    composed = "punched";
+  }
+
   const lastLabel = "subbed";
-  steps.push(`[scaled]${subtitlesFilter(assSubtitlesPath)}[${lastLabel}]`);
+  // I sottotitoli vanno DOPO il primo piano: devono restare della stessa misura mentre il video zooma.
+  steps.push(`[${composed}]${subtitlesFilter(assSubtitlesPath)}[${lastLabel}]`);
 
   if (showProgressBar) {
     const safeDuration = Math.max(clipDurationSeconds, 0.1);
@@ -38,6 +50,60 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
   }
 
   return steps.join(";\n");
+}
+
+/**
+ * Primi piani netti sugli urli: la clip già composta viene divisa in pezzi (normale / primo piano /
+ * normale...) e i pezzi "primo piano" vengono ingranditi con un ritaglio fisso, poi si riattacca
+ * tutto. Stesso metodo trim+concat delle scene, con soli numeri costanti nei filtri: niente
+ * espressioni dipendenti dal tempo (vedi buildCroppedSteps per il bug del parser di ffmpeg).
+ *
+ * È uno STACCO, non uno zoom che scivola: entra e esce di netto, e il resto della clip non si
+ * muove mai (scelta di simo, vedi face-tracker.ts).
+ */
+function buildPunchInSteps(layout: Layout, punchIns: Array<{ start: number; end: number }>, zoom: number, total: number): string[] {
+  const { width: W, height: H } = OUTPUT_RESOLUTION;
+  const cw = evenRound(W / zoom);
+  const ch = evenRound(H / zoom);
+
+  const pieces: Array<{ start: number; end: number; punch: boolean }> = [];
+  let cursor = 0;
+  for (const p of [...punchIns].sort((a, b) => a.start - b.start)) {
+    const start = Math.max(cursor, p.start);
+    const end = Math.min(total, p.end);
+    if (end - start < 0.1) continue;
+    if (start - cursor > 0.01) pieces.push({ start: cursor, end: start, punch: false });
+    pieces.push({ start, end, punch: true });
+    cursor = end;
+  }
+  if (total - cursor > 0.01) pieces.push({ start: cursor, end: total, punch: false });
+  if (!pieces.some((p) => p.punch)) return ["[scaled]null[punched]"];
+
+  const steps = [`[scaled]split=${pieces.length}${pieces.map((_, i) => `[pi${i}]`).join("")}`];
+  pieces.forEach((piece, i) => {
+    let chain = `[pi${i}]trim=start=${piece.start.toFixed(3)}:end=${piece.end.toFixed(3)},setpts=PTS-STARTPTS`;
+    if (piece.punch) {
+      const center = punchCenter(layout, piece.start);
+      const x = Math.round(Math.min(W - cw, Math.max(0, center.x - cw / 2)));
+      const y = Math.round(Math.min(H - ch, Math.max(0, center.y - ch / 2)));
+      chain += `,crop=${cw}:${ch}:${x}:${y},scale=${W}:${H}:flags=lanczos,setsar=1`;
+    }
+    steps.push(`${chain}[po${i}]`);
+  });
+  steps.push(`${pieces.map((_, i) => `[po${i}]`).join("")}concat=n=${pieces.length}:v=1:a=0[punched]`);
+  return steps;
+}
+
+/** Dove puntare il primo piano: il volto nei primi piani, la webcam negli split, il centro altrove. */
+function punchCenter(layout: Layout, t: number): { x: number; y: number } {
+  const { width: W, height: H } = OUTPUT_RESOLUTION;
+  const topPanelCenter = (topRatio: number) => ({ x: W / 2, y: (H * topRatio) / 2 });
+  if (layout.type === "split_vertical") return topPanelCenter(layout.topRatio);
+  const scene = layout.scenes.find((s) => t >= s.startSeconds && t < s.endSeconds) ?? layout.scenes[layout.scenes.length - 1];
+  if (scene?.composition.kind === "split") return topPanelCenter(scene.composition.topRatio);
+  // Nei primi piani il volto sta nella metà alta del ritaglio (inquadrato a tutta altezza).
+  if (scene?.composition.kind === "crop") return { x: W / 2, y: H * 0.38 };
+  return { x: W / 2, y: H / 2 };
 }
 
 /**
