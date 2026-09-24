@@ -5,6 +5,12 @@ export interface TranscriptWord {
   end: number;
   /** Confidenza del provider STT, 0-1, se disponibile. */
   confidence?: number;
+  /**
+   * Di quanti dB la parola supera il livello abituale della voce attorno alla clip. Calcolato al
+   * momento del render (vedi render/word-loudness.ts), mai salvato: serve ai sottotitoli per le
+   * parole urlate.
+   */
+  loudnessDb?: number;
 }
 
 /** Segmento di trascrizione (tipicamente una frase o unità di parlato continuo). */

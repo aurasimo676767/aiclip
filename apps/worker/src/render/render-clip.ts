@@ -8,6 +8,7 @@ import { buildAssSubtitles } from "./captions.js";
 import { buildVideoFilterComplex } from "./build-video-filter.js";
 import { detectSilences, computeKeepSegments, buildTimeRemap, type TimeSegment } from "./silence.js";
 import { trimToKeepSegments } from "./trim-concat.js";
+import { annotateWordLoudness } from "./word-loudness.js";
 
 export interface RenderClipParams {
   sourceVideoPath: string;
@@ -53,7 +54,9 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
     }
   }
 
-  const clipRelativeSegments = sliceAndRemapSegments(transcriptSegments, clip.start, clip.end, timeRemap);
+  // Volume di ogni parola rispetto al parlato attorno alla clip: i sottotitoli colorano le urla.
+  const withLoudness = sourceProbe.hasAudio ? await annotateWordLoudness(sourceVideoPath, transcriptSegments, clip.start, clip.end) : transcriptSegments;
+  const clipRelativeSegments = sliceAndRemapSegments(withLoudness, clip.start, clip.end, timeRemap);
   const highlightWords = new Set(
     clip.edl.events
       .filter((e): e is Extract<typeof e, { action: "highlight_word" }> => e.action === "highlight_word")

@@ -160,6 +160,24 @@ const SCENE_SUBJECT_MIN_HEIGHT_RATIO = 0.25;
  */
 const MAX_ANCHOR_GAP_SECONDS = 2;
 
+/** Da quanti secondi di primo piano senza webcam in poi lo stream ha cambiato inquadratura. */
+const MIN_SUBJECT_GAP_SECONDS = 1;
+
+/**
+ * Il tratto contiguo più lungo (secondi) in cui la webcam non si vede E c'è un volto a tutto
+ * schermo (alto almeno SCENE_SUBJECT_MIN_HEIGHT_RATIO del frame).
+ */
+function longestSubjectGap(decisions: SegmentDecision[], segments: SegmentDetections[], sourceHeight: number): number {
+  let best = 0;
+  let run = 0;
+  decisions.forEach((d, i) => {
+    const bigFace = segments[i]?.allFaces.some((f) => f.avg.height >= sourceHeight * SCENE_SUBJECT_MIN_HEIGHT_RATIO) ?? false;
+    run = d.anchor === null && bigFace ? run + (d.endSeconds - d.startSeconds) : 0;
+    best = Math.max(best, run);
+  });
+  return best;
+}
+
 /** Il tratto contiguo piu' lungo in cui nessun segmento ha un'ancora. */
 function longestAnchorGap(decisions: SegmentDecision[]): { startSeconds: number; endSeconds: number; seconds: number } | null {
   let best: { startSeconds: number; endSeconds: number; seconds: number } | null = null;
@@ -661,6 +679,20 @@ export class ReactionCamFaceTracker implements FaceTracker {
     // reale, i primi 6 secondi mostravano un muro sfocato. In quel caso si passa al percorso che
     // sceglie la composizione scena per scena. Si rinuncia al cambio di inquadratura per speaker
     // dentro le scene, ma e' un prezzo minore rispetto a mezza clip inquadrata su un muro.
+    // Prova diretta, prima di quella sul riquadro: dove la webcam non si vede e c'è invece un volto
+    // a tutto schermo, lo stream ha cambiato inquadratura (primo piano dello streamer, o del video
+    // reagito) — lì il ritaglio della cam inquadra un pezzo di qualcos'altro. Verificato su una clip
+    // vera: 3.5s finali a primo piano mostrati come "cam" = una spalla, perché il controllo sul
+    // riquadro qui sotto trovava per caso bordi nello stesso punto.
+    const subjectGap = longestSubjectGap(decisions, rawSegments, sourceHeight);
+    if (subjectGap >= MIN_SUBJECT_GAP_SECONDS) {
+      logger.info("Primo piano a tutto schermo dove la webcam non c'è: composizione scelta per tratti", {
+        trattoPrimoPiano: subjectGap.toFixed(1) + "s",
+      });
+      const scenes = await perSceneCompositions(sourceVideoPath, startSeconds, rawSegments, cutTimes, clipDuration, sourceWidth, sourceHeight);
+      if (scenes.length) return { type: "scenes", scenes };
+    }
+
     const gap = longestAnchorGap(decisions);
     if (gap && gap.seconds > MAX_ANCHOR_GAP_SECONDS) {
       // Un buco lungo puo' voler dire due cose OPPOSTE: la webcam c'e' ancora ma il detector non

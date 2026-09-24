@@ -54,8 +54,8 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     label: "Podcast Dynamic",
     description: "Sottotitoli word-by-word, zoom frequenti, alta energia. Ideale per estratti podcast/interviste.",
     captionStyle: {
-      fontFamily: "Montserrat ExtraBold",
-      fontSize: 96,
+      fontFamily: "Anton",
+      fontSize: 210,
       position: "smart",
       textColor: "#FFFFFF",
       highlightColor: "#FFD400",
@@ -73,8 +73,8 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     label: "Podcast Clean",
     description: "Sottotitoli a frase, editing minimale, tono professionale.",
     captionStyle: {
-      fontFamily: "Inter SemiBold",
-      fontSize: 84,
+      fontFamily: "Anton",
+      fontSize: 130,
       position: "bottom",
       textColor: "#FFFFFF",
       highlightColor: "#FFFFFF",
@@ -92,8 +92,8 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     label: "Streamer",
     description: "Stile gaming/streaming: caption grandi e colorate, zoom aggressivi.",
     captionStyle: {
-      fontFamily: "Poppins Black",
-      fontSize: 100,
+      fontFamily: "Anton",
+      fontSize: 210,
       position: "smart",
       textColor: "#FFFFFF",
       highlightColor: "#00E5FF",
@@ -111,8 +111,8 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     label: "Storytelling",
     description: "Ritmo più lento, caption a frase, zoom morbidi per momenti narrativi/emotivi.",
     captionStyle: {
-      fontFamily: "Merriweather Bold",
-      fontSize: 80,
+      fontFamily: "Anton",
+      fontSize: 130,
       position: "bottom",
       textColor: "#FFFFFF",
       highlightColor: "#FFD400",
@@ -131,7 +131,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     description: "Caption bold centrali, forte enfasi sulle parole chiave, zoom marcati sui payoff.",
     captionStyle: {
       fontFamily: "Anton",
-      fontSize: 104,
+      fontSize: 210,
       position: "bottom",
       textColor: "#FFFFFF",
       highlightColor: "#FF3B30",

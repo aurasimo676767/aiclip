@@ -105,11 +105,17 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
         end: w.end + chunk.offsetSeconds,
       }));
 
+      const assignedWords = new Set<(typeof words)[number]>();
+
       const segments = response.segments ?? [];
       for (const seg of segments) {
         const start = seg.start + chunk.offsetSeconds;
         const end = seg.end + chunk.offsetSeconds;
-        const segmentWords = words.filter((w) => w.start >= start - 0.05 && w.start < end + 0.05);
+        // Ogni parola va in UNA sola frase: col margine di 0.05s da entrambi i lati, una parola sul
+        // confine fra due frasi finiva in tutte e due con gli stessi tempi — e nei sottotitoli usciva
+        // due volte ("QUESTO QUESTO" impilato su due righe, visto sui render veri).
+        const segmentWords = words.filter((w) => !assignedWords.has(w) && w.start >= start - 0.05 && w.start < end + 0.05);
+        for (const w of segmentWords) assignedWords.add(w);
 
         allSegments.push({
           id: segmentIdCounter++,

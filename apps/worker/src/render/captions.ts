@@ -1,6 +1,9 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { CaptionStyleConfig, TranscriptSegment, TranscriptWord } from "@clipforge/shared";
 import { OUTPUT_RESOLUTION } from "@clipforge/shared";
 import type { Layout } from "../face-tracking/face-tracker.js";
+import { toFfmpegFilterPath } from "./ffmpeg-filter-utils.js";
 
 interface WordChunk {
   words: TranscriptWord[];
@@ -12,21 +15,40 @@ const MAX_WORDS_PER_CHUNK = 6;
 const MAX_CHUNK_DURATION_SECONDS = 4;
 
 /**
- * Genera un file di sottotitoli in formato ASS (Advanced SubStation Alpha) per una clip,
- * sincronizzato parola-per-parola. `words` deve contenere già solo le parole della clip,
- * con timestamp clip-relativi (0 = inizio clip) e già rimappati per l'eventuale rimozione
- * dei silenzi (vedi silence.ts).
+ * Cartella dei font inclusi nel progetto, passata a ffmpeg (`fontsdir`). Senza, libass cerca il
+ * font fra quelli installati sul PC e, se manca, ripiega IN SILENZIO su un altro: tutti gli Shorts
+ * usciti fino al 25/09/2026 chiedevano "Montserrat ExtraBold"/"Poppins Black", mai installati, e
+ * venivano scritti in Arial.
+ */
+export const CAPTION_FONTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../assets/fonts");
+
+/** Il filtro `subtitles` di ffmpeg con i font del progetto. Usarlo per ogni sottotitolo bruciato. */
+export function subtitlesFilter(assPath: string): string {
+  return `subtitles='${toFfmpegFilterPath(assPath)}':fontsdir='${toFfmpegFilterPath(CAPTION_FONTS_DIR)}'`;
+}
+
+/**
+ * Una parola resta a schermo fino alla successiva se la pausa fra le due è più corta di così: le
+ * parole sparivano nei buchi fra una e l'altra e il testo lampeggiava.
+ */
+const FILL_GAP_SECONDS = 0.35;
+/** Dopo l'ultima parola di una frase, quanto resta ancora visibile. */
+const LINGER_SECONDS = 0.15;
+/** Tempo minimo a schermo di una parola, se la successiva lo permette. */
+const MIN_WORD_SECONDS = 0.18;
+
+/**
+ * Genera un file di sottotitoli ASS per una clip, sincronizzato parola per parola. `segments`
+ * contiene già solo le parole della clip, con tempi clip-relativi (0 = inizio clip) e già
+ * rimappati per la rimozione dei silenzi (vedi silence.ts).
  *
- * - wordByWord=true (template dinamici): una riga per "chunk" di poche parole (o una singola
- *   parola se oneWordAtATime), con tag karaoke \k per l'effetto di evidenziazione.
- * - wordByWord=false (template puliti): una riga per segmento/frase, colore statico.
- * - position="smart" (richiede `layout`): invece di stare sempre nella stessa fascia, ogni riga
- *   viene posizionata in base al layout ATTIVO in quel momento — vicino al confine tra webcam
- *   e contenuto durante uno split_vertical (dove ha più senso, come visto in Shorts di
- *   riferimento reali), altrimenti nella posizione di default (basso).
- *
- * `highlightWords` (dall'EDL, evento highlight_word) forza un colore di evidenziazione
- * statico sulle parole corrispondenti, indipendentemente dal karaoke sweep.
+ * - wordByWord + oneWordAtATime (Shorts): UNA parola alla volta, bianca con contorno spesso, con un
+ *   piccolo "pop" d'ingresso; gialle solo le parole chiave scelte dall'AI (`highlightWords`).
+ * - wordByWord senza oneWordAtATime: gruppi di poche parole con evidenziazione karaoke.
+ * - wordByWord=false: una riga per frase, colore statico.
+ * - position="smart" (richiede `layout`): la riga si mette dove non copre niente nell'inquadratura
+ *   di QUEL momento — sulla giunzione fra webcam e contenuto nello split, nel terzo basso sui
+ *   primi piani, sotto il video nel frame intero (vedi smartPosition).
  */
 export function buildAssSubtitles(
   segments: TranscriptSegment[],
@@ -34,16 +56,15 @@ export function buildAssSubtitles(
   options: { highlightWords?: Set<string>; layout?: Layout } = {},
 ): string {
   const highlightWords = options.highlightWords ?? new Set<string>();
-  // "smart" non ha un allineamento fisso per l'intera clip: l'header definisce solo il
-  // fallback (basso) usato quando una riga non cade in una finestra split_vertical — ogni riga
-  // in quella finestra riceve invece un override \pos esplicito (vedi resolveSmartOverride).
   const alignment = style.position === "top" ? 8 : style.position === "center" ? 5 : 2;
-  const marginV = style.position === "center" ? 0 : 120;
+  const marginV = style.position === "center" ? 0 : 160;
 
   const header = buildHeader(style, alignment, marginV);
-  const events = style.wordByWord
-    ? buildKaraokeEvents(segments, style, highlightWords, options.layout)
-    : buildPlainEvents(segments, style);
+  const events = !style.wordByWord
+    ? buildPlainEvents(segments, style)
+    : style.oneWordAtATime
+      ? buildSingleWordEvents(segments, style, highlightWords, options.layout)
+      : buildKaraokeEvents(segments, style, highlightWords, options.layout);
 
   return `${header}\n${events.join("\n")}\n`;
 }
@@ -53,27 +74,120 @@ function buildHeader(style: CaptionStyleConfig, alignment: number, marginV: numb
   const secondary = hexToAssColor(style.highlightColor);
   const outline = hexToAssColor(style.outlineColor);
 
+  // Contorno 9 e ombra 4: su una webcam o un gioco colorato il contorno sottile di prima (6)
+  // si perdeva, e la parola diventava difficile da leggere su un telefono.
   return `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${OUTPUT_RESOLUTION.width}
 PlayResY: ${OUTPUT_RESOLUTION.height}
 ScaledBorderAndShadow: yes
+WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${style.fontFamily},${style.fontSize},${primary},${secondary},${outline},&H64000000,-1,0,0,0,100,100,0,0,1,6,3,${alignment},60,60,${marginV},1
+Style: Default,${style.fontFamily},${style.fontSize},${primary},${secondary},${outline},&H80000000,0,0,0,0,100,100,1,0,1,9,4,${alignment},60,60,${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`;
 }
 
 function buildPlainEvents(segments: TranscriptSegment[], style: CaptionStyleConfig): string[] {
-  return segments
-    .filter((seg) => seg.words.length > 0)
-    .map((seg) => {
-      const text = applyTextCase(seg.text.trim(), style.uppercase);
-      return `Dialogue: 0,${formatAssTime(seg.start)},${formatAssTime(seg.end)},Default,,0,0,0,,${escapeAssText(text)}`;
+  const lines = segments.filter((seg) => seg.words.length > 0).sort((a, b) => a.start - b.start);
+  return lines.map((seg, i) => {
+    const text = applyTextCase(seg.text.trim(), style.uppercase);
+    // Mai due righe a schermo insieme: libass le IMPILEREBBE una sopra l'altra.
+    const next = lines[i + 1];
+    const end = next ? Math.min(seg.end, next.start) : seg.end;
+    return `Dialogue: 0,${formatAssTime(seg.start)},${formatAssTime(end)},Default,,0,0,0,,${escapeAssText(text)}`;
+  });
+}
+
+/**
+ * Una parola alla volta (stile richiesto da simo dopo due Shorts di riferimento).
+ *
+ * Errori della versione precedente, visti sui render veri:
+ * - due parole sovrapposte anche di un centesimo venivano IMPILATE da libass ("QUESTO/QUESTO"
+ *   su due righe): qui ogni parola finisce al più quando comincia la successiva;
+ * - il colore cambiava a caso fra bianco e azzurro: era l'effetto karaoke (\k), pensato per una
+ *   frase intera, applicato a una parola sola, dove il risultato dipendeva dagli arrotondamenti.
+ *   Ora il colore ha un significato: bianco, e il colore d'evidenza solo sulle parole chiave.
+ */
+function buildSingleWordEvents(
+  segments: TranscriptSegment[],
+  style: CaptionStyleConfig,
+  highlightWords: Set<string>,
+  layout: Layout | undefined,
+): string[] {
+  const sorted = segments
+    .flatMap((seg) => seg.words)
+    .filter((w) => w.word.trim().length > 0 && w.end > w.start)
+    .sort((a, b) => a.start - b.start);
+  // Doppioni: i transcript salvati prima della correzione del provider hanno le parole sul confine
+  // fra due frasi ripetute due volte, con gli stessi tempi.
+  const deduped = sorted.filter((w, i) => {
+    const prev = sorted[i - 1];
+    return !prev || Math.abs(prev.start - w.start) > 0.05 || normalizeWord(prev.word) !== normalizeWord(w.word);
+  });
+  // Elisioni: Whisper spezza "l'acqua" in "l" + "'acqua" e "c'ho" in "c" + "'ho", che a una parola
+  // alla volta uscivano come "L", poi "'ACQUA". Si riuniscono in una parola sola.
+  const words: TranscriptWord[] = [];
+  for (const w of deduped) {
+    const prev = words[words.length - 1];
+    if (prev && /^['’]/.test(w.word.trim())) {
+      words[words.length - 1] = {
+        ...prev,
+        word: prev.word.trim() + w.word.trim(),
+        end: w.end,
+        loudnessDb:
+          prev.loudnessDb === undefined && w.loudnessDb === undefined
+            ? undefined
+            : Math.max(prev.loudnessDb ?? -Infinity, w.loudnessDb ?? -Infinity),
+      };
+    } else {
+      words.push(w);
+    }
+  }
+  const shoutLevel = shoutLevels(words);
+
+  const events: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!;
+    const next = words[i + 1];
+    let end = Math.max(word.end, word.start + MIN_WORD_SECONDS);
+    if (next) {
+      end = next.start - word.end <= FILL_GAP_SECONDS ? next.start : Math.min(end + LINGER_SECONDS, next.start);
+    } else {
+      end += LINGER_SECONDS;
+    }
+    if (end - word.start < 0.04) continue; // parola "schiacciata" fra due quasi simultanee: si salta
+
+    const text = applyTextCase(word.word.trim(), style.uppercase);
+    const isHighlighted = highlightWords.has(normalizeWord(text));
+    const shout = shoutLevel.get(word) ?? 0;
+    const color = shout > 0 ? `\\c${SHOUT_COLOR}` : isHighlighted ? `\\c${hexToAssColor(style.highlightColor)}` : "";
+    // Più grandi le urla: la misura "a riposo" della parola, dopo il pop.
+    const rest = shout === 2 ? 112 : 100;
+    const fit = widthFitPercent(text, (style.fontSize * rest) / 100);
+    // Pop d'ingresso: parte al 75%, supera la misura a riposo e ci torna in 160ms. Parole chiave e
+    // urla "saltano" di più. La larghezza è in proporzione a `fit` (parole lunghe ristrette).
+    const peak = shout === 2 ? 145 : shout === 1 ? 128 : isHighlighted ? 118 : 108;
+    const pct = (p: number) => Math.round((p * fit) / 100);
+    const shake = shout === 2 ? `\\t(160,220,\\frz-5)\\t(220,280,\\frz5)\\t(280,340,\\frz-3)\\t(340,400,\\frz0)` : "";
+    const pop = `\\fscx${pct(75)}\\fscy75\\t(0,90,\\fscx${pct(peak)}\\fscy${peak})\\t(90,160,\\fscx${pct(rest)}\\fscy${rest})${shake}`;
+
+    // Una parola che attraversa un cambio d'inquadratura si sposta nel punto giusto dal cambio in
+    // poi, senza rifare il pop: prima restava dov'era, e dopo uno stacco da split a primo piano
+    // finiva in mezzo alla faccia.
+    const pieces = style.position === "smart" ? splitAtLayoutChanges(layout, word.start, end) : [{ start: word.start, end }];
+    pieces.forEach((piece, p) => {
+      const position = style.position === "smart" ? smartPosition(layout, piece.start) : "";
+      const animation = p === 0 ? pop : `\\fscx${pct(rest)}\\fscy${rest}`;
+      events.push(
+        `Dialogue: 0,${formatAssTime(piece.start)},${formatAssTime(piece.end)},Default,,0,0,0,,{${position}${color}${animation}}${escapeAssText(text)}`,
+      );
     });
+  }
+  return events;
 }
 
 function buildKaraokeEvents(
@@ -82,38 +196,99 @@ function buildKaraokeEvents(
   highlightWords: Set<string>,
   layout: Layout | undefined,
 ): string[] {
-  const maxWords = style.oneWordAtATime ? 1 : MAX_WORDS_PER_CHUNK;
-  const chunks = segments.flatMap((seg) => chunkWords(seg.words, maxWords));
-  return chunks.map((chunk) => {
+  const chunks = segments.flatMap((seg) => chunkWords(seg.words, MAX_WORDS_PER_CHUNK)).sort((a, b) => a.start - b.start);
+  return chunks.map((chunk, i) => {
     const parts = chunk.words.map((word) => {
       const durationCentis = Math.max(1, Math.round((word.end - word.start) * 100));
       const text = applyTextCase(word.word.trim(), style.uppercase);
-      const normalized = text.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
-      const isHighlighted = highlightWords.has(normalized);
       const escaped = escapeAssText(text);
-      return isHighlighted ? `{\\k${durationCentis}}{\\c${hexToAssColor(style.highlightColor)}}${escaped}{\\r} ` : `{\\k${durationCentis}}${escaped} `;
+      return highlightWords.has(normalizeWord(text))
+        ? `{\\k${durationCentis}}{\\c${hexToAssColor(style.highlightColor)}}${escaped}{\\r} `
+        : `{\\k${durationCentis}}${escaped} `;
     });
-    const override = style.position === "smart" ? resolveSmartOverride(layout) : "";
-    return `Dialogue: 0,${formatAssTime(chunk.start)},${formatAssTime(chunk.end)},Default,,0,0,0,,${override}${parts.join("")}`;
+    const next = chunks[i + 1];
+    const end = next ? Math.min(chunk.end, next.start) : chunk.end;
+    const override = style.position === "smart" ? `{${smartPosition(layout, chunk.start)}}` : "";
+    return `Dialogue: 0,${formatAssTime(chunk.start)},${formatAssTime(end)},Default,,0,0,0,,${override}${parts.join("")}`;
   });
 }
 
+/** Rosso delle parole urlate (formato colore ASS, &HBBGGRR). */
+const SHOUT_COLOR = "&H002E2EFF";
 /**
- * Override \an+\pos per una singola riga quando position="smart": se in questo istante è
- * attivo un pannello split_vertical (webcam sopra/contenuto sotto), centra la riga esattamente
- * sul confine tra i due pannelli — è dove ha più senso stare (leggibile su entrambi, non copre
- * né il volto né il contenuto), come visto in Shorts di riferimento reali. Altrimenti nessun
- * override: resta il fallback (basso) definito nell'header.
+ * Soglie delle urla, in dB sopra il parlato abituale attorno alla clip (vedi word-loudness.ts).
+ * Misurate su clip vere: il parlato normale sta fra 0 e +3, la voce alzata a +5/+6, le urla vere a
+ * +7/+8 (uno sfogo: "sei un rotto in culo" = +7 +7 +6 +8, la frase detta normalmente -1).
  */
-function resolveSmartOverride(layout: Layout | undefined): string {
-  // Nel layout "scenes" la composizione cambia da una scena all'altra (a volte c'è una linea di
-  // separazione, a volte no) e i sottotitoli sono invece un unico blocco per tutta la clip: non
-  // esiste una posizione "sulla giunzione" valida ovunque, quindi resta il fallback in basso.
-  if (!layout || layout.type === "scenes") return "";
+const LOUD_DB = 5;
+const SCREAM_DB = 7;
+/**
+ * Solo la parte più forte della clip può diventare rossa: in una clip urlata dall'inizio alla fine
+ * altrimenti sarebbe rosso tutto, e il rosso smetterebbe di dire "qui urla".
+ */
+const LOUD_TOP_SHARE = 0.4;
 
+/** 0 = normale, 1 = voce alzata, 2 = urlo. */
+function shoutLevels(words: TranscriptWord[]): Map<TranscriptWord, 0 | 1 | 2> {
+  const levels = new Map<TranscriptWord, 0 | 1 | 2>();
+  const measured = words.map((w) => w.loudnessDb).filter((v): v is number => v !== undefined).sort((a, b) => a - b);
+  if (measured.length === 0) return levels;
+  const topCut = measured[Math.floor(measured.length * (1 - LOUD_TOP_SHARE))] ?? Infinity;
+  for (const w of words) {
+    const db = w.loudnessDb;
+    if (db === undefined || db < LOUD_DB || db < topCut) continue;
+    levels.set(w, db >= SCREAM_DB ? 2 : 1);
+  }
+  return levels;
+}
+
+/** Larghezza massima di una parola a schermo (px su 1080): oltre, la parola viene ristretta. */
+const MAX_WORD_WIDTH_PX = 940;
+/**
+ * Larghezza media di un carattere di Anton maiuscolo, in frazioni della dimensione del font.
+ * Misurata: "INCREDIBILMENTE" (15 lettere) a 210 è larga ~800px.
+ */
+const ANTON_CHAR_WIDTH_RATIO = 0.255;
+
+/** Percentuale di larghezza (\fscx) perché la parola stia nello schermo: 100 se ci sta già. */
+function widthFitPercent(text: string, fontSize: number): number {
+  const estimated = text.length * fontSize * ANTON_CHAR_WIDTH_RATIO;
+  return estimated <= MAX_WORD_WIDTH_PX ? 100 : Math.max(55, Math.floor((MAX_WORD_WIDTH_PX / estimated) * 100));
+}
+
+/** Divide [start, end] nei punti in cui cambia la posizione dei sottotitoli (cambi di scena). */
+function splitAtLayoutChanges(layout: Layout | undefined, start: number, end: number): Array<{ start: number; end: number }> {
+  if (!layout || layout.type !== "scenes") return [{ start, end }];
+  const cuts = layout.scenes
+    .map((s) => s.startSeconds)
+    .filter((t) => t > start + 0.05 && t < end - 0.05 && smartPosition(layout, t) !== smartPosition(layout, t - 0.01));
+  const bounds = [start, ...cuts, end];
+  return bounds.slice(0, -1).map((b, i) => ({ start: b, end: bounds[i + 1]! }));
+}
+
+/** Altezza (frazione dello schermo) dei sottotitoli sui primi piani e sul frame intero. */
+const LOWER_THIRD_Y_RATIO = 0.73;
+
+/**
+ * Posizione della riga in base all'inquadratura attiva all'istante `t`:
+ * - split (webcam sopra, contenuto sotto): sulla giunzione fra i due pannelli — leggibile, e non
+ *   copre né il volto né il contenuto;
+ * - primo piano (ritaglio a schermo intero): nel terzo basso, sotto il volto;
+ * - frame intero su sfondo sfocato: subito sotto il video, sullo sfondo sfocato (per un 16:9 il
+ *   video occupa la fascia centrale fino a ~1264px).
+ * Prima, nel layout "scene", stava sempre in basso: sopra il gioco o il mento dello streamer.
+ */
+function smartPosition(layout: Layout | undefined, t: number): string {
   const x = Math.round(OUTPUT_RESOLUTION.width / 2);
-  const y = Math.round(OUTPUT_RESOLUTION.height * layout.topRatio);
-  return `{\\an5\\pos(${x},${y})}`;
+  const lowerThird = Math.round(OUTPUT_RESOLUTION.height * LOWER_THIRD_Y_RATIO);
+  if (!layout) return `\\an5\\pos(${x},${lowerThird})`;
+  if (layout.type === "split_vertical") return `\\an5\\pos(${x},${Math.round(OUTPUT_RESOLUTION.height * layout.topRatio)})`;
+
+  const scene = layout.scenes.find((s) => t >= s.startSeconds && t < s.endSeconds) ?? layout.scenes[layout.scenes.length - 1];
+  if (scene?.composition.kind === "split") {
+    return `\\an5\\pos(${x},${Math.round(OUTPUT_RESOLUTION.height * scene.composition.topRatio)})`;
+  }
+  return `\\an5\\pos(${x},${lowerThird})`;
 }
 
 function chunkWords(words: TranscriptWord[], maxWords: number): WordChunk[] {
@@ -146,6 +321,10 @@ function toChunk(words: TranscriptWord[]): WordChunk {
   return { words, start: first.start, end: last.end };
 }
 
+function normalizeWord(text: string): string {
+  return text.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+}
+
 function applyTextCase(text: string, uppercase: boolean): string {
   return uppercase ? text.toUpperCase() : text;
 }
@@ -157,11 +336,13 @@ export function escapeAssText(text: string): string {
 }
 
 export function formatAssTime(seconds: number): string {
-  const clamped = Math.max(0, seconds);
-  const h = Math.floor(clamped / 3600);
-  const m = Math.floor((clamped % 3600) / 60);
-  const s = Math.floor(clamped % 60);
-  const centis = Math.round((clamped - Math.floor(clamped)) * 100);
+  // Si arrotonda UNA volta sui centesimi totali: arrotondando solo la parte decimale, 1.996 dava
+  // "0:00:01.100" (centesimi = 100), cioè un tempo sbagliato.
+  const totalCentis = Math.round(Math.max(0, seconds) * 100);
+  const h = Math.floor(totalCentis / 360000);
+  const m = Math.floor((totalCentis % 360000) / 6000);
+  const s = Math.floor((totalCentis % 6000) / 100);
+  const centis = totalCentis % 100;
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(centis).padStart(2, "0")}`;
 }
 

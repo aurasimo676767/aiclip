@@ -3,8 +3,7 @@ import path from "node:path";
 import type { TranscriptSegment, CaptionStyleConfig } from "@clipforge/shared";
 import { OUTPUT_RESOLUTION } from "@clipforge/shared";
 import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
-import { buildAssSubtitles } from "./captions.js";
-import { toFfmpegFilterPath } from "./ffmpeg-filter-utils.js";
+import { buildAssSubtitles, subtitlesFilter } from "./captions.js";
 
 // Font già usato (e verificato funzionante) dal template MOTIVATIONAL: bold/condensato, molto
 // leggibile una parola alla volta, adatto a contenuti "ad" tipo Whop. Nessun face-tracking qui
@@ -54,7 +53,7 @@ export async function renderVoiceoverClip(params: RenderVoiceoverClipParams): Pr
   const filterComplex = [
     `[0:v]scale=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height}:force_original_aspect_ratio=increase,` +
       `crop=w=${OUTPUT_RESOLUTION.width}:h=${OUTPUT_RESOLUTION.height},setsar=1[scaled]`,
-    `[scaled]subtitles='${toFfmpegFilterPath(assPath)}'[vout]`,
+    `[scaled]${subtitlesFilter(assPath)}[vout]`,
   ].join(";\n");
 
   const args = [

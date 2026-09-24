@@ -1,6 +1,6 @@
 import type { CropWindow, Layout, Scene, SceneComposition, TimedCrop } from "../face-tracking/face-tracker.js";
 import { OUTPUT_RESOLUTION } from "@clipforge/shared";
-import { toFfmpegFilterPath } from "./ffmpeg-filter-utils.js";
+import { subtitlesFilter } from "./captions.js";
 
 export interface VideoFilterParams {
   layout: Layout;
@@ -25,9 +25,8 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
 
   const steps = layout.type === "scenes" ? buildScenesSteps(layout.scenes, clipDurationSeconds) : buildSplitVerticalSteps(layout, clipDurationSeconds);
 
-  const subtitlesFilterPath = toFfmpegFilterPath(assSubtitlesPath);
   const lastLabel = "subbed";
-  steps.push(`[scaled]subtitles='${subtitlesFilterPath}'[${lastLabel}]`);
+  steps.push(`[scaled]${subtitlesFilter(assSubtitlesPath)}[${lastLabel}]`);
 
   if (showProgressBar) {
     const safeDuration = Math.max(clipDurationSeconds, 0.1);
