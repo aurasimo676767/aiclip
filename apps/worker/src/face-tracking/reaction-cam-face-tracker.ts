@@ -180,20 +180,56 @@ function longestAnchorGap(decisions: SegmentDecision[]): { startSeconds: number;
 const SCENE_SAMPLE_COUNT = 6;
 
 /**
- * Sceglie la composizione di OGNI SCENA del montaggio originale.
+ * Di quanto (frazione della larghezza sorgente) deve spostarsi il soggetto perché valga la pena
+ * reinquadrarlo con uno stacco. Il ritaglio è largo ~608px su 1920 e un volto ~300px: oltre ~150px
+ * di spostamento il volto comincia a uscire dal ritaglio, sotto è rumore del detector o un gesto.
+ */
+const REFRAME_THRESHOLD_RATIO = 0.08;
+/**
+ * Oltre questa larghezza (in multipli del ritaglio 9:16) il "volto" non è un primo piano ma un
+ * rilevamento assurdo, e si mostra il frame intero. Non più bassa: un primo piano stretto del
+ * montatore, con il volto appena più largo del ritaglio, sta benissimo ritagliato — provato a 0.9
+ * sul set di prova, e quei primi piani diventavano un frame piccolo su sfondo sfocato.
+ */
+const MAX_SUBJECT_WIDTH_IN_CROP = 1.6;
+/**
+ * Durata minima di un'inquadratura dentro la stessa scena. Un tratto più corto non diventa un
+ * ritaglio a sé ma si fonde col vicino: meglio un volto per un attimo un po' decentrato che uno
+ * stacco ogni secondo. Misurato sulla clip che l'ha resa necessaria: UN rilevamento a x=1279
+ * (streamer piegato in avanti) contro 9 secondi di volto stabile a x≈700-780.
+ */
+const MIN_REFRAME_SECONDS = 3;
+
+type UnitKind = "split" | "crop" | "fit";
+
+interface CompositionUnit {
+  startSeconds: number;
+  endSeconds: number;
+  kind: UnitKind | null;
+  /** Centro orizzontale del soggetto (solo per "crop"; null = nessun volto visto in questo tratto). */
+  subjectCx: number | null;
+  /** Bordi orizzontali del volto (solo per "crop"), per capire se più posizioni stanno in un ritaglio solo. */
+  subjectLeft: number | null;
+  subjectRight: number | null;
+}
+
+/**
+ * Sceglie la composizione della clip TRATTO PER TRATTO (i segmenti di ~1.5s già allineati agli
+ * stacchi di montaggio rilevati), non scena per scena.
  *
- * Perche' per scena e non una sola per clip: molti VOD non sono stream grezzi ma video GIA'
- * MONTATI, che staccano ogni pochi secondi fra streamer a schermo intero, gameplay a schermo
- * intero e condivisione schermo con la cam in un angolo. Una composizione sola non puo' andare
- * bene per tutte e tre — su una clip reale ne usciva il gioco ingrandito e tagliato per l'intera
- * durata, con lo streamer mai inquadrato.
+ * Perché non per scena: la versione precedente decideva una composizione per ogni scena usando
+ * il rilevatore di stacchi, e con il "volto più grande della scena" come soggetto. Due difetti
+ * osservati su clip reali:
+ * - uno stacco non rilevato (zoom del montatore sul video reagito) lasciava "cam sopra +
+ *   contenuto sotto" per 2 secondi su un'inquadratura che non aveva più nessuna cam: nel pannello
+ *   cam finiva mezza faccia di un'altra persona;
+ * - un solo falso/insolito rilevamento grande (lo streamer piegato in avanti per mezzo secondo)
+ *   spostava il ritaglio di un'intera scena di 12 secondi sul suo braccio.
+ * Decidendo ogni ~1.5s, uno stacco mancato costa al massimo un tratto; e il soggetto si segue con
+ * "corse" di posizione stabile (vedi reframeRuns), dove gli scostamenti brevi vengono assorbiti.
  *
- * Perche' FISSA dentro la scena e non un inseguimento continuo del volto: misurato su quella
- * clip, dentro un'inquadratura il volto si sposta di 1-38 px, fra un'inquadratura e l'altra di
- * 700-1500 px. Un inseguimento morbido non avrebbe niente da seguire dove la persona sta ferma, e
- * scivolerebbe per mezzo schermo proprio sugli stacchi — dove invece si taglia netto. I confini
- * qui sono gli stacchi VERI del montaggio (vedi scene-detect.ts), quindi il cambio cade dove lo
- * spettatore gia' se lo aspetta.
+ * Il ritaglio resta comunque FERMO: cambia solo con uno stacco netto quando il soggetto si è
+ * davvero spostato, mai con un movimento continuo (scelta esplicita di simo, vedi face-tracker.ts).
  */
 async function perSceneCompositions(
   sourceVideoPath: string,
@@ -206,105 +242,234 @@ async function perSceneCompositions(
 ): Promise<Scene[]> {
   const fullAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
   const boundaries = [0, ...cutTimes.filter((t) => t > 0.01 && t < clipDuration - 0.01), clipDuration];
+  const isCut = (t: number) => cutTimes.some((c) => Math.abs(c - t) < 0.05);
 
-  interface RawScene {
-    startSeconds: number;
-    endSeconds: number;
-    subject: FaceBox | null;
-    isSubjectShot: boolean;
-    cam: CropWindow | null;
-    faces: FaceBox[];
-  }
-
-  const raw: RawScene[] = [];
+  // 1) Il riquadro della cam si cerca per SCENA (serve una stessa inquadratura per più fotogrammi
+  //    per vederne i bordi fermi), attorno al volto più PICCOLO e defilato: in una scena di
+  //    condivisione schermo il volto più grande è quello dentro il video reagito.
+  const cams: CropWindow[] = [];
   for (let i = 0; i < boundaries.length - 1; i++) {
     const startSeconds = boundaries[i]!;
     const endSeconds = boundaries[i + 1]!;
-
-    // Il volto PIU' GRANDE visto nei segmenti che cadono in questa scena, non la media: dentro una
-    // scena il soggetto e' sempre lo stesso, e mediare con qualche rilevamento spurio piu' piccolo
-    // sposterebbe l'inquadratura senza motivo.
-    const faces: FaceBox[] = [];
-    for (const seg of segments) {
-      if (seg.endSeconds <= startSeconds + 0.01 || seg.startSeconds >= endSeconds - 0.01) continue;
-      for (const meta of seg.allFaces) faces.push(meta.avg);
-    }
-    let subject: FaceBox | null = null;
-    for (const face of faces) if (!subject || face.height > subject.height) subject = face;
-    const isSubjectShot = subject !== null && subject.height >= sourceHeight * SCENE_SUBJECT_MIN_HEIGHT_RATIO;
-
-    // Il riquadro cam si cerca attorno al volto piu' PICCOLO e defilato della scena, non attorno al
-    // piu' grande: in una scena di condivisione schermo il volto piu' grande e' quello dentro il
-    // video reagito, la cam dello streamer e' l'altro.
-    const camFace = faces
-      .filter((f) => isWebcamLike(f, sourceWidth, sourceHeight))
-      .sort((a, b) => a.height - b.height)[0];
-    let cam: CropWindow | null = null;
-    if (camFace) {
-      const duration = Math.max(0.1, endSeconds - startSeconds);
-      const sampleTimes = Array.from(
-        { length: SCENE_SAMPLE_COUNT },
-        (_, k) => clipStartSeconds + startSeconds + (duration * (k + 0.5)) / SCENE_SAMPLE_COUNT,
-      );
-      const found = await detectWebcamRect(sourceVideoPath, sampleTimes, camFace, sourceWidth, sourceHeight);
-      if (found && !rejectionReasonForWebcamRect(found, sourceWidth, sourceHeight)) cam = found;
-    }
-    raw.push({ startSeconds, endSeconds, subject, isSubjectShot, cam, faces });
+    const faces = segments
+      .filter((seg) => seg.endSeconds > startSeconds + 0.01 && seg.startSeconds < endSeconds - 0.01)
+      .flatMap((seg) => seg.allFaces.map((m) => m.avg));
+    const camFace = faces.filter((f) => isWebcamLike(f, sourceWidth, sourceHeight)).sort((a, b) => a.height - b.height)[0];
+    if (!camFace) continue;
+    const duration = Math.max(0.1, endSeconds - startSeconds);
+    const sampleTimes = Array.from({ length: SCENE_SAMPLE_COUNT }, (_, k) => clipStartSeconds + startSeconds + (duration * (k + 0.5)) / SCENE_SAMPLE_COUNT);
+    const found = await detectWebcamRect(sourceVideoPath, sampleTimes, camFace, sourceWidth, sourceHeight);
+    if (found && !rejectionReasonForWebcamRect(found, sourceWidth, sourceHeight)) cams.push(found);
   }
+  // UN SOLO riquadro cam per tutta la clip: le scene con la cam sono lo stesso stream ripreso più
+  // volte, e riquadri leggermente diversi facevano "respirare" il pannello a ogni stacco.
+  const canonicalCam = mostRecurrentRect(cams);
 
-  // UN SOLO riquadro cam per tutta la clip, non uno per scena. Le scene con la cam sono lo stesso
-  // momento di stream ripreso piu' volte, quindi la cam sta sempre nello stesso punto: rilevarla
-  // scena per scena dava riquadri leggermente diversi (526x296 contro 548x310), che facevano
-  // "respirare" il pannello a ogni stacco, e su una scena il rilevamento falliva del tutto
-  // lasciandola senza template. Si prende quindi il riquadro piu' ricorrente e si riusa ovunque.
-  const canonicalCam = mostRecurrentRect(raw.map((r) => r.cam).filter((c): c is CropWindow => c !== null));
+  // 2) Decisione tratto per tratto.
+  const units: CompositionUnit[] = segments.map((seg) => {
+    const faces = seg.allFaces.map((m) => m.avg);
+    const base = { startSeconds: seg.startSeconds, endSeconds: seg.endSeconds };
+    const none = { subjectCx: null, subjectLeft: null, subjectRight: null };
+    if (faces.length === 0) return { ...base, kind: null, ...none };
+    // Prima la cam: in una reaction il volto più grande è spesso quello del video reagito, e con
+    // l'ordine opposto il tratto veniva ritagliato su di lui e lo streamer spariva.
+    if (canonicalCam && faces.some((f) => faceFitsInCam(f, canonicalCam))) return { ...base, kind: "split", ...none };
+    const subject = faces.filter((f) => f.height >= sourceHeight * SCENE_SUBJECT_MIN_HEIGHT_RATIO).sort((a, b) => b.height - a.height)[0];
+    // Solo un "volto" enormemente più largo del ritaglio va a frame intero (vedi la costante).
+    if (subject && subject.width <= sourceHeight * fullAspect * MAX_SUBJECT_WIDTH_IN_CROP) {
+      return { ...base, kind: "crop", subjectCx: subject.x + subject.width / 2, subjectLeft: subject.x, subjectRight: subject.x + subject.width };
+    }
+    return { ...base, kind: "fit", ...none };
+  });
 
+  fillUnknownUnits(units, isCut);
+  smoothKindOutliers(units, isCut);
+
+  // 3) Pannello contenuto per i tratti in split, SENZA MAI tagliare il contenuto: ritaglio
+  //    centrato se il contenuto ci sta, altrimenti la finestra dove succede qualcosa, altrimenti il
+  //    frame intero (vedi chooseWithoutCutting in content-region.ts). Prima il ripiego era sempre
+  //    il ritaglio centrato, che tagliava le scritte di un quiz largo tutto lo schermo ("sta è
+  //    diventata famosa", "Elo", "Rose V").
+  //    Provato e scartato, misurando sul set di prova: detectContentBounds (sui video montati
+  //    sceglieva il tavolo invece della scena, o la faccia del reagito invece del suo video).
   let topRatio = 0;
   let content: CropWindow | null = null;
-  if (canonicalCam) {
+  const splitUnits = units.filter((u) => u.kind === "split");
+  if (canonicalCam && splitUnits.length > 0) {
     topRatio = topRatioForWebcam([canonicalCam]);
+    // Campioni SOLO dai tratti in split: su tutta la clip l'attività delle scene a schermo intero
+    // riempiva il frame e ogni ritaglio sembrava tagliare qualcosa (continuazione ~1.0 ovunque).
+    const splitSeconds = splitUnits.reduce((sum, u) => sum + (u.endSeconds - u.startSeconds), 0);
+    const samples: number[] = [];
+    for (let k = 0; k < RECT_SAMPLE_COUNT; k++) {
+      let offset = (splitSeconds * (k + 0.5)) / RECT_SAMPLE_COUNT;
+      for (const u of splitUnits) {
+        const len = u.endSeconds - u.startSeconds;
+        if (offset <= len) {
+          samples.push(clipStartSeconds + u.startSeconds + offset);
+          break;
+        }
+        offset -= len;
+      }
+    }
     const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - topRatio));
-    const clipSamples = Array.from(
-      { length: RECT_SAMPLE_COUNT },
-      (_, k) => clipStartSeconds + (clipDuration * (k + 0.5)) / RECT_SAMPLE_COUNT,
-    );
-    // NOTA: qui si usa detectContentRegion (finestra con le proporzioni del pannello) e NON
-    // detectContentBounds come nel layout a clip intera. I bordi del contenuto vengono calcolati una
-    // volta sola per tutta la clip, ma in un video montato ogni scena inquadra una cosa diversa:
-    // provato, ne usciva una fascia 1920x540 buona per nessuna scena e il pannello restava quasi
-    // nero. La finestra con le proporzioni del pannello e' invece un compromesso che regge su tutte.
-    const region = await detectContentRegion(sourceVideoPath, clipSamples, sourceWidth, sourceHeight, bottomAspect, [canonicalCam]);
-    content = region ?? centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
+    const region = await detectContentRegion(sourceVideoPath, samples, sourceWidth, sourceHeight, bottomAspect, [canonicalCam], true);
+    content = region ?? { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
   }
 
-  const scenes: Scene[] = raw.map((r) => {
-    // 1) La cam della clip e' visibile anche in questa scena: il template, cam sopra e contenuto
-    //    sotto. Basta che un volto qualsiasi cada dentro il riquadro noto — non serve che il
-    //    rilevamento del riquadro riesca di nuovo proprio qui.
-    //
-    //    Questo controllo viene PRIMA di quello sul soggetto a schermo intero, e l'ordine conta: in
-    //    una reaction il volto piu' grande della scena e' spesso quello dentro il video reagito
-    //    (un TikTok a mezzo schermo), quindi con l'ordine opposto la scena veniva ritagliata sulla
-    //    faccia del TikTok e lo streamer spariva — il contrario di una reaction.
-    if (canonicalCam && content && r.faces.some((f) => faceCenterInside(f, canonicalCam))) {
-      return {
-        startSeconds: r.startSeconds,
-        endSeconds: r.endSeconds,
-        composition: { kind: "split", cam: canonicalCam, content, topRatio },
-      };
+  // 4) Ritagli: posizione del soggetto per "corse" stabili, poi un Scene per tratto.
+  const cropCx = reframeRuns(units, isCut, sourceWidth * REFRAME_THRESHOLD_RATIO, sourceHeight * fullAspect);
+  const scenes: Scene[] = units.map((u, i) => {
+    const base = { startSeconds: u.startSeconds, endSeconds: u.endSeconds };
+    if (u.kind === "split" && canonicalCam && content) {
+      return { ...base, composition: { kind: "split", cam: canonicalCam, content, topRatio } };
     }
-    // 2) Soggetto a schermo intero senza cam separata: ritaglio 9:16 centrato su di lui.
-    if (r.isSubjectShot && r.subject) {
-      const crop = centeredCrop(r.subject.x + r.subject.width / 2, sourceHeight / 2, sourceWidth, sourceHeight, fullAspect);
-      return { startSeconds: r.startSeconds, endSeconds: r.endSeconds, composition: { kind: "crop", crop } };
+    if (u.kind === "crop" && cropCx[i] !== null && cropCx[i] !== undefined) {
+      return { ...base, composition: { kind: "crop", crop: centeredCrop(cropCx[i]!, sourceHeight / 2, sourceWidth, sourceHeight, fullAspect) } };
     }
-    // 3) Niente cam e niente soggetto: gameplay/schermo a tutto campo. Si mostra INTERO su sfondo
-    //    sfocato invece di ritagliarlo — cosa serva vedere dipende dal gioco, e un ritaglio
-    //    "sull'azione" tirerebbe a indovinare (scelta esplicita dell'utente).
-    return { startSeconds: r.startSeconds, endSeconds: r.endSeconds, composition: { kind: "fit" } };
+    return { ...base, composition: { kind: "fit" } };
   });
 
   return mergeAdjacentScenes(scenes, sourceWidth);
+}
+
+/**
+ * Tratti dove il detector non ha visto nessun volto (girato, coperto, o un'inquadratura senza
+ * persone): prendono la decisione del tratto precedente se non c'è uno stacco in mezzo, altrimenti
+ * del successivo. Un'intera scena senza volti resta "fit" (gameplay/schermo a tutto campo).
+ */
+function fillUnknownUnits(units: CompositionUnit[], isCut: (t: number) => boolean): void {
+  for (let i = 1; i < units.length; i++) {
+    const u = units[i]!;
+    const prev = units[i - 1]!;
+    if (u.kind === null && prev.kind !== null && !isCut(u.startSeconds)) u.kind = prev.kind;
+  }
+  for (let i = units.length - 2; i >= 0; i--) {
+    const u = units[i]!;
+    const next = units[i + 1]!;
+    if (u.kind === null && next.kind !== null && !isCut(next.startSeconds)) u.kind = next.kind;
+  }
+  for (const u of units) if (u.kind === null) u.kind = "fit";
+}
+
+/**
+ * Un tratto singolo di tipo diverso dai due vicini (che invece coincidono), senza stacchi ai suoi
+ * bordi, è quasi sempre un errore di rilevamento e non un cambio vero: prende il tipo dei vicini.
+ */
+function smoothKindOutliers(units: CompositionUnit[], isCut: (t: number) => boolean): void {
+  for (let i = 1; i < units.length - 1; i++) {
+    const prev = units[i - 1]!;
+    const u = units[i]!;
+    const next = units[i + 1]!;
+    if (u.kind === prev.kind || prev.kind !== next.kind) continue;
+    if (isCut(u.startSeconds) || isCut(next.startSeconds)) continue;
+    u.kind = prev.kind;
+    u.subjectCx = null;
+    u.subjectLeft = null;
+    u.subjectRight = null;
+  }
+}
+
+/**
+ * Centro del ritaglio per ogni tratto "crop" (null per gli altri).
+ *
+ * I tratti crop consecutivi senza stacchi in mezzo formano uno "span"; dentro lo span la posizione
+ * del soggetto si divide in corse (una nuova corsa parte quando il volto si allontana oltre la
+ * soglia dalla mediana della corsa), poi le corse più corte di MIN_REFRAME_SECONDS vengono fuse
+ * nella vicina più lunga. Ogni corsa rimasta è un ritaglio fermo sulla mediana delle sue posizioni:
+ * la mediana, non la media, così un rilevamento spurio non sposta l'inquadratura.
+ */
+function reframeRuns(units: CompositionUnit[], isCut: (t: number) => boolean, threshold: number, cropWidth: number): Array<number | null> {
+  const result: Array<number | null> = units.map(() => null);
+
+  let i = 0;
+  while (i < units.length) {
+    if (units[i]!.kind !== "crop") {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < units.length && units[j + 1]!.kind === "crop" && !isCut(units[j + 1]!.startSeconds)) j++;
+
+    interface Run {
+      from: number;
+      to: number;
+      positions: number[];
+    }
+    const runs: Run[] = [];
+    for (let k = i; k <= j; k++) {
+      const cx = units[k]!.subjectCx;
+      const current = runs[runs.length - 1];
+      if (current && (cx === null || Math.abs(cx - median(current.positions)) <= threshold || current.positions.length === 0)) {
+        current.to = k;
+        if (cx !== null) current.positions.push(cx);
+      } else {
+        runs.push({ from: k, to: k, positions: cx === null ? [] : [cx] });
+      }
+    }
+
+    const runSeconds = (r: Run) => units[r.to]!.endSeconds - units[r.from]!.startSeconds;
+    while (runs.length > 1) {
+      let shortest = -1;
+      for (let r = 0; r < runs.length; r++) {
+        if (runSeconds(runs[r]!) < MIN_REFRAME_SECONDS && (shortest < 0 || runSeconds(runs[r]!) < runSeconds(runs[shortest]!))) shortest = r;
+      }
+      if (shortest < 0) break;
+      const left = runs[shortest - 1];
+      const right = runs[shortest + 1];
+      const target = !left ? right! : !right ? left : runSeconds(left) >= runSeconds(right) ? left : right;
+      const absorbed = runs[shortest]!;
+      target.from = Math.min(target.from, absorbed.from);
+      target.to = Math.max(target.to, absorbed.to);
+      // Le posizioni del tratto assorbito NON entrano nella mediana: era troppo breve per contare,
+      // ed è proprio lo scostamento che non deve spostare l'inquadratura.
+      runs.splice(shortest, 1);
+    }
+
+    for (const run of runs) {
+      let cx = run.positions.length > 0 ? median(run.positions) : null;
+      // Se TUTTE le posizioni del volto nella corsa (anche quelle dei tratti brevi assorbiti) stanno
+      // insieme nel ritaglio, lo si centra sull'insieme: la mediana sola, su uno streamer che gira la
+      // testa, lasciava fuori mezza faccia nei momenti in cui si voltava (verificato su una clip
+      // vera). Se non ci stanno — un rilevamento lontano, lo streamer piegato fuori campo — resta la
+      // mediana, che ignora lo scostamento.
+      const lefts: number[] = [];
+      const rights: number[] = [];
+      for (let k = run.from; k <= run.to; k++) {
+        const u = units[k]!;
+        if (u.subjectLeft !== null && u.subjectRight !== null) {
+          lefts.push(u.subjectLeft);
+          rights.push(u.subjectRight);
+        }
+      }
+      if (cx !== null && lefts.length > 0) {
+        const left = Math.min(...lefts);
+        const right = Math.max(...rights);
+        if (right - left <= cropWidth * 0.95) cx = (left + right) / 2;
+      }
+      for (let k = run.from; k <= run.to; k++) result[k] = cx;
+    }
+    // Uno span in cui nessun tratto ha visto il volto non può restare un ritaglio al buio.
+    for (let k = i; k <= j; k++) if (result[k] === null) units[k]!.kind = "fit";
+    i = j + 1;
+  }
+  return result;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/**
+ * Il volto è quello DENTRO la cam: centro nel riquadro e dimensioni da cam. Il solo centro non
+ * basta — in un primo piano del montatore sul video reagito, una faccia alta il doppio del
+ * riquadro aveva il centro proprio nell'angolo della cam, e il tratto finiva "cam sopra" con mezza
+ * faccia di un'altra persona nel pannello.
+ */
+function faceFitsInCam(face: FaceBox, cam: CropWindow): boolean {
+  return faceCenterInside(face, cam) && face.height <= cam.height * 0.85 && face.width <= cam.width * 0.85;
 }
 
 function faceCenterInside(face: FaceBox, rect: CropWindow): boolean {
@@ -539,7 +704,17 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const contentBounds = await detectContentBounds(sourceVideoPath, sampleTimes, sourceWidth, sourceHeight, [
       ...cropByAnchor.values(),
     ]);
-    const bottom = contentBounds ?? centeredCrop(sourceWidth / 2, sourceHeight / 2, sourceWidth, sourceHeight, bottomAspect);
+    // Se i bordi non sono credibili, stessa scelta "senza tagli" dei video montati: ritaglio
+    // centrato se il contenuto ci sta, altrimenti il frame intero. Prima il ripiego era sempre il
+    // ritaglio centrato, a costo di tagliare il contenuto.
+    const bottom =
+      contentBounds ??
+      (await detectContentRegion(sourceVideoPath, sampleTimes, sourceWidth, sourceHeight, bottomAspect, [...cropByAnchor.values()], true)) ?? {
+        x: 0,
+        y: 0,
+        width: sourceWidth,
+        height: sourceHeight,
+      };
     // Ogni ancora valida è, per definizione, un overlay webcam fisso nel frame sorgente — e
     // il pannello "contenuto" sotto è un crop dell'INTERO frame sorgente, quindi la mostra
     // di nuovo, piccola (e spesso tagliata dal bordo del crop). Sfochiamo quelle zone nel

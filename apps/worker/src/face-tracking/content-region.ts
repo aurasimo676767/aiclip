@@ -42,6 +42,11 @@ export async function detectContentRegion(
   sourceHeight: number,
   targetAspect: number,
   excludeRegions: CropWindow[],
+  /**
+   * Se true, rinuncia (null) quando il contenuto CONTINUA oltre i bordi laterali della finestra:
+   * vuol dire che la finestra lo taglierebbe (vedi CONTINUATION_RATIO).
+   */
+  rejectIfContentContinues = false,
 ): Promise<CropWindow | null> {
   const scale = ANALYSIS_WIDTH / sourceWidth;
   const width = ANALYSIS_WIDTH;
@@ -114,6 +119,7 @@ export async function detectContentRegion(
   if (!best) return null;
 
   const share = best.sum / total;
+  if (rejectIfContentContinues) return chooseWithoutCutting(integral, width, height, windowWidth, windowHeight, best, share, scale);
   if (share < MIN_ACTIVITY_SHARE) {
     logger.info("Contenuto sparso su tutto il frame, resto sul ritaglio centrato", { share: share.toFixed(2) });
     return null;
@@ -130,6 +136,77 @@ export async function detectContentRegion(
 }
 
 /** Somma, pixel per pixel, quanto l'immagine cambia tra un campione e il successivo. */
+/**
+ * Scelta del pannello contenuto quando non si deve MAI tagliare il contenuto (video già montati),
+ * in quest'ordine — ognuno misurato sul set di prova:
+ * 1. il ritaglio centrato, se il contenuto non continua oltre i suoi lati: era già il ripiego della
+ *    versione precedente ed è quello giusto per un palco o un'interfaccia da leggere al centro;
+ * 2. la finestra dove succede qualcosa, se spicca (quota >= MIN_ACTIVITY_SHARE) e non taglia il
+ *    contenuto: il player di una reaction spostato di lato nel layout dello stream;
+ * 3. altrimenti null, e il chiamante mostra il frame intero: un quiz largo tutto lo schermo, che
+ *    il ritaglio centrato tagliava ("sta è diventata famosa", "Elo", "Rose V").
+ */
+function chooseWithoutCutting(
+  integral: Float64Array,
+  width: number,
+  height: number,
+  windowWidth: number,
+  windowHeight: number,
+  best: { x: number; y: number },
+  share: number,
+  scale: number,
+): CropWindow | null {
+  const toSource = (x: number, y: number): CropWindow => ({
+    x: Math.round(x / scale),
+    y: Math.round(y / scale),
+    width: Math.round(windowWidth / scale),
+    height: Math.round(windowHeight / scale),
+  });
+  const cx = Math.round((width - windowWidth) / 2);
+  const cy = Math.round((height - windowHeight) / 2);
+  const centeredContinuation = sideContinuation(integral, width, cx, cy, windowWidth, windowHeight);
+  if (centeredContinuation < CONTINUATION_RATIO) {
+    logger.info("Contenuto dentro il ritaglio centrato", { continuazione: centeredContinuation.toFixed(2) });
+    return toSource(cx, cy);
+  }
+  const bestContinuation = sideContinuation(integral, width, best.x, best.y, windowWidth, windowHeight);
+  if (share >= MIN_ACTIVITY_SHARE && bestContinuation < CONTINUATION_RATIO) {
+    logger.info("Contenuto dentro la finestra più attiva", { share: share.toFixed(2), continuazione: bestContinuation.toFixed(2) });
+    return toSource(best.x, best.y);
+  }
+  logger.info("Qualunque ritaglio taglierebbe il contenuto: frame intero", {
+    share: share.toFixed(2),
+    continuazioneCentrato: centeredContinuation.toFixed(2),
+    continuazioneFinestra: bestContinuation.toFixed(2),
+  });
+  return null;
+}
+
+/** Larghezza (frazione del frame) delle strisce subito fuori dai lati della finestra. */
+const CONTINUATION_STRIP_RATIO = 0.06;
+/**
+ * Oltre questo rapporto fra la densità di pixel attivi appena FUORI dai lati della finestra e
+ * quella dentro, il contenuto prosegue oltre il ritaglio e la finestra lo taglierebbe.
+ */
+const CONTINUATION_RATIO = 0.6;
+
+/**
+ * Densità di pixel attivi nella striscia più attiva subito fuori dai lati della finestra, relativa
+ * alla densità dentro. Si guarda solo la fascia centrale in altezza (20%-80%): negli angoli stanno
+ * le webcam degli altri partecipanti, che si muovono ma non sono il contenuto.
+ */
+function sideContinuation(integral: Float64Array, width: number, x: number, y: number, w: number, h: number): number {
+  const y0 = y + Math.round(h * 0.2);
+  const y1 = y + Math.round(h * 0.8) - 1;
+  const inside = regionSum(integral, width, x, y0, x + w - 1, y1) / (w * (y1 - y0 + 1));
+  if (inside <= 0) return 0;
+  const strip = Math.max(2, Math.round(width * CONTINUATION_STRIP_RATIO));
+  let worst = 0;
+  if (x - strip >= 0) worst = Math.max(worst, regionSum(integral, width, x - strip, y0, x - 1, y1) / (strip * (y1 - y0 + 1)));
+  if (x + w + strip <= width) worst = Math.max(worst, regionSum(integral, width, x + w, y0, x + w + strip - 1, y1) / (strip * (y1 - y0 + 1)));
+  return worst / inside;
+}
+
 async function buildActivityMap(
   videoPath: string,
   sampleTimes: number[],
@@ -210,9 +287,6 @@ function toLuma(bgr: Buffer, width: number, height: number): Float32Array {
  */
 const MIN_BOUNDS_ACTIVITY_SHARE = 0.35;
 
-/** Sotto questa frazione di schermo il rettangolo non è credibile come "contenuto". */
-const MIN_BOUNDS_SCREEN_SHARE = 0.04;
-
 /** Passi della ricerca: pochi, la mappa di analisi è piccola e la scansione resta istantanea. */
 const BOUNDS_SIZE_STEPS = 10;
 const BOUNDS_POSITION_STEP = 6;
@@ -291,15 +365,84 @@ export async function detectContentBounds(
   }
   if (!best) return null;
 
+  const grown = growToContentEdges(integral, width, height, best);
   const rect: CropWindow = {
-    x: Math.max(0, Math.round(best.x / scale)),
-    y: Math.max(0, Math.round(best.y / scale)),
-    width: Math.min(sourceWidth, Math.round(best.w / scale)),
-    height: Math.min(sourceHeight, Math.round(best.h / scale)),
+    x: Math.max(0, Math.round(grown.x / scale)),
+    y: Math.max(0, Math.round(grown.y / scale)),
+    width: Math.min(sourceWidth, Math.round(grown.w / scale)),
+    height: Math.min(sourceHeight, Math.round(grown.h / scale)),
   };
   const screenShare = (rect.width * rect.height) / (sourceWidth * sourceHeight);
-  if (screenShare < MIN_BOUNDS_SCREEN_SHARE) return null;
+  const aspect = rect.width / rect.height;
+  if (screenShare < MIN_GROWN_SCREEN_SHARE || aspect < MIN_CONTENT_ASPECT || aspect > MAX_CONTENT_ASPECT) {
+    logger.info("Bordi del contenuto non credibili come un video, scartati", {
+      rect,
+      quotaSchermo: screenShare.toFixed(2),
+      proporzioni: aspect.toFixed(2),
+    });
+    return null;
+  }
 
   logger.info("Bordi del contenuto individuati", { rect, quotaSchermo: screenShare.toFixed(2) });
   return rect;
+}
+
+/**
+ * Un player/un gioco a schermo si riconosce dalla forma: tra il 9:16 di un TikTok (0.56) e un
+ * 16:9 (1.78), con margine. Sul set di prova i rettangoli sbagliati erano strisce 1344x324,
+ * 1728x432, 1152x216 (proporzioni 4-5): una fascia di video con tanto sfondo sfocato attorno, o il
+ * contatore in fondo allo schermo al posto del gioco.
+ */
+const MIN_CONTENT_ASPECT = 0.45;
+const MAX_CONTENT_ASPECT = 2.4;
+/** Dopo la crescita, sotto questa quota di schermo il rettangolo non è il contenuto principale. */
+const MIN_GROWN_SCREEN_SHARE = 0.1;
+/** Un lato si allarga finché la striscia appena fuori è attiva almeno così, rispetto al nocciolo. */
+const GROW_DENSITY_RATIO = 0.5;
+/** Spessore (px di analisi) della striscia valutata a ogni passo di crescita. */
+const GROW_STEP = 3;
+
+/**
+ * Allarga il nocciolo più denso fino ai BORDI VERI del contenuto. Il nocciolo racchiude solo il 35%
+ * dell'attività (MIN_BOUNDS_ACTIVITY_SHARE) e di suo è la parte più fitta, quindi più PICCOLA del
+ * player: sul set di prova prendeva l'angolo in alto a sinistra di un TikTok, o una striscia del
+ * video reagito. Un player è attivo in modo uniforme fino al suo bordo e lì finisce (cornici e
+ * bande nere hanno attività zero), mentre chat e commenti sono attivi in modo rado: la crescita si
+ * ferma dove la striscia appena fuori scende sotto metà della densità del nocciolo.
+ */
+function growToContentEdges(
+  integral: Float64Array,
+  width: number,
+  height: number,
+  core: { x: number; y: number; w: number; h: number; density: number },
+): { x: number; y: number; w: number; h: number } {
+  let x0 = core.x;
+  let y0 = core.y;
+  let x1 = core.x + core.w - 1;
+  let y1 = core.y + core.h - 1;
+  const minDensity = core.density * GROW_DENSITY_RATIO;
+  const density = (ax: number, ay: number, bx: number, by: number) =>
+    regionSum(integral, width, ax, ay, bx, by) / ((bx - ax + 1) * (by - ay + 1));
+
+  let grew = true;
+  while (grew) {
+    grew = false;
+    if (x0 - GROW_STEP >= 0 && density(x0 - GROW_STEP, y0, x0 - 1, y1) >= minDensity) {
+      x0 -= GROW_STEP;
+      grew = true;
+    }
+    if (x1 + GROW_STEP <= width - 1 && density(x1 + 1, y0, x1 + GROW_STEP, y1) >= minDensity) {
+      x1 += GROW_STEP;
+      grew = true;
+    }
+    if (y0 - GROW_STEP >= 0 && density(x0, y0 - GROW_STEP, x1, y0 - 1) >= minDensity) {
+      y0 -= GROW_STEP;
+      grew = true;
+    }
+    if (y1 + GROW_STEP <= height - 1 && density(x0, y1 + 1, x1, y1 + GROW_STEP) >= minDensity) {
+      y1 += GROW_STEP;
+      grew = true;
+    }
+  }
+  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
 }
