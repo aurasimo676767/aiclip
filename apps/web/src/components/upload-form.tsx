@@ -1,19 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { FileVideo, Loader2, UploadCloud } from "lucide-react";
 import { ALLOWED_VIDEO_MIME_TYPES } from "@clipforge/shared";
 
 type Stage = "idle" | "creating" | "uploading" | "finalizing" | "error";
 
+const STAGE_LABEL: Record<Stage, string> = {
+  idle: "Carica e analizza",
+  error: "Carica e analizza",
+  creating: "Creo il progetto…",
+  uploading: "Caricamento in corso…",
+  finalizing: "Finalizzo…",
+};
+
 export function UploadForm() {
   const router = useRouter();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState<string | null>(null);
 
   const isBusy = stage === "creating" || stage === "uploading" || stage === "finalizing";
+
+  function pick(candidate: File | null | undefined) {
+    if (!candidate) return;
+    setFile(candidate);
+    setError(null);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -74,50 +91,53 @@ export function UploadForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label htmlFor="title" className="mb-1 block text-sm font-medium text-zinc-300">
-          Titolo progetto
-        </label>
-        <input
-          id="title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Es. Episodio 42 - Intervista con..."
-          className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-brand-400"
-        />
-      </div>
-
-      <div>
-        <label htmlFor="file" className="mb-1 block text-sm font-medium text-zinc-300">
-          Video sorgente
-        </label>
-        <input
-          id="file"
-          type="file"
-          accept={ALLOWED_VIDEO_MIME_TYPES.join(",")}
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className="block w-full text-sm text-zinc-400 file:mr-4 file:rounded-lg file:border-0 file:bg-brand-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-600"
-        />
-        {file && (
-          <p className="mt-1 text-xs text-zinc-500">
-            {file.name} — {(file.size / 1024 / 1024).toFixed(1)} MB
-          </p>
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          pick(e.dataTransfer.files?.[0]);
+        }}
+        className={`flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-8 text-center transition ${
+          dragging ? "border-brand-400 bg-brand-500/10" : "border-line-strong bg-canvas hover:border-faint"
+        }`}
+      >
+        {file ? <FileVideo size={26} className="text-brand-300" /> : <UploadCloud size={26} className="text-faint" />}
+        {file ? (
+          <span className="text-sm text-ink">
+            {file.name} <span className="text-faint">— {(file.size / 1024 / 1024).toFixed(1)} MB</span>
+          </span>
+        ) : (
+          <span className="text-sm text-muted">
+            Trascina qui il video, o <span className="text-brand-300">sfoglia</span>
+            <span className="block text-xs text-faint">MP4, MOV, MKV o WebM</span>
+          </span>
         )}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={ALLOWED_VIDEO_MIME_TYPES.join(",")}
+        onChange={(e) => pick(e.target.files?.[0])}
+        className="hidden"
+      />
+
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Titolo del progetto (facoltativo)" className="input flex-1" />
+        <button type="submit" disabled={isBusy || !file} className="btn btn-gradient">
+          {isBusy && <Loader2 size={16} className="animate-spin" />}
+          {STAGE_LABEL[stage]}
+        </button>
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
-
-      <button
-        type="submit"
-        disabled={isBusy}
-        className="w-full rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50"
-      >
-        {stage === "creating" && "Creazione progetto..."}
-        {stage === "uploading" && "Caricamento in corso..."}
-        {stage === "finalizing" && "Finalizzazione..."}
-        {(stage === "idle" || stage === "error") && "Carica e avvia analisi"}
-      </button>
     </form>
   );
 }

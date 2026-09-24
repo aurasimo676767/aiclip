@@ -1,7 +1,11 @@
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { fetchProjectSummaries } from "@/lib/data/projects";
 import { ProjectList } from "@/components/project-list";
 import { CreateProjectPanel } from "@/components/create-project-panel";
+import { PollingRefresher } from "@/components/polling-refresher";
+import { isProcessingStatus } from "@/components/status-badge";
 
 // Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
 // cachati anche col polling attivo.
@@ -12,25 +16,30 @@ export const dynamic = "force-dynamic";
 // cresciuto a centinaia di progetti era diventato il principale collo di bottiglia di velocità
 // del sito. I progetti più vecchi restano comunque raggiungibili dalle altre tab (Pubblicati,
 // Completati, ...).
-const RECENT_PROJECTS_LIMIT = 10;
+const RECENT_PROJECTS_LIMIT = 12;
 
-export default async function MyClipsPage() {
+export default async function HomePage() {
   const { supabase } = await requireUser();
   const summaries = await fetchProjectSummaries(supabase, undefined, RECENT_PROJECTS_LIMIT);
+  const anyProcessing = summaries.some((s) => isProcessingStatus(s.project.status));
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold text-white">My Clips</h1>
-        <p className="mt-1 text-sm text-zinc-500">Incolla un link YouTube per iniziare, oppure carica un file.</p>
-      </div>
-
+    <div className="mx-auto max-w-6xl space-y-10">
+      <PollingRefresher active={anyProcessing} />
       <CreateProjectPanel />
 
-      <div>
-        <p className="mb-3 text-xs text-zinc-600">Gli ultimi {RECENT_PROJECTS_LIMIT} progetti.</p>
-        <ProjectList summaries={summaries} emptyMessage="Non hai ancora nessuna clip. Incolla un link YouTube qui sopra per iniziare." />
-      </div>
+      <section className="space-y-4">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="font-display text-xl font-semibold text-ink">Progetti recenti</h2>
+            <p className="text-sm text-muted">Gli ultimi {RECENT_PROJECTS_LIMIT}.</p>
+          </div>
+          <Link href="/dashboard/completed" className="btn btn-ghost btn-sm">
+            Tutti i completati <ArrowRight size={14} />
+          </Link>
+        </div>
+        <ProjectList summaries={summaries} emptyMessage="Incolla un link YouTube qui sopra per creare il primo progetto." />
+      </section>
     </div>
   );
 }

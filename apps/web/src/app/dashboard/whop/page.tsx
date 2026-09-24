@@ -32,8 +32,8 @@ export default async function WhopPage() {
       <PollingRefresher active={pollingActive} />
 
       <div>
-        <h1 className="text-2xl font-semibold text-white">Whop</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-ink sm:text-[28px]">Voice over</h1>
+        <p className="mt-1 text-sm text-muted">
           Carica una clip già pronta e un file audio (voice over): genera automaticamente uno Short verticale con l&apos;audio
           del voice over al posto di quello originale e sottotitoli una parola alla volta.
         </p>
@@ -42,7 +42,7 @@ export default async function WhopPage() {
       <VoiceoverUploadForm />
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Le tue clip ({jobs.length})</h2>
+        <h2 className="section-title">Le tue clip ({jobs.length})</h2>
         <VoiceoverJobList jobs={jobs} />
       </section>
     </div>

@@ -2,11 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { X } from "lucide-react";
+import { useConfirm } from "./ui-kit/confirm";
 
 export function CancelProjectButton({ projectId, compact }: { projectId: string; compact?: boolean }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   async function handleClick(e: React.MouseEvent) {
     // Il bottone può stare dentro una <Link> (card della dashboard): evita che il click
@@ -14,7 +17,13 @@ export function CancelProjectButton({ projectId, compact }: { projectId: string;
     e.preventDefault();
     e.stopPropagation();
 
-    if (!window.confirm("Annullare l'elaborazione di questo progetto?")) return;
+    const ok = await confirm({
+      title: "Annullare l'elaborazione?",
+      description: "Il worker smette di lavorare su questo video. Potrai riprovare più tardi.",
+      confirmLabel: "Annulla elaborazione",
+      destructive: true,
+    });
+    if (!ok) return;
 
     setSubmitting(true);
     setError(null);
@@ -32,13 +41,15 @@ export function CancelProjectButton({ projectId, compact }: { projectId: string;
 
   return (
     <div className={compact ? "space-y-1" : "mt-2 space-y-1"}>
+      {confirm.element}
       {error && <p className="text-xs text-red-400">{error}</p>}
       <button
         onClick={handleClick}
         disabled={submitting}
-        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50"
+        className="btn btn-secondary btn-sm"
       >
-        {submitting ? "Annullo..." : "Annulla"}
+        <X size={14} />
+        {submitting ? "Annullo…" : "Annulla"}
       </button>
     </div>
   );

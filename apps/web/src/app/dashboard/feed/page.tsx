@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { ArrowUpRight, Radio, Tv } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { VideoFeed } from "@/components/video-feed";
 import { TwitchVideoFeed } from "@/components/twitch-video-feed";
+import { EmptyState, PageHeader } from "@/components/ui";
 
 export default async function FeedPage() {
   const { supabase, user } = await requireUser();
@@ -10,61 +12,60 @@ export default async function FeedPage() {
   const { data: channels } = await supabase.from("followed_channels").select("id, channel_title").eq("user_id", user.id);
   const { data: twitchChannels } = await supabase.from("followed_twitch_channels").select("id, display_name").eq("user_id", user.id);
 
+  const settingsLink = (
+    <Link href="/dashboard/settings" className="btn btn-secondary btn-sm">
+      Vai alle Opzioni
+    </Link>
+  );
+
   return (
-    <div className="mx-auto max-w-5xl space-y-10">
-      <div>
-        <h1 className="text-2xl font-semibold text-white">Feed</h1>
-        <p className="mt-1 text-sm text-zinc-500">Video recenti dei canali che segui. Clicca &quot;Genera&quot; su quello che vuoi trasformare in contenuto.</p>
-      </div>
+    <div className="mx-auto max-w-6xl space-y-12">
+      <PageHeader title="Feed" description="Gli ultimi video dei canali che segui: premi Genera su quello che vuoi trasformare." />
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">YouTube — Shorts</h2>
-        {!connection ? (
-          <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
-            Collega prima un account YouTube dalle{" "}
-            <Link href="/dashboard/settings" className="text-brand-300 hover:underline">
-              Impostazioni
-            </Link>
-            .
+      <section className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/15 text-purple-300">
+              <Radio size={18} />
+            </span>
+            <div>
+              <h2 className="font-display text-lg font-semibold text-ink">Twitch</h2>
+              <p className="text-xs text-muted">VOD → video long-form</p>
+            </div>
           </div>
-        ) : !channels || channels.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
-            Non segui ancora nessun canale. Aggiungine uno dalle{" "}
-            <Link href="/dashboard/settings" className="text-brand-300 hover:underline">
-              Impostazioni
-            </Link>
-            .
-          </div>
-        ) : (
-          <VideoFeed />
-        )}
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Twitch — video long-form</h2>
-        {!twitchChannels || twitchChannels.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
-            Non segui ancora nessun canale Twitch. Aggiungine uno dalle{" "}
-            <Link href="/dashboard/settings" className="text-brand-300 hover:underline">
-              Impostazioni
-            </Link>{" "}
-            (nessuna connessione richiesta).
-          </div>
-        ) : (
-          <>
-            <div className="flex flex-wrap gap-2">
+          {twitchChannels && twitchChannels.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
               {twitchChannels.map((c) => (
-                <Link
-                  key={c.id}
-                  href={`/dashboard/feed/twitch/${c.id}`}
-                  className="rounded-full border border-zinc-700 px-3 py-1 text-xs font-medium text-zinc-300 hover:border-brand-400/50 hover:text-brand-300"
-                >
-                  {c.display_name} →
+                <Link key={c.id} href={`/dashboard/feed/twitch/${c.id}`} className="chip transition hover:border-purple-400/50 hover:text-ink">
+                  {c.display_name} <ArrowUpRight size={12} />
                 </Link>
               ))}
             </div>
-            <TwitchVideoFeed />
-          </>
+          )}
+        </div>
+        {!twitchChannels || twitchChannels.length === 0 ? (
+          <EmptyState title="Non segui ancora nessun canale Twitch" description="Aggiungine uno dalle Opzioni (non serve nessuna connessione)." action={settingsLink} />
+        ) : (
+          <TwitchVideoFeed />
+        )}
+      </section>
+
+      <section className="space-y-5">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-500/15 text-red-300">
+            <Tv size={18} />
+          </span>
+          <div>
+            <h2 className="font-display text-lg font-semibold text-ink">YouTube</h2>
+            <p className="text-xs text-muted">Video → Shorts verticali</p>
+          </div>
+        </div>
+        {!connection ? (
+          <EmptyState title="Collega prima un account YouTube" description="Serve per leggere i video dei canali che segui." action={settingsLink} />
+        ) : !channels || channels.length === 0 ? (
+          <EmptyState title="Non segui ancora nessun canale YouTube" description="Aggiungine uno dalle Opzioni." action={settingsLink} />
+        ) : (
+          <VideoFeed />
         )}
       </section>
     </div>

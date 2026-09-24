@@ -1,6 +1,7 @@
 import type { ClipScores, ClipBadge, VideoUsageStats } from "@clipforge/shared";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { ClipViewModel } from "@/components/clip-list";
+import { getPresignedDownloadUrl } from "@/lib/storage/r2";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
@@ -46,7 +47,9 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       .in("project_id", projectIds),
     supabase
       .from("clips")
-      .select("id, project_id, title, hook, reason, duration, scores, status, error_message, hashtags, caption, publish_description, badges, format")
+      .select(
+        "id, project_id, title, hook, reason, duration, scores, status, error_message, hashtags, caption, publish_description, badges, format, thumbnail_path, output_video_path",
+      )
       .in("project_id", projectIds),
   ]);
 
@@ -89,6 +92,20 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
     streamerByProject.set(v.project_id, { name: v.streamer_name, login: v.streamer_login });
   }
 
+  // URL firmati di copertina e video, per la griglia (anteprima al passaggio del mouse) e il
+  // player: si calcolano in locale (nessuna chiamata a R2), quindi costano solo qualche ms.
+  const mediaUrls = new Map<string, { thumbnailUrl: string | null; videoUrl: string | null }>();
+  await Promise.all(
+    (clipsRaw ?? []).map(async (c) => {
+      const sign = (path: string | null) => (path ? getPresignedDownloadUrl(path, 6 * 3600).catch(() => null) : Promise.resolve(null));
+      const [thumbnailUrl, videoUrl] = await Promise.all([
+        sign(c.thumbnail_path),
+        c.status === "COMPLETED" ? sign(c.output_video_path) : Promise.resolve(null),
+      ]);
+      mediaUrls.set(c.id, { thumbnailUrl, videoUrl });
+    }),
+  );
+
   const clipsByProject = new Map<string, ClipViewModel[]>();
   for (const c of clipsRaw ?? []) {
     const publish = latestPublishByClip.get(c.id);
@@ -116,6 +133,8 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       youtubeError: publish?.errorMessage ?? null,
       youtubePublishAt: publish?.publishAt ?? null,
       youtubeCancelledAt: publish?.cancelledAt ?? null,
+      thumbnailUrl: mediaUrls.get(c.id)?.thumbnailUrl ?? null,
+      videoUrl: mediaUrls.get(c.id)?.videoUrl ?? null,
     };
     const list = clipsByProject.get(c.project_id) ?? [];
     list.push(clip);

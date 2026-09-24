@@ -26,7 +26,7 @@ export default async function CreditsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
-      <h1 className="text-2xl font-semibold text-white">Credits & Usage</h1>
+      <h1 className="font-display text-2xl font-semibold tracking-tight text-ink sm:text-[28px]">Credits & Usage</h1>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Piano" value={plan} />
@@ -37,8 +37,8 @@ export default async function CreditsPage() {
         />
       </div>
 
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
-        <h2 className="mb-3 text-sm font-semibold text-zinc-300">Limiti piano {plan}</h2>
+      <div className="card p-5">
+        <h2 className="mb-3 text-sm font-semibold text-ink">Limiti piano {plan}</h2>
         <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
           <Metric label="Minuti/mese" value={String(limits.monthlyProcessingMinutes)} />
           <Metric label="Clip/mese" value={String(limits.monthlyClips)} />
@@ -48,11 +48,11 @@ export default async function CreditsPage() {
       </div>
 
       <div>
-        <h2 className="mb-3 text-sm font-semibold text-zinc-300">Storico utilizzo</h2>
+        <h2 className="mb-3 text-sm font-semibold text-ink">Storico utilizzo</h2>
         {usageRows && usageRows.length > 0 ? (
-          <div className="overflow-hidden rounded-xl border border-zinc-800">
+          <div className="overflow-hidden rounded-2xl border border-line">
             <table className="w-full text-sm">
-              <thead className="bg-zinc-900/60 text-left text-zinc-500">
+              <thead className="bg-raised text-left text-muted">
                 <tr>
                   <th className="px-4 py-2 font-medium">Periodo</th>
                   <th className="px-4 py-2 font-medium">Minuti</th>
@@ -60,7 +60,7 @@ export default async function CreditsPage() {
                   <th className="px-4 py-2 font-medium">Storage</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800 text-zinc-300">
+              <tbody className="divide-y divide-line text-ink">
                 {usageRows.map((row) => (
                   <tr key={row.period_start}>
                     <td className="px-4 py-2">{row.period_start}</td>
@@ -73,7 +73,7 @@ export default async function CreditsPage() {
             </table>
           </div>
         ) : (
-          <p className="text-sm text-zinc-500">Nessun utilizzo registrato ancora.</p>
+          <p className="text-sm text-muted">Nessun utilizzo registrato ancora.</p>
         )}
       </div>
     </div>
@@ -82,9 +82,9 @@ export default async function CreditsPage() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className="mt-1 text-xl font-semibold text-white">{value}</p>
+    <div className="card p-4">
+      <p className="text-xs text-muted">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-ink">{value}</p>
     </div>
   );
 }
@@ -92,8 +92,8 @@ function StatCard({ label, value }: { label: string; value: string }) {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs text-zinc-500">{label}</dt>
-      <dd className="text-zinc-200">{value}</dd>
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="text-ink">{value}</dd>
     </div>
   );
 }

@@ -79,49 +79,49 @@ export function FollowedChannelsPanel({ channels }: { channels: FollowedChannel[
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="youtube.com/@nomecanale"
-          className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-white outline-none focus:border-brand-400"
+          className="input min-w-0 flex-1"
         />
         <button
           type="submit"
           disabled={adding || !input.trim()}
-          className="shrink-0 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:border-zinc-500 disabled:opacity-50"
+          className="btn btn-secondary shrink-0"
         >
           {adding ? "Aggiungo..." : "Aggiungi"}
         </button>
       </form>
 
       {channels.length > 0 ? (
-        <ul className="space-y-1">
+        <ul className="space-y-1.5">
           {channels.map((c) => (
-            <li key={c.id} className="flex items-center justify-between rounded-md bg-zinc-900/60 px-3 py-1.5 text-sm text-zinc-200">
+            <li key={c.id} className="flex items-center justify-between rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm text-ink">
               {c.channelTitle}
-              <button onClick={() => handleRemove(c.id)} className="text-xs text-zinc-500 hover:text-red-400">
+              <button onClick={() => handleRemove(c.id)} className="text-xs text-faint transition hover:text-red-300">
                 Rimuovi
               </button>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-zinc-600">Non segui ancora nessun canale.</p>
+        <p className="text-xs text-faint">Non segui ancora nessun canale.</p>
       )}
 
       {error && <p className="text-xs text-red-400">{error}</p>}
 
-      <div className="border-t border-zinc-800 pt-3">
+      <div className="space-y-2 border-t border-line pt-4">
         <button
           onClick={handleScan}
           disabled={scanning || channels.length === 0}
-          className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+          className="btn btn-primary btn-sm"
         >
-          {scanning ? "Scansione in corso..." : "Scan — cerca video nuovi"}
+          {scanning ? "Scansione in corso…" : "Cerca video nuovi"}
         </button>
-        <p className="mt-1 text-xs text-zinc-600">
+        <p className="text-xs text-faint">
           Importa i video nuovi trovati nella pipeline normale (stessi costi di un&apos;importazione manuale, ~$0.04-0.05 a video con
           Sonnet, ~$0.08-0.17 con Opus). Max {5} importazioni per scan.
         </p>
 
         {scanResult && (
-          <div className="mt-2 rounded-md bg-zinc-900/60 p-2 text-xs text-zinc-300">
+          <div className="rounded-lg border border-line bg-raised/60 p-3 text-xs text-muted">
             <p>
               Controllati {scanResult.channelsScanned} canali, trovati {scanResult.newVideosFound} video nuovi
               {scanResult.imported.length > 0 ? `, importati ${scanResult.imported.length}:` : "."}

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Layers, Loader2 } from "lucide-react";
 
 export function BulkYoutubeImportForm() {
   const router = useRouter();
@@ -9,22 +10,21 @@ export function BulkYoutubeImportForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const urls = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError(null);
-
-    const urls = text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
 
     if (urls.length === 0) {
       setError("Incolla almeno un link YouTube (uno per riga)");
-      setLoading(false);
       return;
     }
 
+    setLoading(true);
     try {
       const res = await fetch("/api/projects/youtube/bulk", {
         method: "POST",
@@ -39,7 +39,6 @@ export function BulkYoutubeImportForm() {
       router.push(`/dashboard/batch?ids=${data.projectIds.join(",")}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore imprevisto");
-    } finally {
       setLoading(false);
     }
   }
@@ -51,17 +50,17 @@ export function BulkYoutubeImportForm() {
         rows={5}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={"Un link YouTube per riga, es.:\nhttps://www.youtube.com/watch?v=...\nhttps://youtu.be/..."}
-        className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-white outline-none focus:border-brand-400"
+        placeholder={"Un link YouTube per riga\nhttps://www.youtube.com/watch?v=…\nhttps://youtu.be/…"}
+        className="input resize-y rounded-2xl px-4 py-3 text-[15px]"
       />
       {error && <p className="text-sm text-red-400">{error}</p>}
-      <button
-        type="submit"
-        disabled={loading}
-        className="rounded-lg bg-brand-500 px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50"
-      >
-        {loading ? "Importazione..." : "Genera più video"}
-      </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-faint">Tutte le clip suggerite vengono messe subito in render, senza selezione manuale.</p>
+        <button type="submit" disabled={loading || urls.length === 0} className="btn btn-gradient">
+          {loading ? <Loader2 size={16} className="animate-spin" /> : <Layers size={16} />}
+          {loading ? "Importo…" : urls.length > 1 ? `Genera ${urls.length} video` : "Genera"}
+        </button>
+      </div>
     </form>
   );
 }

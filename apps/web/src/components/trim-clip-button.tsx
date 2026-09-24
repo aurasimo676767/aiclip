@@ -2,19 +2,31 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Loader2, Scissors } from "lucide-react";
 
-interface TrimClipButtonProps {
+interface TrimPanelProps {
   clipId: string;
   duration: number;
+  /** Secondo corrente del player della clip, per "inizio qui"/"fine qui". */
+  getCurrentTime?: () => number | null;
+  onDone: () => void;
+  onCancel: () => void;
 }
 
-export function TrimClipButton({ clipId, duration }: TrimClipButtonProps) {
+/** Accorcia una clip già renderizzata spostando inizio e fine (rigenera il video). */
+export function TrimPanel({ clipId, duration, getCurrentTime, onDone, onCancel }: TrimPanelProps) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [startOffset, setStartOffset] = useState(0);
-  const [endOffset, setEndOffset] = useState(duration);
+  const [endOffset, setEndOffset] = useState(Math.round(duration * 10) / 10);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const newDuration = endOffset - startOffset;
+
+  function fromPlayer(set: (value: number) => void) {
+    const t = getCurrentTime?.();
+    if (t !== null && t !== undefined) set(Math.round(t * 10) / 10);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,8 +40,8 @@ export function TrimClipButton({ clipId, duration }: TrimClipButtonProps) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Taglio fallito");
-      setOpen(false);
       router.refresh();
+      onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore imprevisto");
     } finally {
@@ -37,73 +49,55 @@ export function TrimClipButton({ clipId, duration }: TrimClipButtonProps) {
     }
   }
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => {
-          setStartOffset(0);
-          setEndOffset(duration);
-          setOpen(true);
-        }}
-        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:border-zinc-500"
-      >
-        Modifica durata
-      </button>
-    );
-  }
-
-  const newDuration = endOffset - startOffset;
+  const startPct = (startOffset / duration) * 100;
+  const endPct = (endOffset / duration) * 100;
 
   return (
-    <form onSubmit={handleSubmit} className="mt-2 max-w-md space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-      <p className="text-xs text-zinc-500">
-        Sposta inizio/fine per accorciare la clip (0s - {duration.toFixed(1)}s). Rigenera il video — richiede qualche minuto.
-      </p>
-      <div className="flex gap-2">
-        <div className="flex-1">
-          <label className="mb-1 block text-xs text-zinc-500">Inizia da (s)</label>
-          <input
-            type="number"
-            min={0}
-            max={endOffset - 3}
-            step={0.5}
-            value={startOffset}
-            onChange={(e) => setStartOffset(Number(e.target.value))}
-            className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-white outline-none focus:border-brand-400"
-          />
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <p className="section-title">Taglia la clip</p>
+        <p className="mt-0.5 text-xs text-muted">Sposta inizio e fine: il video viene rigenerato (qualche minuto).</p>
+      </div>
+
+      {/* Barra che mostra la parte tenuta */}
+      <div className="relative h-2 rounded-full bg-overlay">
+        <div className="absolute inset-y-0 rounded-full bg-brand-gradient" style={{ left: `${startPct}%`, width: `${Math.max(0, endPct - startPct)}%` }} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label">Inizia da (s)</label>
+          <input type="number" min={0} max={endOffset - 3} step={0.1} value={startOffset} onChange={(e) => setStartOffset(Number(e.target.value))} className="input tabular-nums" />
+          {getCurrentTime && (
+            <button type="button" onClick={() => fromPlayer(setStartOffset)} className="mt-1.5 text-xs text-brand-300 hover:text-brand-200">
+              Inizio qui ▸
+            </button>
+          )}
         </div>
-        <div className="flex-1">
-          <label className="mb-1 block text-xs text-zinc-500">Termina a (s)</label>
-          <input
-            type="number"
-            min={startOffset + 3}
-            max={duration}
-            step={0.5}
-            value={endOffset}
-            onChange={(e) => setEndOffset(Number(e.target.value))}
-            className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-white outline-none focus:border-brand-400"
-          />
+        <div>
+          <label className="label">Termina a (s)</label>
+          <input type="number" min={startOffset + 3} max={duration} step={0.1} value={endOffset} onChange={(e) => setEndOffset(Number(e.target.value))} className="input tabular-nums" />
+          {getCurrentTime && (
+            <button type="button" onClick={() => fromPlayer(setEndOffset)} className="mt-1.5 text-xs text-brand-300 hover:text-brand-200">
+              ◂ Fine qui
+            </button>
+          )}
         </div>
       </div>
 
-      <p className="text-xs text-zinc-500">Nuova durata: {newDuration.toFixed(1)}s</p>
+      <p className="text-xs text-muted">
+        Nuova durata: <span className="font-medium tabular-nums text-ink">{newDuration.toFixed(1)}s</span> su {duration.toFixed(1)}s
+      </p>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
 
-      <div className="flex gap-2 pt-1">
-        <button
-          type="submit"
-          disabled={submitting || newDuration < 3}
-          className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-        >
-          {submitting ? "Applico..." : "Applica taglio"}
+      <div className="flex gap-2">
+        <button type="submit" disabled={submitting || newDuration < 3} className="btn btn-primary btn-sm">
+          {submitting ? <Loader2 size={14} className="animate-spin" /> : <Scissors size={14} />}
+          {submitting ? "Applico…" : "Applica taglio"}
         </button>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-500"
-        >
-          Annulla
+        <button type="button" onClick={onCancel} className="btn btn-secondary btn-sm">
+          Indietro
         </button>
       </div>
     </form>

@@ -26,16 +26,17 @@ export function YoutubeConnectionPanel({ channelTitle }: { channelTitle: string 
   if (channelTitle) {
     return (
       <div className="space-y-2">
-        <p className="text-sm text-zinc-300">
-          Connesso come <span className="font-medium text-white">{channelTitle}</span>
+        <p className="flex items-center gap-2 text-sm text-muted">
+          <span className="h-2 w-2 rounded-full bg-emerald-400" />
+          Connesso come <span className="font-medium text-ink">{channelTitle}</span>
         </p>
         {error && <p className="text-sm text-red-400">{error}</p>}
         <button
           onClick={handleDisconnect}
           disabled={loading}
-          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50"
+          className="btn btn-secondary btn-sm"
         >
-          {loading ? "Disconnessione..." : "Disconnetti"}
+          {loading ? "Disconnetto…" : "Disconnetti"}
         </button>
       </div>
     );
@@ -44,7 +45,7 @@ export function YoutubeConnectionPanel({ channelTitle }: { channelTitle: string 
   return (
     <a
       href="/api/youtube/connect"
-      className="inline-block rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600"
+      className="btn btn-primary"
     >
       Connetti YouTube
     </a>

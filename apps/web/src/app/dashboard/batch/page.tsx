@@ -7,6 +7,7 @@ import { ClipList } from "@/components/clip-list";
 import { RetryProjectButton } from "@/components/retry-project-button";
 import { CancelProjectButton } from "@/components/cancel-project-button";
 import { fetchProjectDetails, fetchYoutubeConnected } from "@/lib/data/clips";
+import { Alert, EmptyState, PageHeader, formatDuration } from "@/components/ui";
 
 // Senza questo, su Vercel (produzione) Next.js può servire dati Supabase cachati anche col
 // polling attivo lato client (router.refresh() non basta a bypassare la Data Cache di fetch()
@@ -14,7 +15,7 @@ import { fetchProjectDetails, fetchYoutubeConnected } from "@/lib/data/clips";
 // avendo il worker che completava job in continuazione. In `next dev` questo non si nota perché
 // il dev server ha semantiche di cache diverse.
 export const dynamic = "force-dynamic";
-import { statusMessage } from "@/app/dashboard/projects/[id]/page";
+import { statusMessage } from "@/lib/status-message";
 
 export default async function BatchReviewPage({ searchParams }: { searchParams: { ids?: string } }) {
   const { supabase, user } = await requireUser();
@@ -26,14 +27,15 @@ export default async function BatchReviewPage({ searchParams }: { searchParams: 
 
   if (projectIds.length === 0) {
     return (
-      <div className="mx-auto max-w-4xl">
-        <p className="text-sm text-zinc-400">
-          Nessun progetto da mostrare.{" "}
-          <Link href="/dashboard" className="text-brand-300 hover:underline">
-            Torna alla dashboard
-          </Link>
-          .
-        </p>
+      <div className="mx-auto max-w-3xl">
+        <EmptyState
+          title="Nessun progetto da mostrare"
+          action={
+            <Link href="/dashboard" className="btn btn-secondary btn-sm">
+              Torna alla home
+            </Link>
+          }
+        />
       </div>
     );
   }
@@ -53,59 +55,48 @@ export default async function BatchReviewPage({ searchParams }: { searchParams: 
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <PollingRefresher active={pollingActive} />
 
-      <div>
-        <h1 className="text-2xl font-semibold text-white">Generazione multipla</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          {columns.length} video in elaborazione — ogni colonna si aggiorna da sola, puoi generare le clip che vuoi da ognuna.
-        </p>
-      </div>
+      <PageHeader
+        title="Generazione multipla"
+        description={`${columns.length} video — ogni colonna si aggiorna da sola.`}
+      />
 
-      <div className="flex gap-4 overflow-x-auto pb-4">
+      <div className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6 md:-mx-10 md:px-10">
         {columns.map(({ project, video, clips }) => {
           const processing = isProcessingStatus(project.status);
 
           return (
-            <div key={project.id} className="w-[22rem] shrink-0 space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-              <div className="space-y-1">
-                <div className="flex items-start justify-between gap-2">
-                  <Link
-                    href={`/dashboard/projects/${project.id}`}
-                    className="min-w-0 break-words font-medium text-white hover:underline"
-                  >
-                    {project.title}
-                  </Link>
+            <div key={project.id} className="card w-[23rem] shrink-0 space-y-4 p-4">
+              <div className="space-y-2">
+                <Link href={`/dashboard/projects/${project.id}`} className="line-clamp-2 font-medium leading-snug text-ink hover:text-brand-200">
+                  {project.title}
+                </Link>
+                <div className="flex flex-wrap items-center gap-2">
                   <StatusBadge status={project.status} />
+                  {video?.duration_seconds ? <span className="text-xs text-faint">{formatDuration(video.duration_seconds)}</span> : null}
                 </div>
-                {video && (
-                  <p className="break-words text-xs text-zinc-500">
-                    {video.original_filename}
-                    {video.duration_seconds ? ` — ${Math.round(video.duration_seconds / 60)} min` : ""}
-                  </p>
-                )}
               </div>
 
               {project.status === "FAILED" && (
-                <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
-                  <p>Errore: {project.error_message ?? video?.error_message ?? "sconosciuto"}</p>
-                  <RetryProjectButton projectId={project.id} />
-                </div>
+                <Alert>
+                  <p className="text-xs">Errore: {project.error_message ?? video?.error_message ?? "sconosciuto"}</p>
+                  <div className="mt-2">
+                    <RetryProjectButton projectId={project.id} />
+                  </div>
+                </Alert>
               )}
 
               {processing && clips.length === 0 && (
-                <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 animate-pulse rounded-full bg-brand-400" />
-                    <p className="text-xs text-zinc-400">{statusMessage(project.status, project.source_type)}</p>
-                  </div>
-                  <ProcessingProgressBar status={project.status} />
+                <div className="space-y-3 rounded-xl border border-line bg-raised/50 p-4">
+                  <p className="text-xs text-muted">{statusMessage(project.status, project.source_type)}</p>
+                  <ProcessingProgressBar status={project.status} showSteps={false} />
                   <CancelProjectButton projectId={project.id} compact />
                 </div>
               )}
 
-              {clips.length > 0 && <ClipList clips={clips} youtubeConnected={youtubeConnected} />}
+              {clips.length > 0 && <ClipList clips={clips} youtubeConnected={youtubeConnected} compact />}
             </div>
           );
         })}

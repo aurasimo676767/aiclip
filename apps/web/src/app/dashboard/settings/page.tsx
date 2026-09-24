@@ -3,6 +3,7 @@ import { YoutubeConnectionPanel } from "@/components/youtube-connection-panel";
 import { FollowedChannelsPanel } from "@/components/followed-channels-panel";
 import { FollowedTwitchChannelsPanel } from "@/components/followed-twitch-channels-panel";
 import { PublishSchedulePanel } from "@/components/publish-schedule-panel";
+import { Alert, PageHeader } from "@/components/ui";
 
 // Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
 // cachati anche col polling attivo.
@@ -37,78 +38,60 @@ export default async function SettingsPage({
     .maybeSingle();
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-2xl font-semibold text-white">Impostazioni</h1>
+    <div className="mx-auto max-w-4xl space-y-8">
+      <PageHeader title="Opzioni" description="Collegamenti, canali seguiti e orari di pubblicazione." />
 
-      {searchParams.youtube_connected && (
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300">
-          Account YouTube collegato con successo.
-        </div>
-      )}
-      {searchParams.youtube_error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-          Connessione YouTube fallita: {searchParams.youtube_error}
-        </div>
-      )}
+      {searchParams.youtube_connected && <Alert tone="success">Account YouTube collegato.</Alert>}
+      {searchParams.youtube_error && <Alert>Connessione YouTube fallita: {searchParams.youtube_error}</Alert>}
 
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
-        <dl className="space-y-4 text-sm">
-          <div className="flex justify-between border-b border-zinc-800 pb-3">
-            <dt className="text-zinc-500">Email</dt>
-            <dd className="text-zinc-200">{user.email}</dd>
-          </div>
-          <div className="flex justify-between border-b border-zinc-800 pb-3">
-            <dt className="text-zinc-500">Piano attuale</dt>
-            <dd className="text-zinc-200">{profile?.plan ?? "FREE"}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-zinc-500">Account creato il</dt>
-            <dd className="text-zinc-200">
-              {profile?.created_at ? new Date(profile.created_at).toLocaleDateString("it-IT") : "—"}
-            </dd>
-          </div>
-        </dl>
+      <div className="divide-y divide-line">
+        <Section title="YouTube" description="Serve per pubblicare e programmare le clip direttamente da qui.">
+          <YoutubeConnectionPanel channelTitle={youtubeConnection?.channel_title ?? null} />
+        </Section>
+
+        <Section title="Orari di pubblicazione" description="La griglia usata quando programmi più clip insieme.">
+          <PublishSchedulePanel initialShortTimes={publishSchedule?.short_times ?? []} initialLongformTimes={publishSchedule?.longform_times ?? []} />
+        </Section>
+
+        <Section title="Canali Twitch" description="I loro VOD compaiono nel Feed, da trasformare in video long-form. Non serve nessuna connessione.">
+          <FollowedTwitchChannelsPanel channels={(followedTwitchChannels ?? []).map((c) => ({ id: c.id, displayName: c.display_name }))} />
+        </Section>
+
+        {youtubeConnection && (
+          <Section title="Canali YouTube" description="Canali da controllare: i video nuovi finiscono nel Feed, o li importi con una scansione.">
+            <FollowedChannelsPanel channels={(followedChannels ?? []).map((c) => ({ id: c.id, channelTitle: c.channel_title }))} />
+          </Section>
+        )}
+
+        <Section title="Account">
+          <dl className="card divide-y divide-line text-sm">
+            <Row label="Email" value={user.email ?? "—"} />
+            <Row label="Piano" value={profile?.plan ?? "FREE"} />
+            <Row label="Creato il" value={profile?.created_at ? new Date(profile.created_at).toLocaleDateString("it-IT") : "—"} />
+          </dl>
+        </Section>
       </div>
+    </div>
+  );
+}
 
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
-        <h2 className="mb-3 text-sm font-semibold text-zinc-300">Pubblicazione YouTube</h2>
-        <YoutubeConnectionPanel channelTitle={youtubeConnection?.channel_title ?? null} />
+function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
+  return (
+    <section className="grid gap-4 py-7 first:pt-0 md:grid-cols-[14rem_1fr] md:gap-10">
+      <div>
+        <h2 className="section-title">{title}</h2>
+        {description && <p className="mt-1 text-xs leading-relaxed text-muted">{description}</p>}
       </div>
+      <div className="min-w-0">{children}</div>
+    </section>
+  );
+}
 
-      {youtubeConnection && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
-          <h2 className="mb-1 text-sm font-semibold text-zinc-300">Canali seguiti</h2>
-          <p className="mb-3 text-xs text-zinc-500">
-            Aggiungi canali YouTube da controllare — lo scan importa da solo i video nuovi nella pipeline normale.
-          </p>
-          <FollowedChannelsPanel
-            channels={(followedChannels ?? []).map((c) => ({ id: c.id, channelTitle: c.channel_title }))}
-          />
-        </div>
-      )}
-
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
-        <h2 className="mb-1 text-sm font-semibold text-zinc-300">Canali Twitch seguiti (video long-form)</h2>
-        <p className="mb-3 text-xs text-zinc-500">
-          Nessuna connessione richiesta. I VOD recenti compaiono nella tab Feed — da lì scegli quali trasformare in video
-          long-form divisi per argomento.
-        </p>
-        <FollowedTwitchChannelsPanel
-          channels={(followedTwitchChannels ?? []).map((c) => ({ id: c.id, displayName: c.display_name }))}
-        />
-      </div>
-
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
-        <h2 className="mb-1 text-sm font-semibold text-zinc-300">Programmazione automatica</h2>
-        <PublishSchedulePanel
-          initialShortTimes={publishSchedule?.short_times ?? []}
-          initialLongformTimes={publishSchedule?.longform_times ?? []}
-        />
-      </div>
-
-      <p className="text-xs text-zinc-600">
-        Gestione fatturazione e upgrade piano non ancora disponibili in questa fase.
-      </p>
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4 px-4 py-3">
+      <dt className="text-muted">{label}</dt>
+      <dd className="truncate text-ink">{value}</dd>
     </div>
   );
 }

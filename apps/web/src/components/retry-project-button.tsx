@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { RotateCcw } from "lucide-react";
 
 export function RetryProjectButton({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -29,9 +30,10 @@ export function RetryProjectButton({ projectId }: { projectId: string }) {
       <button
         onClick={handleClick}
         disabled={submitting}
-        className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-200 hover:border-red-400 disabled:opacity-50"
+        className="btn btn-danger btn-sm"
       >
-        {submitting ? "Rimetto in coda..." : "Riprova"}
+        <RotateCcw size={14} />
+        {submitting ? "Rimetto in coda…" : "Riprova"}
       </button>
     </div>
   );

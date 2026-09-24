@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowRight, Link2, Loader2 } from "lucide-react";
 
 export function YoutubeImportForm() {
   const router = useRouter();
@@ -27,31 +28,30 @@ export function YoutubeImportForm() {
       router.push(`/dashboard/projects/${data.projectId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore imprevisto");
-    } finally {
       setLoading(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 sm:flex-row sm:items-start">
-      <div className="flex-1">
-        <input
-          type="url"
-          required
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://www.youtube.com/watch?v=..."
-          className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-white outline-none focus:border-brand-400"
-        />
-        {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+    <form onSubmit={handleSubmit} className="space-y-2">
+      <div className="flex flex-col gap-2 rounded-2xl border border-line-strong bg-canvas p-2 transition focus-within:border-brand-400 focus-within:ring-4 focus-within:ring-brand-500/15 sm:flex-row sm:items-center">
+        <div className="flex flex-1 items-center gap-3 px-3">
+          <Link2 size={18} className="shrink-0 text-faint" />
+          <input
+            type="url"
+            required
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="Incolla un link YouTube…"
+            className="w-full bg-transparent py-2.5 text-[15px] text-ink placeholder:text-faint focus:outline-none"
+          />
+        </div>
+        <button type="submit" disabled={loading || url.trim().length === 0} className="btn btn-gradient btn-lg">
+          {loading ? <Loader2 size={18} className="animate-spin" /> : <ArrowRight size={18} />}
+          {loading ? "Importo…" : "Crea clip"}
+        </button>
       </div>
-      <button
-        type="submit"
-        disabled={loading}
-        className="rounded-lg bg-brand-500 px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50"
-      >
-        {loading ? "Importazione..." : "Importa e analizza"}
-      </button>
+      {error && <p className="px-2 text-sm text-red-400">{error}</p>}
     </form>
   );
 }

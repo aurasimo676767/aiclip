@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CalendarClock, Loader2, Sparkles, X } from "lucide-react";
 import { overallScore, type ClipScores, type ClipBadge } from "@clipforge/shared";
-import { StatusBadge } from "./status-badge";
-import { PublishYoutubeButton } from "./publish-youtube-button";
-import { TrimClipButton } from "./trim-clip-button";
+import { ClipCard } from "./clip-card";
+import { ClipDetailDialog } from "./clip-detail-dialog";
+import { Alert, EmptyState } from "./ui";
 
 export interface ClipViewModel {
   id: string;
@@ -27,38 +28,46 @@ export interface ClipViewModel {
   youtubeCancelledAt: string | null;
   badges: ClipBadge[];
   format: "short" | "longform";
+  /** URL firmati (validi qualche ora), null finché la clip non è renderizzata. */
+  thumbnailUrl: string | null;
+  videoUrl: string | null;
 }
 
-const BADGE_LABELS: Record<ClipBadge, string> = {
-  gotcha: "🎯 Gotcha",
-  cliffhanger: "⏳ Cliffhanger",
-  controversial: "🔥 Controverso",
-  relatable: "🙃 Relatable",
-  high_energy: "⚡ Energia alta",
-};
+type Filter = "all" | "todo" | "working" | "ready" | "published";
 
-export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; youtubeConnected: boolean }) {
+const FILTERS: Array<{ id: Filter; label: string; match: (c: ClipViewModel) => boolean }> = [
+  { id: "all", label: "Tutte", match: () => true },
+  { id: "todo", label: "Da generare", match: (c) => c.status === "SUGGESTED" || c.status === "FAILED" },
+  { id: "working", label: "In render", match: (c) => c.status === "QUEUED" || c.status === "RENDERING" },
+  { id: "ready", label: "Pronte", match: (c) => c.status === "COMPLETED" && !c.youtubeUrl },
+  { id: "published", label: "Su YouTube", match: (c) => Boolean(c.youtubeUrl) },
+];
+
+export function isRenderable(clip: ClipViewModel): boolean {
+  return clip.status === "SUGGESTED" || clip.status === "FAILED";
+}
+
+/** Un job annullato non blocca una nuova programmazione: il video è stato eliminato da YouTube. */
+export function isSchedulable(clip: ClipViewModel, youtubeConnected: boolean): boolean {
+  return youtubeConnected && clip.status === "COMPLETED" && (clip.youtubePublishStatus === null || clip.youtubeCancelledAt !== null);
+}
+
+export function ClipList({ clips, youtubeConnected, compact = false }: { clips: ClipViewModel[]; youtubeConnected: boolean; compact?: boolean }) {
   const router = useRouter();
+  const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [submitting, setSubmitting] = useState(false);
-  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
-  const [previewLoading, setPreviewLoading] = useState<string | null>(null);
+  const [openClipId, setOpenClipId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"render" | "schedule" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [retryingClipId, setRetryingClipId] = useState<string | null>(null);
-  const [cancellingClipId, setCancellingClipId] = useState<string | null>(null);
-  const [regeneratingTitleClipId, setRegeneratingTitleClipId] = useState<string | null>(null);
-  const [editingClipId, setEditingClipId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<{ title: string; description: string; hashtags: string } | null>(null);
-  const [savingEdit, setSavingEdit] = useState(false);
-  const [editMessage, setEditMessage] = useState<string | null>(null);
-  const [selectedForSchedule, setSelectedForSchedule] = useState<Set<string>>(new Set());
-  const [submittingSchedule, setSubmittingSchedule] = useState(false);
-  const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
-  const sorted = useMemo(
-    () => [...clips].sort((a, b) => overallScore(b.scores) - overallScore(a.scores)),
-    [clips],
-  );
+  const sorted = useMemo(() => [...clips].sort((a, b) => overallScore(b.scores) - overallScore(a.scores)), [clips]);
+  const visible = sorted.filter(FILTERS.find((f) => f.id === filter)!.match);
+  const openClip = clips.find((c) => c.id === openClipId) ?? null;
+
+  const selectedClips = clips.filter((c) => selected.has(c.id));
+  const toRender = selectedClips.filter(isRenderable);
+  const toSchedule = selectedClips.filter((c) => isSchedulable(c, youtubeConnected));
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -69,46 +78,43 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
     });
   }
 
-  async function handleGenerate() {
-    if (selected.size === 0) return;
-    setSubmitting(true);
+  function selectAllRenderable() {
+    setSelected(new Set(sorted.filter(isRenderable).map((c) => c.id)));
+  }
+
+  async function handleRender() {
+    if (toRender.length === 0) return;
+    setBusy("render");
     setError(null);
+    setMessage(null);
     try {
       const res = await fetch("/api/clips/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clipIds: [...selected] }),
+        body: JSON.stringify({ clipIds: toRender.map((c) => c.id) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Richiesta fallita");
+      setMessage(`${toRender.length} ${toRender.length === 1 ? "clip messa" : "clip messe"} in render.`);
       setSelected(new Set());
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore imprevisto");
     } finally {
-      setSubmitting(false);
+      setBusy(null);
     }
   }
 
-  function toggleSchedule(id: string) {
-    setSelectedForSchedule((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  async function handleScheduleBatch() {
-    if (selectedForSchedule.size === 0) return;
-    setSubmittingSchedule(true);
+  async function handleSchedule() {
+    if (toSchedule.length === 0) return;
+    setBusy("schedule");
     setError(null);
-    setScheduleMessage(null);
+    setMessage(null);
     try {
       const res = await fetch("/api/clips/schedule-batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clipIds: [...selectedForSchedule] }),
+        body: JSON.stringify({ clipIds: toSchedule.map((c) => c.id) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Programmazione fallita");
@@ -116,404 +122,98 @@ export function ClipList({ clips, youtubeConnected }: { clips: ClipViewModel[]; 
       const errors = data.errors as Array<{ clipId: string; error: string }>;
       if (scheduled.length > 0) {
         const last = scheduled[scheduled.length - 1]!;
-        setScheduleMessage(
+        setMessage(
           `${scheduled.length} clip programmate, l'ultima per il ${new Date(last.publishAt).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "short" })}` +
-            (errors.length > 0 ? ` (${errors.length} saltate: ${errors[0]!.error})` : ""),
+            (errors.length > 0 ? ` (${errors.length} saltate: ${errors[0]!.error})` : "."),
         );
       } else if (errors.length > 0) {
         setError(errors[0]!.error);
       }
-      setSelectedForSchedule(new Set());
+      setSelected(new Set());
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore imprevisto");
     } finally {
-      setSubmittingSchedule(false);
+      setBusy(null);
     }
   }
 
-  async function retryClip(clipId: string) {
-    setRetryingClipId(clipId);
-    setError(null);
-    try {
-      const res = await fetch("/api/clips/render", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clipIds: [clipId] }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Riprova fallita");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore imprevisto");
-    } finally {
-      setRetryingClipId(null);
-    }
-  }
-
-  async function cancelRender(clipId: string) {
-    if (!window.confirm("Annullare il render di questa clip?")) return;
-    setCancellingClipId(clipId);
-    setError(null);
-    try {
-      const res = await fetch(`/api/clips/${clipId}/cancel-render`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Annullamento fallito");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore imprevisto");
-    } finally {
-      setCancellingClipId(null);
-    }
-  }
-
-  async function regenerateTitle(clipId: string) {
-    setRegeneratingTitleClipId(clipId);
-    setError(null);
-    try {
-      const res = await fetch(`/api/clips/${clipId}/regenerate-title`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Rigenerazione fallita");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore imprevisto");
-    } finally {
-      setRegeneratingTitleClipId(null);
-    }
-  }
-
-  function startEditing(clip: ClipViewModel) {
-    setEditingClipId(clip.id);
-    setEditDraft({ title: clip.title, description: clip.publishDescription, hashtags: clip.hashtags.join(" ") });
-    setEditMessage(null);
-    setError(null);
-  }
-
-  async function saveEdit(clipId: string) {
-    if (!editDraft) return;
-    setSavingEdit(true);
-    setError(null);
-    setEditMessage(null);
-    try {
-      const res = await fetch(`/api/clips/${clipId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: editDraft.title.trim(),
-          publishDescription: editDraft.description,
-          // Si accettano sia "#tag" sia "tag", separati da spazi o virgole.
-          hashtags: editDraft.hashtags
-            .split(/[\s,]+/)
-            .map((h) => h.replace(/^#/, "").trim())
-            .filter(Boolean),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Salvataggio fallito");
-      setEditingClipId(null);
-      setEditDraft(null);
-      setEditMessage(
-        data.pendingJobsUpdated > 0
-          ? "Salvato, e aggiornata anche la pubblicazione già programmata."
-          : "Salvato.",
-      );
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore imprevisto");
-    } finally {
-      setSavingEdit(false);
-    }
-  }
-
-  async function loadPreview(clipId: string) {
-    setPreviewLoading(clipId);
-    setError(null);
-    try {
-      const res = await fetch(`/api/clips/${clipId}/download`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Impossibile caricare la clip");
-      setPreviewUrls((prev) => ({ ...prev, [clipId]: data.url }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Errore imprevisto");
-    } finally {
-      setPreviewLoading(null);
-    }
-  }
-
-  const selectableCount = sorted.filter((c) => c.status === "SUGGESTED" || c.status === "FAILED").length;
-  // Un job annullato non blocca una nuova programmazione: il video è stato eliminato da YouTube.
-  const isFreeToSchedule = (c: ClipViewModel) => c.youtubePublishStatus === null || c.youtubeCancelledAt !== null;
-  const schedulableCount = youtubeConnected ? sorted.filter((c) => c.status === "COMPLETED" && isFreeToSchedule(c)).length : 0;
+  const renderableCount = sorted.filter(isRenderable).length;
 
   return (
     <div className="space-y-4">
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      {scheduleMessage && <p className="text-sm text-emerald-400">{scheduleMessage}</p>}
-      {editMessage && <p className="text-sm text-emerald-400">{editMessage}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1.5">
+          {FILTERS.map((f) => {
+            const count = sorted.filter(f.match).length;
+            if (f.id !== "all" && count === 0) return null;
+            return (
+              <button
+                key={f.id}
+                onClick={() => setFilter(f.id)}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                  filter === f.id ? "border-brand-400/60 bg-brand-500/15 text-brand-100" : "border-line bg-raised text-muted hover:text-ink"
+                }`}
+              >
+                {f.label} <span className="ml-0.5 text-faint">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+        {renderableCount > 0 && selected.size === 0 && (
+          <button onClick={selectAllRenderable} className="btn btn-ghost btn-sm">
+            Seleziona tutte da generare
+          </button>
+        )}
+      </div>
 
-      {selectableCount > 0 && (
-        <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3">
-          <p className="text-sm text-zinc-400">{selected.size} clip selezionate</p>
-          <button
-            onClick={handleGenerate}
-            disabled={selected.size === 0 || submitting}
-            className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50"
-          >
-            {submitting ? "Invio..." : "Generate Shorts"}
+      {error && <Alert>{error}</Alert>}
+      {message && <Alert tone="success">{message}</Alert>}
+
+      {visible.length === 0 ? (
+        <EmptyState title="Nessuna clip in questa vista" description="Cambia filtro per vedere le altre." />
+      ) : (
+        <div className={`grid gap-4 ${compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"}`}>
+          {visible.map((clip) => (
+            <ClipCard
+              key={clip.id}
+              clip={clip}
+              rank={sorted.indexOf(clip) + 1}
+              selectable={isRenderable(clip) || isSchedulable(clip, youtubeConnected)}
+              selected={selected.has(clip.id)}
+              selectionActive={selected.size > 0}
+              onToggle={() => toggle(clip.id)}
+              onOpen={() => setOpenClipId(clip.id)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Barra azioni della selezione, fissa in basso */}
+      {selected.size > 0 && (
+        <div className="sticky bottom-4 z-30 mx-auto flex w-fit max-w-full flex-wrap items-center gap-2 rounded-2xl border border-line-strong bg-raised/95 p-2 pl-4 shadow-2xl backdrop-blur animate-fade-in">
+          <span className="text-sm text-muted">
+            <span className="font-semibold text-ink">{selected.size}</span> selezionate
+          </span>
+          {toRender.length > 0 && (
+            <button onClick={handleRender} disabled={busy !== null} className="btn btn-gradient btn-sm">
+              {busy === "render" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              Genera {toRender.length}
+            </button>
+          )}
+          {toSchedule.length > 0 && (
+            <button onClick={handleSchedule} disabled={busy !== null} className="btn btn-primary btn-sm" title="Programma la pubblicazione automatica negli slot liberi">
+              {busy === "schedule" ? <Loader2 size={14} className="animate-spin" /> : <CalendarClock size={14} />}
+              Programma {toSchedule.length}
+            </button>
+          )}
+          <button onClick={() => setSelected(new Set())} className="btn btn-ghost btn-sm" aria-label="Deseleziona tutto">
+            <X size={14} />
           </button>
         </div>
       )}
 
-      {schedulableCount > 0 && (
-        <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3">
-          <p className="text-sm text-zinc-400">{selectedForSchedule.size} clip selezionate per la programmazione</p>
-          <button
-            onClick={handleScheduleBatch}
-            disabled={selectedForSchedule.size === 0 || submittingSchedule}
-            className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50"
-          >
-            {submittingSchedule ? "Programmazione..." : "Programma pubblicazione automatica"}
-          </button>
-        </div>
-      )}
-
-      <ul className="space-y-3">
-        {sorted.map((clip, index) => {
-          const score = overallScore(clip.scores);
-          const canSelect = clip.status === "SUGGESTED" || clip.status === "FAILED";
-          const canSchedule = youtubeConnected && clip.status === "COMPLETED" && isFreeToSchedule(clip);
-          const canPreview = clip.status === "COMPLETED";
-          const previewUrl = previewUrls[clip.id];
-
-          return (
-            <li key={clip.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
-              <div className="flex items-start gap-4">
-                {canSelect && (
-                  <input
-                    type="checkbox"
-                    checked={selected.has(clip.id)}
-                    onChange={() => toggle(clip.id)}
-                    className="mt-1.5 h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-brand-500"
-                  />
-                )}
-                {canSchedule && (
-                  <input
-                    type="checkbox"
-                    checked={selectedForSchedule.has(clip.id)}
-                    onChange={() => toggleSchedule(clip.id)}
-                    title="Seleziona per la programmazione automatica"
-                    className="mt-1.5 h-4 w-4 rounded border-zinc-600 bg-zinc-800 text-brand-500"
-                  />
-                )}
-                <div className="min-w-0 flex-1 space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="min-w-0 break-words font-medium text-white">
-                      Clip #{index + 1} — {clip.title}
-                    </h3>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className="rounded-full bg-brand-500/15 px-2.5 py-0.5 text-xs font-semibold text-brand-200">
-                        Score {score}
-                      </span>
-                      <StatusBadge status={clip.status} />
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      onClick={() => (editingClipId === clip.id ? setEditingClipId(null) : startEditing(clip))}
-                      className="text-xs text-zinc-500 underline decoration-dotted hover:text-zinc-300"
-                    >
-                      {editingClipId === clip.id ? "Chiudi" : "✏️ Modifica titolo e descrizione"}
-                    </button>
-                    {clip.format === "longform" && (
-                      <button
-                        onClick={() => regenerateTitle(clip.id)}
-                        disabled={regeneratingTitleClipId === clip.id}
-                        className="text-xs text-zinc-500 underline decoration-dotted hover:text-zinc-300 disabled:opacity-50"
-                      >
-                        {regeneratingTitleClipId === clip.id ? "Rigenero titolo..." : "Rigenera titolo"}
-                      </button>
-                    )}
-                  </div>
-
-                  {editingClipId === clip.id && editDraft && (
-                    <div className="space-y-3 rounded-xl border border-zinc-700 bg-zinc-900/60 p-3">
-                      <label className="block space-y-1">
-                        <span className="text-xs font-medium text-zinc-400">Titolo ({editDraft.title.length}/100)</span>
-                        <input
-                          value={editDraft.title}
-                          maxLength={100}
-                          onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })}
-                          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white"
-                        />
-                      </label>
-                      <label className="block space-y-1">
-                        <span className="text-xs font-medium text-zinc-400">Descrizione</span>
-                        <textarea
-                          value={editDraft.description}
-                          rows={5}
-                          onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
-                          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white"
-                        />
-                        <span className="block text-[11px] text-zinc-500">
-                          Svuota il campo per tornare alla descrizione generata automaticamente.
-                        </span>
-                      </label>
-                      <label className="block space-y-1">
-                        <span className="text-xs font-medium text-zinc-400">Hashtag</span>
-                        <input
-                          value={editDraft.hashtags}
-                          onChange={(e) => setEditDraft({ ...editDraft, hashtags: e.target.value })}
-                          placeholder="blur reaction gtavi"
-                          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white"
-                        />
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => saveEdit(clip.id)}
-                          disabled={savingEdit || editDraft.title.trim().length === 0}
-                          className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-400 disabled:opacity-50"
-                        >
-                          {savingEdit ? "Salvo..." : "Salva"}
-                        </button>
-                        <button
-                          onClick={() => setEditingClipId(null)}
-                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-500"
-                        >
-                          Annulla
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  <p className="text-sm text-zinc-400">
-                    {Math.round(clip.duration)}s — Hook: &ldquo;{clip.hook}&rdquo;
-                  </p>
-                  <p className="text-sm text-zinc-500">{clip.reason}</p>
-                  {clip.badges.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {clip.badges.map((badge) => (
-                        <span
-                          key={badge}
-                          className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-medium text-zinc-200"
-                        >
-                          {BADGE_LABELS[badge]}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {clip.hashtags.length > 0 && (
-                    <p className="text-xs text-brand-300/80">{clip.hashtags.map((h) => `#${h}`).join(" ")}</p>
-                  )}
-                  {(clip.status === "QUEUED" || clip.status === "RENDERING") && (
-                    <button
-                      onClick={() => cancelRender(clip.id)}
-                      disabled={cancellingClipId === clip.id}
-                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-500 disabled:opacity-50"
-                    >
-                      {cancellingClipId === clip.id ? "Annullo..." : "Annulla render"}
-                    </button>
-                  )}
-
-                  {clip.errorMessage && (
-                    <div className="space-y-1">
-                      <p className="text-sm text-red-400">Errore: {clip.errorMessage}</p>
-                      <button
-                        onClick={() => retryClip(clip.id)}
-                        disabled={retryingClipId === clip.id}
-                        className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-200 hover:border-red-400 disabled:opacity-50"
-                      >
-                        {retryingClipId === clip.id ? "Rimetto in coda..." : "Riprova"}
-                      </button>
-                    </div>
-                  )}
-
-                  <ScoreBreakdown scores={clip.scores} />
-
-                  {canPreview && (
-                    <div className="pt-2">
-                      {previewUrl ? (
-                        <video
-                          src={previewUrl}
-                          controls
-                          className={
-                            clip.format === "longform"
-                              ? "aspect-video w-full max-w-md rounded-lg bg-black"
-                              : "aspect-[9/16] w-48 rounded-lg bg-black"
-                          }
-                        />
-                      ) : (
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => loadPreview(clip.id)}
-                            disabled={previewLoading === clip.id}
-                            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:border-zinc-500"
-                          >
-                            {previewLoading === clip.id ? "Caricamento..." : "Preview"}
-                          </button>
-                        </div>
-                      )}
-                      {previewUrl && (
-                        <a
-                          href={previewUrl}
-                          download
-                          className="mt-2 inline-block text-xs text-brand-300 hover:underline"
-                        >
-                          Scarica MP4
-                        </a>
-                      )}
-
-                      <div className="mt-2">
-                        <TrimClipButton clipId={clip.id} duration={clip.duration} />
-                      </div>
-
-                      {youtubeConnected ? (
-                        <div className="mt-2">
-                          <PublishYoutubeButton
-                            clipId={clip.id}
-                            defaultTitle={clip.title}
-                            defaultDescription={clip.publishDescription}
-                            defaultHashtags={clip.hashtags}
-                            status={clip.youtubePublishStatus}
-                            youtubeUrl={clip.youtubeUrl}
-                            youtubeError={clip.youtubeError}
-                            youtubePublishAt={clip.youtubePublishAt}
-                            youtubeCancelledAt={clip.youtubeCancelledAt}
-                          />
-                        </div>
-                      ) : (
-                        <p className="mt-2 text-xs text-zinc-600">
-                          Collega YouTube dalle Impostazioni per pubblicare direttamente.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-function ScoreBreakdown({ scores }: { scores: ClipScores }) {
-  const entries: Array<[string, number]> = [
-    ["Hook", scores.hook],
-    ["Retention", scores.retention],
-    ["Emotion", scores.emotion],
-    ["Clarity", scores.clarity],
-    ["Payoff", scores.payoff],
-    ["Virality", scores.virality],
-  ];
-
-  return (
-    <div className="grid grid-cols-3 gap-x-4 gap-y-1 pt-1 sm:grid-cols-6">
-      {entries.map(([label, value]) => (
-        <div key={label} className="text-xs text-zinc-500">
-          <span className="block text-zinc-400">{label}</span>
-          {value}
-        </div>
-      ))}
+      <ClipDetailDialog clip={openClip} youtubeConnected={youtubeConnected} onClose={() => setOpenClipId(null)} />
     </div>
   );
 }

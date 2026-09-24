@@ -7,6 +7,71 @@
 }
 
 body {
-  background-color: #0b0a12;
-  color: #f4f3ff;
+  @apply bg-canvas text-ink;
+}
+
+::selection {
+  @apply bg-brand-500/40 text-white;
+}
+
+/* Scrollbar discreta: quella di sistema su Windows è un blocco grigio chiaro sul fondo scuro. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #34343f transparent;
+}
+
+@layer components {
+  /* Pulsanti — base + varianti. Usare sempre una variante insieme a .btn. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60 disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-sm {
+    @apply gap-1.5 px-3 py-1.5 text-xs;
+  }
+  .btn-lg {
+    @apply px-5 py-3 text-base;
+  }
+  .btn-primary {
+    @apply bg-brand-500 text-white shadow-[0_6px_20px_-8px_rgba(124,92,255,0.8)] hover:bg-brand-400;
+  }
+  .btn-gradient {
+    @apply bg-brand-gradient text-white shadow-[0_8px_24px_-10px_rgba(255,92,168,0.7)] hover:brightness-110;
+  }
+  .btn-secondary {
+    @apply border border-line-strong bg-raised text-ink hover:border-faint hover:bg-overlay;
+  }
+  .btn-ghost {
+    @apply text-muted hover:bg-raised hover:text-ink;
+  }
+  .btn-danger {
+    @apply border border-red-500/30 bg-red-500/10 text-red-200 hover:border-red-400/60 hover:bg-red-500/15;
+  }
+
+  .card {
+    @apply rounded-2xl border border-line bg-surface shadow-card;
+  }
+  .card-hover {
+    @apply transition hover:border-line-strong hover:bg-raised;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-ink placeholder:text-faint transition
+      focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/25 disabled:opacity-60;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium text-muted;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-raised px-2.5 py-0.5 text-xs font-medium text-muted;
+  }
+
+  .section-title {
+    @apply font-display text-base font-semibold text-ink;
+  }
+
+  .skeleton {
+    @apply animate-shimmer rounded-lg bg-[linear-gradient(90deg,#16161c_0%,#22222b_50%,#16161c_100%)] bg-[length:200%_100%];
+  }
 }

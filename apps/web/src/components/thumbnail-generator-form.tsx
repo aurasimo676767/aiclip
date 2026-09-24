@@ -33,31 +33,31 @@ export function ThumbnailGeneratorForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+    <form onSubmit={handleSubmit} className="space-y-2 rounded-lg border border-line bg-surface p-4">
       <div>
-        <label className="mb-1 block text-xs text-zinc-500">Link del tuo video pubblicato</label>
+        <label className="mb-1 block text-xs text-muted">Link del tuo video pubblicato</label>
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://www.youtube.com/watch?v=..."
-          className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-brand-400"
+          className="w-full rounded-md border border-line-strong bg-canvas px-3 py-2 text-sm text-ink outline-none focus:border-brand-400"
         />
       </div>
       <div>
-        <label className="mb-1 block text-xs text-zinc-500">
+        <label className="mb-1 block text-xs text-muted">
           Link del video ORIGINALE reagito (opzionale, ma consigliato — se lo sai, evita che l&apos;IA debba indovinarlo)
         </label>
         <input
           value={reactedUrl}
           onChange={(e) => setReactedUrl(e.target.value)}
           placeholder="https://www.youtube.com/watch?v=... (il video che reagite/guardate)"
-          className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-brand-400"
+          className="w-full rounded-md border border-line-strong bg-canvas px-3 py-2 text-sm text-ink outline-none focus:border-brand-400"
         />
       </div>
       <button
         type="submit"
         disabled={submitting || !url.trim()}
-        className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+        className="btn btn-primary"
       >
         {submitting ? "Avvio..." : "Genera copertina"}
       </button>

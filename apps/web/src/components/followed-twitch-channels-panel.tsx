@@ -54,30 +54,30 @@ export function FollowedTwitchChannelsPanel({ channels }: { channels: FollowedTw
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="twitch.tv/nomecanale"
-          className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-white outline-none focus:border-brand-400"
+          className="input min-w-0 flex-1"
         />
         <button
           type="submit"
           disabled={adding || !input.trim()}
-          className="shrink-0 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:border-zinc-500 disabled:opacity-50"
+          className="btn btn-secondary shrink-0"
         >
           {adding ? "Aggiungo..." : "Aggiungi"}
         </button>
       </form>
 
       {channels.length > 0 ? (
-        <ul className="space-y-1">
+        <ul className="space-y-1.5">
           {channels.map((c) => (
-            <li key={c.id} className="flex items-center justify-between rounded-md bg-zinc-900/60 px-3 py-1.5 text-sm text-zinc-200">
+            <li key={c.id} className="flex items-center justify-between rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm text-ink">
               {c.displayName}
-              <button onClick={() => handleRemove(c.id)} className="text-xs text-zinc-500 hover:text-red-400">
+              <button onClick={() => handleRemove(c.id)} className="text-xs text-faint transition hover:text-red-300">
                 Rimuovi
               </button>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-zinc-600">Non segui ancora nessun canale Twitch.</p>
+        <p className="text-xs text-faint">Non segui ancora nessun canale Twitch.</p>
       )}
 
       {error && <p className="text-xs text-red-400">{error}</p>}

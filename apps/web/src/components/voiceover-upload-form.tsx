@@ -80,9 +80,9 @@ export function VoiceoverUploadForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+    <form onSubmit={handleSubmit} className="space-y-4 card p-5">
       <div>
-        <label htmlFor="vo-title" className="mb-1 block text-sm font-medium text-zinc-300">
+        <label htmlFor="vo-title" className="label">
           Titolo (opzionale)
         </label>
         <input
@@ -90,12 +90,12 @@ export function VoiceoverUploadForm() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Es. Promo settimana 1"
-          className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white outline-none focus:border-brand-400"
+          className="input"
         />
       </div>
 
       <div>
-        <label htmlFor="vo-video" className="mb-1 block text-sm font-medium text-zinc-300">
+        <label htmlFor="vo-video" className="label">
           Clip
         </label>
         <input
@@ -103,17 +103,17 @@ export function VoiceoverUploadForm() {
           type="file"
           accept={ALLOWED_VIDEO_MIME_TYPES.join(",")}
           onChange={(e) => setVideoFile(e.target.files?.[0] ?? null)}
-          className="block w-full text-sm text-zinc-400 file:mr-4 file:rounded-lg file:border-0 file:bg-brand-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-600"
+          className="block w-full text-sm text-muted file:mr-4 file:rounded-lg file:border file:border-line-strong file:bg-raised file:px-4 file:py-2 file:text-sm file:font-medium file:text-ink hover:file:bg-overlay"
         />
         {videoFile && (
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-muted">
             {videoFile.name} — {(videoFile.size / 1024 / 1024).toFixed(1)} MB
           </p>
         )}
       </div>
 
       <div>
-        <label htmlFor="vo-audio" className="mb-1 block text-sm font-medium text-zinc-300">
+        <label htmlFor="vo-audio" className="label">
           Voice over (audio)
         </label>
         <input
@@ -121,10 +121,10 @@ export function VoiceoverUploadForm() {
           type="file"
           accept={ALLOWED_AUDIO_MIME_TYPES.join(",")}
           onChange={(e) => setAudioFile(e.target.files?.[0] ?? null)}
-          className="block w-full text-sm text-zinc-400 file:mr-4 file:rounded-lg file:border-0 file:bg-brand-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-600"
+          className="block w-full text-sm text-muted file:mr-4 file:rounded-lg file:border file:border-line-strong file:bg-raised file:px-4 file:py-2 file:text-sm file:font-medium file:text-ink hover:file:bg-overlay"
         />
         {audioFile && (
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-muted">
             {audioFile.name} — {(audioFile.size / 1024 / 1024).toFixed(1)} MB
           </p>
         )}
@@ -135,7 +135,7 @@ export function VoiceoverUploadForm() {
       <button
         type="submit"
         disabled={isBusy}
-        className="w-full rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50"
+        className="btn btn-primary w-full"
       >
         {stage === "creating" && "Creazione..."}
         {stage === "uploading" && "Caricamento in corso..."}

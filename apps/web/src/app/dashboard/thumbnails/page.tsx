@@ -45,8 +45,8 @@ export default async function ThumbnailsPage() {
       <PollingRefresher active={pollingActive} intervalMs={5000} />
 
       <div>
-        <h1 className="text-2xl font-semibold text-white">Copertine</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-ink sm:text-[28px]">Copertine</h1>
+        <p className="mt-1 text-sm text-muted">
           Incolla il link di un video long-form già pubblicato da ClipForge: viene generata una copertina automaticamente
           (sfondo dal video, faccia ritagliata se c&apos;è la webcam, titolo ad effetto) e impostata subito su YouTube.
         </p>
@@ -56,7 +56,7 @@ export default async function ThumbnailsPage() {
 
       <section className="space-y-3">
         {viewModels.length === 0 ? (
-          <p className="text-sm text-zinc-600">Nessuna copertina generata ancora.</p>
+          <p className="text-sm text-faint">Nessuna copertina generata ancora.</p>
         ) : (
           <ul className="space-y-3">
             {viewModels.map((job) => (

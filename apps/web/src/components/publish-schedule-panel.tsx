@@ -24,13 +24,13 @@ function TimeListEditor({ label, times, onChange }: TimeListEditorProps) {
 
   return (
     <div>
-      <p className="mb-2 text-xs font-medium text-zinc-400">{label}</p>
+      <p className="label">{label}</p>
       <div className="mb-2 flex flex-wrap gap-1.5">
-        {times.length === 0 && <span className="text-xs text-zinc-600">Nessun orario — usa il fallback 2h-2h30 random</span>}
+        {times.length === 0 && <span className="text-xs text-faint">Nessun orario: ogni clip esce 2h-2h30 dopo la precedente</span>}
         {times.map((t) => (
-          <span key={t} className="flex items-center gap-1 rounded-md bg-zinc-800 px-2 py-1 text-xs text-zinc-200">
+          <span key={t} className="chip gap-1.5 text-ink tabular-nums">
             {t}
-            <button onClick={() => handleRemove(t)} className="text-zinc-500 hover:text-red-400" aria-label={`Rimuovi ${t}`}>
+            <button onClick={() => handleRemove(t)} className="text-faint hover:text-red-300" aria-label={`Rimuovi ${t}`}>
               ×
             </button>
           </span>
@@ -41,13 +41,13 @@ function TimeListEditor({ label, times, onChange }: TimeListEditorProps) {
           type="time"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-white outline-none focus:border-brand-400"
+          className="input w-32 [color-scheme:dark]"
         />
         <button
           type="button"
           onClick={handleAdd}
           disabled={!isValidTimeString(input) || times.includes(input)}
-          className="rounded-lg border border-zinc-700 px-3 py-1 text-xs font-medium text-zinc-200 hover:border-zinc-500 disabled:opacity-50"
+          className="btn btn-secondary btn-sm"
         >
           Aggiungi
         </button>
@@ -91,7 +91,7 @@ export function PublishSchedulePanel({
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs leading-relaxed text-muted">
         Orari fissi ({PUBLISH_SCHEDULE_TIMEZONE}) usati quando programmi più clip insieme: ogni clip prende il prossimo orario
         libero nella griglia del suo formato, ripetuta ogni giorno. Se lasci un formato senza orari, per quel formato resta il
         vecchio comportamento (2h-2h30 casuali da adesso).
@@ -100,13 +100,13 @@ export function PublishSchedulePanel({
       <TimeListEditor label="Shorts" times={shortTimes} onChange={setShortTimes} />
       <TimeListEditor label="Video long-form" times={longformTimes} onChange={setLongformTimes} />
 
-      <div className="flex items-center gap-3 border-t border-zinc-800 pt-3">
+      <div className="flex items-center gap-3 border-t border-line pt-4">
         <button
           onClick={handleSave}
           disabled={saving}
-          className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+          className="btn btn-primary btn-sm"
         >
-          {saving ? "Salvo..." : "Salva orari"}
+          {saving ? "Salvo…" : "Salva orari"}
         </button>
         {saved && <span className="text-xs text-emerald-400">Salvato.</span>}
         {error && <span className="text-xs text-red-400">{error}</span>}
