@@ -31,9 +31,20 @@ export async function getPresignedUploadUrl(storagePath: string, contentType: st
   return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
 }
 
-/** URL firmato temporaneo per scaricare/riprodurre un file da R2 (GET). */
+/**
+ * La firma parte dall'inizio dell'ora in corso, non da adesso: così ogni richiesta nella stessa ora
+ * dà lo STESSO URL. Prima l'URL cambiava a ogni ricarica della pagina (che si aggiorna da sola ogni
+ * 4s mentre c'è qualcosa in lavorazione), il player vedeva un video "nuovo" e ripartiva da capo —
+ * si bloccava dopo un secondo e mezzo (2026-09-25). Un URL stabile fa anche usare la cache del
+ * browser.
+ */
+const SIGNING_WINDOW_SECONDS = 3600;
+
+/** URL firmato temporaneo per scaricare/riprodurre un file da R2 (GET), valido almeno `expiresInSeconds` da adesso. */
 export async function getPresignedDownloadUrl(storagePath: string, expiresInSeconds = 3600): Promise<string> {
   const client = getClient();
   const command = new GetObjectCommand({ Bucket: getBucket(), Key: storagePath });
-  return getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+  const windowMs = SIGNING_WINDOW_SECONDS * 1000;
+  const signingDate = new Date(Math.floor(Date.now() / windowMs) * windowMs);
+  return getSignedUrl(client, command, { expiresIn: expiresInSeconds + SIGNING_WINDOW_SECONDS, signingDate });
 }
