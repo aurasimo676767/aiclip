@@ -144,6 +144,17 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
               <Download size={14} /> Scarica
             </a>
           )}
+          {isShort && clip.status === "COMPLETED" && (
+            <button
+              onClick={() => call("regenerate", `/api/clips/${clip.id}/regenerate`, { method: "POST" }, "Clip in coda: rigenerazione con un editing diverso.")}
+              disabled={busy !== null}
+              className="btn btn-secondary btn-sm"
+              title="Rigenera questo estratto con uno stile di editing diverso"
+            >
+              {busy === "regenerate" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              Rigenera clip
+            </button>
+          )}
           {canPublish && (
             <button onClick={() => setPanel("publish")} className="btn btn-primary btn-sm">
               <Send size={14} /> Pubblica
