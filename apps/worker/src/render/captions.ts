@@ -74,8 +74,9 @@ function buildHeader(style: CaptionStyleConfig, alignment: number, marginV: numb
   const secondary = hexToAssColor(style.highlightColor);
   const outline = hexToAssColor(style.outlineColor);
 
-  // Contorno 9 e ombra 4: su una webcam o un gioco colorato il contorno sottile di prima (6)
-  // si perdeva, e la parola diventava difficile da leggere su un telefono.
+  // Grassetto (Arial Bold, lo stile che simo vuole), contorno 8 e ombra 4: su una webcam o un
+  // gioco colorato il contorno sottile di prima (6) si perdeva, e la parola era difficile da
+  // leggere su un telefono.
   return `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${OUTPUT_RESOLUTION.width}
@@ -85,7 +86,7 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${style.fontFamily},${style.fontSize},${primary},${secondary},${outline},&H80000000,0,0,0,0,100,100,1,0,1,9,4,${alignment},60,60,${marginV},1
+Style: Default,${style.fontFamily},${style.fontSize},${primary},${secondary},${outline},&H80000000,-1,0,0,0,100,100,1,0,1,8,4,${alignment},60,60,${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`;
@@ -137,15 +138,11 @@ function buildSingleWordEvents(
     const isHighlighted = highlightWords.has(normalizeWord(text));
     const shout = shoutLevel.get(word) ?? 0;
     const color = shout > 0 ? `\\c${SHOUT_COLOR}` : isHighlighted ? `\\c${hexToAssColor(style.highlightColor)}` : "";
-    // Più grandi le urla: la misura "a riposo" della parola, dopo il pop.
-    const rest = shout === 2 ? 112 : 100;
+    // Misura "a riposo" della parola dopo l'entrata: le urla restano più grandi.
+    const rest = shout === 2 ? 115 : shout === 1 ? 106 : 100;
     const fit = widthFitPercent(text, (style.fontSize * rest) / 100);
-    // Pop d'ingresso: parte al 75%, supera la misura a riposo e ci torna in 160ms. Parole chiave e
-    // urla "saltano" di più. La larghezza è in proporzione a `fit` (parole lunghe ristrette).
-    const peak = shout === 2 ? 145 : shout === 1 ? 128 : isHighlighted ? 118 : 108;
     const pct = (p: number) => Math.round((p * fit) / 100);
-    const shake = shout === 2 ? `\\t(160,220,\\frz-5)\\t(220,280,\\frz5)\\t(280,340,\\frz-3)\\t(340,400,\\frz0)` : "";
-    const pop = `\\fscx${pct(75)}\\fscy75\\t(0,90,\\fscx${pct(peak)}\\fscy${peak})\\t(90,160,\\fscx${pct(rest)}\\fscy${rest})${shake}`;
+    const pop = popAnimation(shout, isHighlighted, i, pct, rest);
 
     // Una parola che attraversa un cambio d'inquadratura si sposta nel punto giusto dal cambio in
     // poi, senza rifare il pop: prima restava dov'era, e dopo uno stacco da split a primo piano
@@ -185,6 +182,28 @@ function buildKaraokeEvents(
   });
 }
 
+/**
+ * Entrata "a schiaffo" di una parola, voluta da simo per gli Shorts ("qualcosa che lobotomizza chi
+ * guarda e lo fa fissare i sottotitoli"): parte piccola, sfocata e ruotata, esplode oltre la sua
+ * misura e rimbalza al suo posto in ~180ms. La rotazione d'ingresso alterna verso a ogni parola, così
+ * due parole di fila non entrano mai uguali. Più forte è la parola, più grande il salto; le urla
+ * dopo l'entrata tremano.
+ */
+function popAnimation(shout: 0 | 1 | 2, isHighlighted: boolean, index: number, pct: (p: number) => number, rest: number): string {
+  const [from, peak, dip, tilt] =
+    shout === 2 ? [30, 165, 108, 12] : shout === 1 ? [35, 145, 98, 10] : isHighlighted ? [40, 132, 96, 8] : [45, 122, 96, 6];
+  const angle = index % 2 === 0 ? tilt : -tilt;
+  const restDip = Math.round((dip * rest) / 100);
+  const entrance =
+    `\\blur6\\frz${angle}\\fscx${pct(from)}\\fscy${from}` +
+    `\\t(0,70,\\blur0\\frz${Math.round(-angle / 3)}\\fscx${pct(peak)}\\fscy${peak})` +
+    `\\t(70,125,\\frz0\\fscx${pct(restDip)}\\fscy${restDip})` +
+    `\\t(125,180,\\fscx${pct(rest)}\\fscy${rest})`;
+  const shake =
+    shout === 2 ? `\\t(180,230,\\frz-7)\\t(230,280,\\frz7)\\t(280,330,\\frz-5)\\t(330,380,\\frz4)\\t(380,430,\\frz0)` : "";
+  return entrance + shake;
+}
+
 /** Rosso delle parole urlate (formato colore ASS, &HBBGGRR). */
 const SHOUT_COLOR = "&H002E2EFF";
 /**
@@ -195,10 +214,17 @@ const SHOUT_COLOR = "&H002E2EFF";
 const LOUD_DB = 5;
 const SCREAM_DB = 7;
 /**
- * Solo la parte più forte della clip può diventare rossa: in una clip urlata dall'inizio alla fine
- * altrimenti sarebbe rosso tutto, e il rosso smetterebbe di dire "qui urla".
+ * Solo la parte più forte della clip può diventare rossa per le soglie assolute: in una clip urlata
+ * dall'inizio alla fine altrimenti sarebbe rosso tutto, e il rosso smetterebbe di dire "qui urla".
  */
 const LOUD_TOP_SHARE = 0.4;
+/**
+ * Quota di parole rosse ANCHE quando nessuno urla (scelta di simo: "ci deve essere a prescindere",
+ * ~1 parola su 6): le più forti della clip rispetto al resto della clip stessa.
+ */
+const RELATIVE_RED_SHARE = 1 / 6;
+/** Le parole rosse "relative" devono avere almeno tante lettere: un "E" rosso non dice niente. */
+const MIN_RED_WORD_LETTERS = 3;
 
 /** 0 = normale, 1 = voce alzata, 2 = urlo. */
 function shoutLevels(words: TranscriptWord[]): Map<TranscriptWord, 0 | 1 | 2> {
@@ -206,10 +232,12 @@ function shoutLevels(words: TranscriptWord[]): Map<TranscriptWord, 0 | 1 | 2> {
   const measured = words.map((w) => w.loudnessDb).filter((v): v is number => v !== undefined).sort((a, b) => a - b);
   if (measured.length === 0) return levels;
   const topCut = measured[Math.floor(measured.length * (1 - LOUD_TOP_SHARE))] ?? Infinity;
+  const relativeCut = measured[Math.floor(measured.length * (1 - RELATIVE_RED_SHARE))] ?? Infinity;
   for (const w of words) {
     const db = w.loudnessDb;
-    if (db === undefined || db < LOUD_DB || db < topCut) continue;
-    levels.set(w, db >= SCREAM_DB ? 2 : 1);
+    if (db === undefined) continue;
+    if (db >= SCREAM_DB && db >= topCut) levels.set(w, 2);
+    else if ((db >= LOUD_DB && db >= topCut) || (db >= relativeCut && normalizeWord(w.word).length >= MIN_RED_WORD_LETTERS)) levels.set(w, 1);
   }
   return levels;
 }
@@ -217,14 +245,15 @@ function shoutLevels(words: TranscriptWord[]): Map<TranscriptWord, 0 | 1 | 2> {
 /** Larghezza massima di una parola a schermo (px su 1080): oltre, la parola viene ristretta. */
 const MAX_WORD_WIDTH_PX = 940;
 /**
- * Larghezza media di un carattere di Anton maiuscolo, in frazioni della dimensione del font.
- * Misurata: "INCREDIBILMENTE" (15 lettere) a 210 è larga ~800px.
+ * Larghezza media di un carattere di Arial Bold maiuscolo, in frazioni della dimensione del font.
+ * Misurata: "INCREDIBILMENTE" (15 lettere) a 124 è larga ~1040px — oltre lo schermo senza
+ * restringerla.
  */
-const ANTON_CHAR_WIDTH_RATIO = 0.255;
+const FONT_CHAR_WIDTH_RATIO = 0.56;
 
 /** Percentuale di larghezza (\fscx) perché la parola stia nello schermo: 100 se ci sta già. */
 function widthFitPercent(text: string, fontSize: number): number {
-  const estimated = text.length * fontSize * ANTON_CHAR_WIDTH_RATIO;
+  const estimated = text.length * fontSize * FONT_CHAR_WIDTH_RATIO;
   return estimated <= MAX_WORD_WIDTH_PX ? 100 : Math.max(55, Math.floor((MAX_WORD_WIDTH_PX / estimated) * 100));
 }
 

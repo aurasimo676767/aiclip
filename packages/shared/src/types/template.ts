@@ -48,22 +48,31 @@ export interface TemplateConfig {
   silenceRemovalThresholdSeconds: number | null;
 }
 
+/**
+ * UNO stile di sottotitoli per tutti gli Shorts, qualunque template: una parola alla volta, Arial
+ * Bold maiuscolo (quello che simo vuole: "deve essere come quello di prima", e prima era Arial
+ * perché i font chiesti dai template non erano installati). I template restano diversi solo in
+ * zoom e taglio dei silenzi. Serve anche perché "Rigenera" cambia template a ogni giro: con stili
+ * diversi per template una clip rigenerata passava ai sottotitoli a frase, su due righe.
+ */
+export const SHORTS_CAPTION_STYLE: CaptionStyleConfig = {
+  fontFamily: "Arial",
+  fontSize: 124,
+  position: "smart",
+  textColor: "#FFFFFF",
+  highlightColor: "#FFD400",
+  outlineColor: "#000000",
+  wordByWord: true,
+  oneWordAtATime: true,
+  uppercase: true,
+};
+
 export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
   PODCAST_DYNAMIC: {
     name: "PODCAST_DYNAMIC",
     label: "Podcast Dynamic",
     description: "Sottotitoli word-by-word, zoom frequenti, alta energia. Ideale per estratti podcast/interviste.",
-    captionStyle: {
-      fontFamily: "Anton",
-      fontSize: 210,
-      position: "smart",
-      textColor: "#FFFFFF",
-      highlightColor: "#FFD400",
-      outlineColor: "#000000",
-      wordByWord: true,
-      oneWordAtATime: true,
-      uppercase: true,
-    },
+    captionStyle: SHORTS_CAPTION_STYLE,
     zoomIntensity: 1.2,
     showProgressBar: true,
     silenceRemovalThresholdSeconds: 0.6,
@@ -71,18 +80,8 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
   PODCAST_CLEAN: {
     name: "PODCAST_CLEAN",
     label: "Podcast Clean",
-    description: "Sottotitoli a frase, editing minimale, tono professionale.",
-    captionStyle: {
-      fontFamily: "Anton",
-      fontSize: 130,
-      position: "bottom",
-      textColor: "#FFFFFF",
-      highlightColor: "#FFFFFF",
-      outlineColor: "#000000",
-      wordByWord: false,
-      oneWordAtATime: false,
-      uppercase: false,
-    },
+    description: "Editing minimale: zoom leggeri, pause tagliate con moderazione.",
+    captionStyle: SHORTS_CAPTION_STYLE,
     zoomIntensity: 0.4,
     showProgressBar: false,
     silenceRemovalThresholdSeconds: 1.0,
@@ -91,17 +90,7 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
     name: "STREAMER",
     label: "Streamer",
     description: "Stile gaming/streaming: caption grandi e colorate, zoom aggressivi.",
-    captionStyle: {
-      fontFamily: "Anton",
-      fontSize: 210,
-      position: "smart",
-      textColor: "#FFFFFF",
-      highlightColor: "#00E5FF",
-      outlineColor: "#000000",
-      wordByWord: true,
-      oneWordAtATime: true,
-      uppercase: true,
-    },
+    captionStyle: SHORTS_CAPTION_STYLE,
     zoomIntensity: 1.5,
     showProgressBar: true,
     silenceRemovalThresholdSeconds: 0.5,
@@ -109,18 +98,8 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
   STORYTELLING: {
     name: "STORYTELLING",
     label: "Storytelling",
-    description: "Ritmo più lento, caption a frase, zoom morbidi per momenti narrativi/emotivi.",
-    captionStyle: {
-      fontFamily: "Anton",
-      fontSize: 130,
-      position: "bottom",
-      textColor: "#FFFFFF",
-      highlightColor: "#FFD400",
-      outlineColor: "#000000",
-      wordByWord: false,
-      oneWordAtATime: false,
-      uppercase: false,
-    },
+    description: "Ritmo più lento, zoom morbidi per momenti narrativi/emotivi.",
+    captionStyle: SHORTS_CAPTION_STYLE,
     zoomIntensity: 0.6,
     showProgressBar: false,
     silenceRemovalThresholdSeconds: 1.2,
@@ -128,18 +107,8 @@ export const DEFAULT_TEMPLATES: Record<TemplateName, TemplateConfig> = {
   MOTIVATIONAL: {
     name: "MOTIVATIONAL",
     label: "Motivational",
-    description: "Caption bold centrali, forte enfasi sulle parole chiave, zoom marcati sui payoff.",
-    captionStyle: {
-      fontFamily: "Anton",
-      fontSize: 210,
-      position: "bottom",
-      textColor: "#FFFFFF",
-      highlightColor: "#FF3B30",
-      outlineColor: "#000000",
-      wordByWord: true,
-      oneWordAtATime: false,
-      uppercase: true,
-    },
+    description: "Forte enfasi sulle parole chiave, zoom marcati sui payoff.",
+    captionStyle: SHORTS_CAPTION_STYLE,
     zoomIntensity: 1.3,
     showProgressBar: true,
     silenceRemovalThresholdSeconds: 0.6,
