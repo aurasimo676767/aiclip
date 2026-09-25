@@ -17,7 +17,7 @@ export const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 z-50 bg-black/75 backdrop-blur-sm data-[state=open]:animate-fade-in", className)}
+    className={cn("fixed inset-0 z-50 bg-black/85 data-[state=open]:animate-fade-in", className)}
     {...props}
   />
 ));
@@ -29,14 +29,19 @@ export const DialogContent = React.forwardRef<
 >(({ className, children, hideClose, ...props }, ref) => (
   <DialogPrimitive.Portal>
     <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-line bg-surface p-6 shadow-2xl focus:outline-none data-[state=open]:animate-fade-in",
-        className,
-      )}
-      {...props}
-    >
+    {/* Centrata con flexbox e non con translate(-50%): con dimensioni dispari la traslazione cade a
+        mezzo pixel e sfoca tutto il contenuto, video compreso. Niente backdrop-blur sull'overlay: con
+        un video a 60fps sopra, il browser ricalcolava la sfocatura della pagina a ogni fotogramma e
+        il player perdeva fotogrammi (sembrava a 10fps). */}
+    <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4">
+      <DialogPrimitive.Content
+        ref={ref}
+        className={cn(
+          "pointer-events-auto relative max-h-[94vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-line bg-surface p-6 shadow-2xl focus:outline-none data-[state=open]:animate-fade-in",
+          className,
+        )}
+        {...props}
+      >
       {children}
       {!hideClose && (
         <DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-1 text-faint transition hover:bg-raised hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60">
@@ -44,7 +49,8 @@ export const DialogContent = React.forwardRef<
           <span className="sr-only">Chiudi</span>
         </DialogPrimitive.Close>
       )}
-    </DialogPrimitive.Content>
+      </DialogPrimitive.Content>
+    </div>
   </DialogPrimitive.Portal>
 ));
 DialogContent.displayName = "DialogContent";

@@ -34,12 +34,12 @@ export function useConfirm() {
   const element = (
     <AlertDialogPrimitive.Root open={state !== null} onOpenChange={(open) => !open && close(false)}>
       <AlertDialogPrimitive.Portal>
-        <AlertDialogPrimitive.Overlay onClick={(e) => e.stopPropagation()} className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm data-[state=open]:animate-fade-in" />
+        <AlertDialogPrimitive.Overlay onClick={(e) => e.stopPropagation()} className="fixed inset-0 z-[60] bg-black/80 data-[state=open]:animate-fade-in" />
         <AlertDialogPrimitive.Content
           // Il bottone che apre la conferma può stare dentro una <Link> (card): i click qui dentro
           // non devono risalire e far navigare.
           onClick={(e) => e.stopPropagation()}
-          className="fixed left-1/2 top-1/2 z-[60] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 space-y-4 rounded-2xl border border-line bg-surface p-6 shadow-2xl data-[state=open]:animate-fade-in"
+          className="fixed inset-x-4 top-[20vh] z-[60] mx-auto max-w-md space-y-4 rounded-2xl border border-line bg-surface p-6 shadow-2xl data-[state=open]:animate-fade-in"
         >
           <div className="space-y-1.5">
             <AlertDialogPrimitive.Title className="font-display text-lg font-semibold text-ink">{state?.title}</AlertDialogPrimitive.Title>

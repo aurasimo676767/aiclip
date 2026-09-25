@@ -30,7 +30,7 @@ export function ClipDetailDialog({ clip, youtubeConnected, onClose }: { clip: Cl
       {clip && (
         <DialogContent
           hideClose
-          className={`p-0 ${clip.format === "short" ? "max-w-4xl" : "max-w-5xl"}`}
+          className={`p-0 ${clip.format === "short" ? "max-w-5xl" : "max-w-6xl"}`}
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
           <ClipDetail key={clip.id} clip={clip} youtubeConnected={youtubeConnected} onClose={onClose} />
@@ -89,10 +89,11 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
   return (
     <div className="flex flex-col md:flex-row">
       {/* Colonna player */}
-      <div className={`flex shrink-0 items-center justify-center bg-black md:rounded-l-2xl ${isShort ? "p-4 md:w-[340px]" : "md:w-[58%]"}`}>
-        <div className={`relative w-full overflow-hidden rounded-xl ${isShort ? "aspect-[9/16] max-w-[300px]" : "aspect-video"}`}>
+      <div className={`flex shrink-0 items-center justify-center bg-black md:rounded-l-2xl ${isShort ? "p-3" : "md:w-[58%]"}`}>
+        {/* Player grande: il video è 1080x1920, mostrato largo 300px sembrava a bassa risoluzione. */}
+        <div className={`relative overflow-hidden rounded-xl ${isShort ? "aspect-[9/16] w-full max-w-[400px] md:h-[min(82vh,760px)] md:w-auto md:max-w-none" : "aspect-video w-full"}`}>
           {clip.videoUrl ? (
-            <video ref={videoRef} src={clip.videoUrl} poster={clip.thumbnailUrl ?? undefined} controls playsInline preload="metadata" className="h-full w-full bg-black object-contain" />
+            <video ref={videoRef} src={clip.videoUrl} poster={clip.thumbnailUrl ?? undefined} controls playsInline preload="auto" className="h-full w-full bg-black object-contain" />
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-[radial-gradient(circle_at_30%_20%,rgba(124,92,255,0.3),transparent_60%)] p-6 text-center">
               {working ? (
@@ -146,10 +147,10 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
           )}
           {isShort && clip.status === "COMPLETED" && (
             <button
-              onClick={() => call("regenerate", `/api/clips/${clip.id}/regenerate`, { method: "POST" }, "Clip in coda: rigenerazione con un editing diverso.")}
+              onClick={() => call("regenerate", `/api/clips/${clip.id}/regenerate`, { method: "POST" }, "Clip in coda: il video si sta rigenerando.")}
               disabled={busy !== null}
               className="btn btn-secondary btn-sm"
-              title="Rigenera questo estratto con uno stile di editing diverso"
+              title="Rifà il video di questa clip con l'impaginazione e i sottotitoli attuali (non usa l'AI)"
             >
               {busy === "regenerate" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
               Rigenera clip
