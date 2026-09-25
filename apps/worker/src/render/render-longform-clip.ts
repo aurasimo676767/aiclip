@@ -64,7 +64,10 @@ export async function renderLongformClip(params: RenderLongformClipParams): Prom
       "+faststart",
       outputPath,
     ],
-    { timeoutMs: 10 * 60 * 1000 },
+    // Proporzionale alla durata: un tetto fisso di 10 minuti ha ucciso il render di un video da 21
+    // minuti (2026-09-25) mentre il disco era sotto carico. Copia video + audio con loudnorm stanno
+    // ben sotto il tempo reale, quindi "durata del video, minimo 10 minuti" lascia molto margine.
+    { timeoutMs: Math.max(10 * 60, end - start) * 1000 },
   );
 
   const outputProbe = await probeVideo(outputPath);
