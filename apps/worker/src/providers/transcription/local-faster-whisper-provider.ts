@@ -8,6 +8,7 @@ import { logger } from "../../lib/logger.js";
 import { splitAudioIntoChunks } from "./audio-chunker.js";
 import type { TranscriptionProvider, TranscribeOptions } from "./transcription-provider.js";
 import { Mutex } from "../../lib/mutex.js";
+import { env } from "../../env.js";
 
 // Se più video vengono processati in parallelo (VIDEO_CONCURRENCY > 1), NON deve arrivare più
 // di una richiesta di trascrizione alla volta al server Whisper locale: gira su un'unica GPU
@@ -145,7 +146,11 @@ export class LocalFasterWhisperProvider implements TranscriptionProvider {
         `--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
       ),
       fileBuffer,
-      Buffer.from(`\r\n--${boundary}--\r\n`),
+      Buffer.from(`\r\n`),
+      ...(env.TRANSCRIPTION_LANGUAGE !== "auto"
+        ? [Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${env.TRANSCRIPTION_LANGUAGE}\r\n`)]
+        : []),
+      Buffer.from(`--${boundary}--\r\n`),
     ]);
 
     const endpoint = fast ? "/transcribe-fast" : "/transcribe";

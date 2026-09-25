@@ -35,6 +35,10 @@ const envSchema = z.object({
   ANTHROPIC_MODEL_CONTENT_FOCUS: z.string().default("claude-sonnet-5"),
   OPENAI_API_KEY: z.string().min(1),
   TRANSCRIPTION_PROVIDER: z.enum(["openai", "local"]).default("openai"),
+  // Lingua passata a Whisper. Senza, la deduce dai primi 30 secondi di ogni blocco da ~20 minuti:
+  // un VOD che si apriva con un audio in inglese è stato trascritto (e tradotto) in inglese per
+  // i primi 20 minuti di parlato italiano (2026-09-25). "auto" = lascia decidere a Whisper.
+  TRANSCRIPTION_LANGUAGE: z.string().default("it"),
   LOCAL_WHISPER_URL: z.string().default("http://127.0.0.1:8765"),
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),

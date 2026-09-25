@@ -225,10 +225,12 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     // Popolato SOLO per il long-form: le funzioni Shorts (candidates.ts/ranking.ts) non
     // restituiscono ancora l'uso token — vedi la nota nel salvataggio di usage_stats più sotto.
     let usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>> = {};
+    let longformTimeline: VideoUsageStats["longformTimeline"];
     if (isLongform) {
       const result = await buildLongformClipsToInsert(video, transcript.segments, transcript.durationSeconds, videoTitle);
       clipsToInsert = result.clipsToInsert;
       usageByModel = result.usageByModel;
+      longformTimeline = result.timeline;
     } else {
       // Per lo Short il file locale serve sempre (frame per il ranking) — needsLocalVideoFile è
       // sempre true quando !isLongform, quindi localVideoPath è garantito qui, ma lo verifichiamo
@@ -319,6 +321,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       tokens: usageByModel,
       costUsd: { ...costUsdByModel, total: totalCostUsd },
       stages: stageDurationsSeconds,
+      ...(longformTimeline ? { longformTimeline } : {}),
     };
     const { error: usageStatsError } = await supabase.from("videos").update({ usage_stats: usageStats }).eq("id", video.id);
     if (usageStatsError) {
@@ -484,6 +487,7 @@ function enforceHardDurationCap(clip: RankedClip, videoId: string): RankedClip {
 interface LongformClipsResult {
   clipsToInsert: ClipToInsert[];
   usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>>;
+  timeline?: VideoUsageStats["longformTimeline"];
 }
 
 /** Accumula usage in usageByModel sotto il livello del modello effettivo (vedi classifyModelTier). */
@@ -515,9 +519,10 @@ async function buildLongformClipsToInsert(
   // della ruota) → rifinitura dei tagli di inizio/fine → titoli. Se qualcosa si rompe si torna al
   // vecchio percorso candidati + ranking, così il VOD produce comunque dei video.
   try {
-    const rankedClips = await planLongformClips(video, segments, videoDurationSeconds, videoTitle, usageByModel);
+    const planned: { timeline?: VideoUsageStats["longformTimeline"] } = {};
+    const rankedClips = await planLongformClips(video, segments, videoDurationSeconds, videoTitle, usageByModel, planned);
     if (rankedClips.length > 0) {
-      return { clipsToInsert: rankedClips.map((clip) => buildLongformInsertRow(video, clip)), usageByModel };
+      return { clipsToInsert: rankedClips.map((clip) => buildLongformInsertRow(video, clip)), usageByModel, timeline: planned.timeline };
     }
     logger.warn("La mappa del VOD non ha prodotto video, si usa il vecchio percorso", { videoId: video.id });
   } catch (error) {
@@ -556,6 +561,7 @@ async function planLongformClips(
   videoDurationSeconds: number,
   videoTitle: string,
   usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>>,
+  planned: { timeline?: VideoUsageStats["longformTimeline"] },
 ): Promise<RankedLongformClip[]> {
   const chapters = await fetchTwitchChapters(video.source_url);
   const plan = await planLongformVideos(segments, {
@@ -572,6 +578,7 @@ async function planLongformClips(
     chapters: chapters.length,
     videos: plan.videos.map((v) => `${fmt(v.start)}-${fmt(v.end)} ${v.activity}${v.part ? ` (parte ${v.part})` : ""}`),
   });
+  planned.timeline = plan.timeline.map((b) => ({ start: b.start, end: b.end, kind: b.kind, activity: b.activity, what: b.what }));
   if (plan.videos.length === 0) return [];
 
   // La rifinitura è un miglioramento: se fallisce restano i confini della mappa.

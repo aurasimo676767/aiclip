@@ -25,6 +25,11 @@ export interface VideoUsageStats {
     transcriptionSeconds?: number;
     aiAnalysisSeconds?: number;
   };
+  /**
+   * Solo VOD: la mappa della live decisa dall'AI (tutti i blocchi, anche quelli scartati). Serve a
+   * capire DOPO perché un pezzo non è diventato un video — la mappa cambia da un giro all'altro.
+   */
+  longformTimeline?: Array<{ start: number; end: number; kind: string; activity: string; what: string }>;
 }
 
 /**

@@ -63,6 +63,7 @@ def transcribe():
 
     segments_iter, info = model.transcribe(
         audio_bytes,
+        language=request.form.get("language") or None,
         word_timestamps=True,
         vad_filter=True,
     )
@@ -105,6 +106,7 @@ def transcribe_fast():
 
     segments_iter, info = batched_pipeline.transcribe(
         audio_bytes,
+        language=request.form.get("language") or None,
         word_timestamps=False,
         vad_filter=True,
         batch_size=BATCH_SIZE,
