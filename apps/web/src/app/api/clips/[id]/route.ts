@@ -27,6 +27,7 @@ const bodySchema = z.object({
   // Stringa vuota = "torna al testo generato automaticamente" (salvata come NULL).
   publishDescription: z.string().max(5000).optional(),
   hashtags: z.array(z.string().trim().min(1).max(60)).max(30).optional(),
+  longformEdit: z.boolean().optional(),
 });
 
 /**
@@ -52,13 +53,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Payload non valido" }, { status: 400 });
   }
-  const { title, publishDescription, hashtags } = parsed.data;
-  if (title === undefined && publishDescription === undefined && hashtags === undefined) {
+  const { title, publishDescription, hashtags, longformEdit } = parsed.data;
+  if (title === undefined && publishDescription === undefined && hashtags === undefined && longformEdit === undefined) {
     return NextResponse.json({ error: "Niente da aggiornare" }, { status: 400 });
   }
 
-  const clipUpdate: { title?: string; hashtags?: string[]; publish_description?: string | null } = {};
+  const clipUpdate: { title?: string; hashtags?: string[]; publish_description?: string | null; longform_edit?: boolean } = {};
   if (title !== undefined) clipUpdate.title = title;
+  if (longformEdit !== undefined) clipUpdate.longform_edit = longformEdit;
   if (hashtags !== undefined) clipUpdate.hashtags = hashtags;
   if (publishDescription !== undefined) {
     const trimmed = publishDescription.trim();
@@ -74,6 +76,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     .select("id, title, caption, hashtags, publish_description, format, video_id")
     .maybeSingle();
   if (updateError) {
+    if (updateError.message.includes("longform_edit")) {
+      return NextResponse.json({ error: "Manca la colonna longform_edit: lancia la migrazione 0024 su Supabase." }, { status: 500 });
+    }
     return NextResponse.json({ error: `Salvataggio fallito: ${updateError.message}` }, { status: 500 });
   }
   if (!updated) {

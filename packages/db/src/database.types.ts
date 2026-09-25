@@ -238,6 +238,7 @@ export interface Database {
           hashtags: unknown;
           caption: string;
           publish_description: string | null;
+          longform_edit: boolean;
           badges: unknown;
           format: ClipFormat;
           status: ClipStatus;
@@ -264,6 +265,7 @@ export interface Database {
           hashtags?: unknown;
           caption?: string;
           publish_description?: string | null;
+          longform_edit?: boolean;
           badges?: unknown;
           format?: ClipFormat;
           status?: ClipStatus;
@@ -290,6 +292,7 @@ export interface Database {
           hashtags?: unknown;
           caption?: string;
           publish_description?: string | null;
+          longform_edit?: boolean;
           badges?: unknown;
           format?: ClipFormat;
           status?: ClipStatus;

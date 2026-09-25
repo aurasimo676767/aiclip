@@ -21,6 +21,8 @@ export interface ClipViewModel {
   caption: string;
   /** Descrizione precompilata nel form di pubblicazione: per il long-form è un preset fisso di crediti allo streamer (non il riassunto IA di `caption`). */
   publishDescription: string;
+  /** Solo long-form: montaggio automatico al prossimo render (tempi morti tagliati, stacchi sulle urla). */
+  longformEdit: boolean;
   youtubePublishStatus: string | null;
   youtubeUrl: string | null;
   youtubeError: string | null;

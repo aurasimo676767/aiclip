@@ -47,9 +47,9 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       .in("project_id", projectIds),
     supabase
       .from("clips")
-      .select(
-        "id, project_id, title, hook, reason, duration, scores, status, error_message, hashtags, caption, publish_description, badges, format, thumbnail_path, output_video_path",
-      )
+      // "*" e non l'elenco delle colonne: così la pagina regge anche prima della migrazione 0024
+      // (longform_edit), che va lanciata a mano su Supabase — senza colonna vale semplicemente false.
+      .select("*")
       .in("project_id", projectIds),
   ]);
 
@@ -128,6 +128,7 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       publishDescription,
       badges: (c.badges as ClipBadge[] | null) ?? [],
       format: c.format,
+      longformEdit: (c as { longform_edit?: boolean }).longform_edit === true,
       youtubePublishStatus: publish?.status ?? null,
       youtubeUrl: publish?.youtubeUrl ?? null,
       youtubeError: publish?.errorMessage ?? null,

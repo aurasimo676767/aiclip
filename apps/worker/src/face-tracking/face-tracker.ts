@@ -85,5 +85,11 @@ export interface FaceTracker {
     /** Timestamp assoluti sul video sorgente (stessa timeline del transcript). */
     startSeconds: number;
     endSeconds: number;
+    /**
+     * false = salta il rilevamento degli stacchi di montaggio. Serve solo su clip lunghe o già
+     * montate; su una finestra di pochi secondi (gli stacchi sulle urla dei video long-form) costava
+     * quasi tutto il tempo dell'analisi per niente. Default: true.
+     */
+    sceneCuts?: boolean;
   }): Promise<Layout>;
 }

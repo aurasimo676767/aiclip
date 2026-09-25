@@ -614,6 +614,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     sourceHeight: number;
     startSeconds: number;
     endSeconds: number;
+    sceneCuts?: boolean;
   }): Promise<Layout> {
     const { sourceVideoPath, sourceWidth, sourceHeight, startSeconds, endSeconds } = params;
     const clipDuration = Math.max(0.1, endSeconds - startSeconds);
@@ -633,7 +634,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     // in cui è stato osservato per la prima volta.
     let cutTimes: number[] = [];
     try {
-      cutTimes = await detectSceneCuts(sourceVideoPath, startSeconds, clipDuration);
+      if (params.sceneCuts !== false) cutTimes = await detectSceneCuts(sourceVideoPath, startSeconds, clipDuration);
     } catch (err) {
       logger.warn("Rilevamento tagli di scena fallito, uso solo la griglia temporale fissa", {
         error: err instanceof Error ? err.message : String(err),

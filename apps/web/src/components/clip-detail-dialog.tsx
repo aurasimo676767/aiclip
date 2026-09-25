@@ -132,6 +132,23 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
           </button>
         </div>
 
+        {!isShort && (
+          <LongformEditToggle
+            enabled={clip.longformEdit}
+            busy={busy === "longform-edit"}
+            onChange={(next) =>
+              call(
+                "longform-edit",
+                `/api/clips/${clip.id}`,
+                { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ longformEdit: next }) },
+                next
+                  ? "Montaggio automatico acceso: vale dal prossimo render (premi Rigenera clip se il video è già pronto)."
+                  : "Montaggio automatico spento: dal prossimo render solo taglio.",
+              )
+            }
+          />
+        )}
+
         {/* Azioni principali */}
         <div className="flex flex-wrap items-center gap-2">
           {isRenderable(clip) && (
@@ -145,12 +162,16 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
               <Download size={14} /> Scarica
             </a>
           )}
-          {isShort && clip.status === "COMPLETED" && (
+          {clip.status === "COMPLETED" && (
             <button
               onClick={() => call("regenerate", `/api/clips/${clip.id}/regenerate`, { method: "POST" }, "Clip in coda: il video si sta rigenerando.")}
               disabled={busy !== null}
               className="btn btn-secondary btn-sm"
-              title="Rifà il video di questa clip con l'impaginazione e i sottotitoli attuali (non usa l'AI)"
+              title={
+                isShort
+                  ? "Rifà il video di questa clip con l'impaginazione e i sottotitoli attuali (non usa l'AI)"
+                  : "Rifà il video con l'impostazione attuale del montaggio automatico (non usa l'AI)"
+              }
             >
               {busy === "regenerate" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
               Rigenera clip
@@ -352,5 +373,34 @@ function EditPanel({ clip, onDone, onCancel }: { clip: ClipViewModel; onDone: (m
         </button>
       </div>
     </form>
+  );
+}
+
+/** Interruttore del montaggio automatico long-form (clips.longform_edit). */
+function LongformEditToggle({ enabled, busy, onChange }: { enabled: boolean; busy: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-line bg-raised/50 p-3">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label="Montaggio automatico"
+        disabled={busy}
+        onClick={() => onChange(!enabled)}
+        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 disabled:opacity-60 ${
+          enabled ? "border-brand-400 bg-brand-400" : "border-line-strong bg-canvas"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-[18px] w-[18px] rounded-full transition-all ${enabled ? "left-[22px] bg-on-brand" : "left-0.5 bg-faint"}`}
+        />
+      </button>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-ink">Montaggio automatico</p>
+        <p className="text-xs leading-relaxed text-muted">
+          Taglia i tempi morti e, quando qualcuno urla, stacca sulla sua faccia a tutto schermo. Vale dal prossimo render.
+        </p>
+      </div>
+    </div>
   );
 }

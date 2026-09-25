@@ -22,13 +22,15 @@ export async function POST(_request: Request, { params }: { params: { id: string
     .eq("id", params.id)
     .single();
   if (clipError || !clip) return NextResponse.json({ error: "Clip non trovata" }, { status: 404 });
-  if (clip.status !== "COMPLETED" || clip.format !== "short") {
-    return NextResponse.json({ error: "Puoi rigenerare solo una clip corta già completata" }, { status: 409 });
+  if (clip.status !== "COMPLETED") {
+    return NextResponse.json({ error: "Puoi rigenerare solo una clip già completata" }, { status: 409 });
   }
 
-  // Cambia il preset effettivamente usato dal renderer, lasciando invariato l'estratto.
+  // Short: cambia il preset usato dal renderer, lasciando invariato l'estratto. Long-form: il
+  // template non conta (solo taglio o montaggio automatico, vedi clips.longform_edit), resta com'è.
   const currentTemplate = TEMPLATE_NAMES.includes(clip.template as TemplateName) ? clip.template as TemplateName : "PODCAST_CLEAN";
-  const template = TEMPLATE_NAMES[(TEMPLATE_NAMES.indexOf(currentTemplate) + 1) % TEMPLATE_NAMES.length]!;
+  const template =
+    clip.format === "short" ? TEMPLATE_NAMES[(TEMPLATE_NAMES.indexOf(currentTemplate) + 1) % TEMPLATE_NAMES.length]! : currentTemplate;
   const { data: queued, error: updateError } = await supabase
     .from("clips")
     .update({

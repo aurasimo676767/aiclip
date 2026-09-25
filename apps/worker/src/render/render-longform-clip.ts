@@ -1,4 +1,7 @@
 import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
+import { logger } from "../lib/logger.js";
+import type { FaceTracker } from "../face-tracking/face-tracker.js";
+import { planLongformEdit, renderEditedLongform } from "./longform-auto-edit.js";
 
 // Target audio comune al segmento estratto — l'audio viene comunque ri-codificato per il
 // loudnorm, quindi tanto vale fissare qui dei parametri stabili.
@@ -10,6 +13,8 @@ export interface RenderLongformClipParams {
   start: number;
   end: number;
   workDir: string;
+  /** Montaggio automatico (clips.longform_edit): tempi morti tagliati e stacchi sulle urla. Serve il tracker per trovare le webcam. */
+  autoEdit?: { faceTracker: FaceTracker };
   outputPath: string;
 }
 
@@ -33,6 +38,21 @@ export async function renderLongformClip(params: RenderLongformClipParams): Prom
   }
   if (!sourceProbe.hasAudio) {
     throw new Error("Il file sorgente non contiene una traccia audio (richiesta per il render long-form)");
+  }
+
+  if (params.autoEdit) {
+    const plan = await planLongformEdit({
+      sourceVideoPath,
+      sourceWidth: sourceProbe.width,
+      sourceHeight: sourceProbe.height,
+      start,
+      end,
+      faceTracker: params.autoEdit.faceTracker,
+    });
+    await renderEditedLongform({ sourceVideoPath, start, end, plan, workDir: params.workDir, outputPath });
+    const editedProbe = await probeVideo(outputPath);
+    logger.info("Video long-form montato", { durata: Math.round(end - start), montato: Math.round(editedProbe.durationSeconds), stacchi: plan.punches.length });
+    return { durationSeconds: editedProbe.durationSeconds };
   }
 
   await runFfmpeg(
