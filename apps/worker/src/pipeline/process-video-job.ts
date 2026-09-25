@@ -16,6 +16,7 @@ import {
   type EditDecisionList,
   type ClipBadge,
   type RankedClip,
+  type RankedLongformClip,
   type ModelUsageKey,
   type ModelTokenUsage,
   type VideoUsageStats,
@@ -31,6 +32,10 @@ import { detectClipCandidates } from "../providers/ai/candidates.js";
 import { rankAndBuildEdl } from "../providers/ai/ranking.js";
 import { detectLongformCandidates } from "../providers/ai/longform-candidates.js";
 import { rankLongformClips } from "../providers/ai/longform-ranking.js";
+import { planLongformVideos, fmt } from "../providers/ai/longform-plan.js";
+import { refineVideoBoundaries } from "../providers/ai/longform-boundaries.js";
+import { describePlannedVideos } from "../providers/ai/longform-metadata.js";
+import { fetchTwitchChapters } from "../lib/twitch-chapters.js";
 import { sanitizeShortClips } from "./short-clip-boundaries.js";
 import { detectLoudMoments } from "./vocal-energy.js";
 import { updateVideoStatus } from "../queue/video-queue.js";
@@ -495,6 +500,22 @@ async function buildLongformClipsToInsert(
 ): Promise<LongformClipsResult> {
   const usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>> = {};
 
+  // Percorso principale: mappa dell'intera live → un video per attività (tornei divisi sul giro
+  // della ruota) → rifinitura dei tagli di inizio/fine → titoli. Se qualcosa si rompe si torna al
+  // vecchio percorso candidati + ranking, così il VOD produce comunque dei video.
+  try {
+    const rankedClips = await planLongformClips(video, segments, videoDurationSeconds, videoTitle, usageByModel);
+    if (rankedClips.length > 0) {
+      return { clipsToInsert: rankedClips.map((clip) => buildLongformInsertRow(video, clip)), usageByModel };
+    }
+    logger.warn("La mappa del VOD non ha prodotto video, si usa il vecchio percorso", { videoId: video.id });
+  } catch (error) {
+    logger.warn("Mappa del VOD fallita, si usa il vecchio percorso", {
+      videoId: video.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   const { candidates, usage: candidatesUsage } = await detectLongformCandidates(segments, {
     apiKey: env.ANTHROPIC_API_KEY,
     model: env.ANTHROPIC_MODEL_CHEAP,
@@ -512,28 +533,82 @@ async function buildLongformClipsToInsert(
   });
   addUsage(usageByModel, env.ANTHROPIC_MODEL_LONGFORM, rankingUsage);
 
-  // editing_style/template/edl sono placeholder inerti: il render long-form (vedi
-  // render-longform-clip.ts) non li legge mai, esistono solo perché le colonne DB sono NOT NULL
-  // e condivise con gli Shorts.
-  const clipsToInsert = rankedClips.slice(0, MAX_SUGGESTED_LONGFORM_CLIPS).map((clip) =>
-    buildInsertRow({
-      video,
-      start: clip.start,
-      end: clip.end,
-      duration: clip.duration,
-      title: clip.title,
-      hook: clip.hook,
-      reason: clip.reason,
-      scores: clip.scores,
-      editingStyle: "clean",
-      template: "PODCAST_CLEAN",
-      edl: { template: "PODCAST_CLEAN", events: [] },
-      hashtags: clip.hashtags,
-      caption: clip.caption,
-      badges: clip.badges,
-      format: "longform",
-    }),
-  );
+  const clipsToInsert = rankedClips.slice(0, MAX_SUGGESTED_LONGFORM_CLIPS).map((clip) => buildLongformInsertRow(video, clip));
 
   return { clipsToInsert, usageByModel };
+}
+
+/** Mappa del VOD → video per attività → tagli rifiniti → titoli (vedi buildLongformClipsToInsert). */
+async function planLongformClips(
+  video: VideoRow,
+  segments: TranscriptSegment[],
+  videoDurationSeconds: number,
+  videoTitle: string,
+  usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>>,
+): Promise<RankedLongformClip[]> {
+  const chapters = await fetchTwitchChapters(video.source_url);
+  const plan = await planLongformVideos(segments, {
+    apiKey: env.ANTHROPIC_API_KEY,
+    model: env.ANTHROPIC_MODEL_LONGFORM,
+    videoTitle,
+    streamerName: video.streamer_name,
+    videoDurationSeconds,
+    chapters,
+  });
+  addUsage(usageByModel, env.ANTHROPIC_MODEL_LONGFORM, plan.usage);
+  logger.info("Mappa del VOD", {
+    videoId: video.id,
+    chapters: chapters.length,
+    videos: plan.videos.map((v) => `${fmt(v.start)}-${fmt(v.end)} ${v.activity}${v.part ? ` (parte ${v.part})` : ""}`),
+  });
+  if (plan.videos.length === 0) return [];
+
+  // La rifinitura è un miglioramento: se fallisce restano i confini della mappa.
+  let videos = plan.videos;
+  try {
+    const refined = await refineVideoBoundaries(plan.videos, segments, {
+      apiKey: env.ANTHROPIC_API_KEY,
+      model: env.ANTHROPIC_MODEL_LONGFORM_BOUNDARIES,
+      videoDurationSeconds,
+    });
+    addUsage(usageByModel, env.ANTHROPIC_MODEL_LONGFORM_BOUNDARIES, refined.usage);
+    if (refined.videos.length > 0) videos = refined.videos;
+  } catch (error) {
+    logger.warn("Rifinitura dei tagli fallita, restano quelli della mappa", {
+      videoId: video.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const { clips, usage } = await describePlannedVideos(videos, plan.timeline, segments, {
+    apiKey: env.ANTHROPIC_API_KEY,
+    model: env.ANTHROPIC_MODEL_LONGFORM,
+    videoTitle,
+    streamerName: video.streamer_name,
+  });
+  addUsage(usageByModel, env.ANTHROPIC_MODEL_LONGFORM, usage);
+  return clips.slice(0, MAX_SUGGESTED_LONGFORM_CLIPS);
+}
+
+// editing_style/template/edl sono placeholder inerti: il render long-form (vedi
+// render-longform-clip.ts) non li legge mai, esistono solo perché le colonne DB sono NOT NULL
+// e condivise con gli Shorts.
+function buildLongformInsertRow(video: VideoRow, clip: RankedLongformClip): ClipToInsert {
+  return buildInsertRow({
+    video,
+    start: clip.start,
+    end: clip.end,
+    duration: clip.duration,
+    title: clip.title,
+    hook: clip.hook,
+    reason: clip.reason,
+    scores: clip.scores,
+    editingStyle: "clean",
+    template: "PODCAST_CLEAN",
+    edl: { template: "PODCAST_CLEAN", events: [] },
+    hashtags: clip.hashtags,
+    caption: clip.caption,
+    badges: clip.badges,
+    format: "longform",
+  });
 }

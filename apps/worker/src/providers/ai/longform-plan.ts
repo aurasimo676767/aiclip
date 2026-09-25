@@ -2,7 +2,7 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { TranscriptSegment, ModelTokenUsage } from "@clipforge/shared";
 import { classifyModelTier, computeModelCostUsd } from "@clipforge/shared";
-import { getAnthropicClient, cachedSystemPrompt, readCacheUsage } from "./anthropic-client.js";
+import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor } from "./anthropic-client.js";
 import { formatChapters, type TwitchChapter } from "../../lib/twitch-chapters.js";
 import { logger } from "../../lib/logger.js";
 
@@ -66,7 +66,7 @@ export interface LongformPlanResult {
 
 const TOOL_NAME = "return_vod_timeline";
 
-/** Oltre questa durata (+25% di tolleranza) un video si divide in parti — simo: "basta che non venga ore e ore". */
+/** Oltre questa durata un video si divide in parti — simo: "basta che non venga ore e ore" (niente tolleranza: un Black Ops 2 da 2h02 restava intero). */
 export const LONG_VIDEO_SPLIT_SECONDS = 2 * 60 * 60;
 /** Sotto questa durata un gioco/reaction/argomento non regge da solo come video. */
 export const MIN_VIDEO_SECONDS = 8 * 60;
@@ -151,7 +151,18 @@ const timelineBlockSchema = z.object({
   what: z.string(),
 });
 
-const timelineResponseSchema = z.object({ timeline: z.array(timelineBlockSchema).min(1) });
+// A volte il modello restituisce la lista come TESTO JSON invece che come lista (visto al test:
+// primo tentativo scartato e ripagato per intero). Si legge il testo invece di rifare la chiamata.
+const timelineResponseSchema = z.object({
+  timeline: z.preprocess((v) => {
+    if (typeof v !== "string") return v;
+    try {
+      return JSON.parse(v);
+    } catch {
+      return v;
+    }
+  }, z.array(timelineBlockSchema).min(1)),
+});
 
 export interface LongformPlanOptions {
   apiKey: string;
@@ -185,13 +196,10 @@ ${transcriptText}`;
     const message = await client.messages.create({
       model: options.model,
       max_tokens: 16000,
-      // Stesso transcript -> stessa timeline: con la temperatura di default due esecuzioni sullo
-      // stesso VOD davano tagli diversi.
-      temperature: 0,
       system: cachedSystemPrompt(SYSTEM_PROMPT),
       messages,
       tools: [TIMELINE_TOOL_SCHEMA],
-      tool_choice: { type: "tool", name: TOOL_NAME },
+      tool_choice: toolChoiceFor(options.model, TOOL_NAME),
     });
     usage.calls++;
     usage.input += message.usage.input_tokens;
@@ -340,7 +348,7 @@ function splitLongVideo(group: ActivityGroup, kind: PlannedVideoKind): PlannedVi
   const start = blocks[0]!.start;
   const end = blocks[blocks.length - 1]!.end;
   const duration = end - start;
-  if (duration <= LONG_VIDEO_SPLIT_SECONDS * 1.25) return [toVideo(group, blocks, kind)];
+  if (duration <= LONG_VIDEO_SPLIT_SECONDS) return [toVideo(group, blocks, kind)];
 
   // Indici dei blocchi da cui può cominciare una parte, già arretrati su setup/ruota attaccati.
   const cuts: Array<{ index: number; wheel: boolean }> = [];

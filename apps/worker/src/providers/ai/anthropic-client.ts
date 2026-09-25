@@ -37,3 +37,14 @@ export function readCacheUsage(usage: Anthropic.Usage): { cacheRead: number; cac
   const raw = usage as Anthropic.Usage & { cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
   return { cacheRead: raw.cache_read_input_tokens ?? 0, cacheWrite: raw.cache_creation_input_tokens ?? 0 };
 }
+
+/**
+ * `tool_choice` per chiedere un output strutturato tramite strumento. Opus 5.5 ha il ragionamento
+ * sempre acceso e rifiuta la scelta forzata ("tool"/"any" → 400): lì si usa "auto", e il prompt di
+ * sistema deve dire esplicitamente di rispondere chiamando lo strumento. Gli altri modelli restano
+ * forzati.
+ */
+export function toolChoiceFor(model: string, toolName: string): Anthropic.MessageCreateParams["tool_choice"] {
+  if (/opus-5/.test(model)) return { type: "auto" };
+  return { type: "tool", name: toolName };
+}

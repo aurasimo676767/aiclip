@@ -25,6 +25,10 @@ const envSchema = z.object({
   // su Opus per la qualità degli Shorts (contesto piccolo, costo basso), il long-form non lo
   // eredita automaticamente e resta su un modello più economico di default.
   ANTHROPIC_MODEL_LONGFORM: z.string().default("claude-sonnet-5"),
+  // Rifinitura dei tagli di inizio/fine dei video long-form (longform-boundaries.ts): poche righe di
+  // transcript attorno a ogni confine, quindi pochi token. Opus perché al test sullo stesso VOD è
+  // stato più costante di Sonnet (Sonnet cambiava idea fra un giro e l'altro).
+  ANTHROPIC_MODEL_LONGFORM_BOUNDARIES: z.string().default("claude-opus-5-5"),
   OPENAI_API_KEY: z.string().min(1),
   TRANSCRIPTION_PROVIDER: z.enum(["openai", "local"]).default("openai"),
   LOCAL_WHISPER_URL: z.string().default("http://127.0.0.1:8765"),
