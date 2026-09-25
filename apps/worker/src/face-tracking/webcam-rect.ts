@@ -41,6 +41,27 @@ const CONTINUITY_PERCENTILE = 0.3;
 const MIN_RECT_SCORE = 4;
 
 /**
+ * Soglia più bassa per un riquadro incastrato in un ANGOLO dello schermo (tocca due bordi
+ * perpendicolari) con proporzioni da webcam. Le webcam senza cornice sfumano nel contenuto su un
+ * lato: verificato su uno stream con Instagram a sinistra e la cam in alto a destra, il riquadro
+ * giusto (538x378 nell'angolo) prendeva 2.7 e la scena finiva a frame intero invece che in split.
+ * Il caso che ha fissato MIN_RECT_SCORE (una foto profilo nei commenti, 0.4) non sta in un angolo.
+ */
+const MIN_CORNER_RECT_SCORE = 2.2;
+const CORNER_MIN_ASPECT = 1.2;
+const CORNER_MAX_ASPECT = 1.85;
+
+/** Il riquadro tocca due bordi perpendicolari dello schermo (tolleranza 2% del lato). */
+function isCornerAnchored(rect: CropWindow, sourceWidth: number, sourceHeight: number): boolean {
+  const tx = sourceWidth * 0.02;
+  const ty = sourceHeight * 0.02;
+  const touchesX = rect.x <= tx || rect.x + rect.width >= sourceWidth - tx;
+  const touchesY = rect.y <= ty || rect.y + rect.height >= sourceHeight - ty;
+  const aspect = rect.width / rect.height;
+  return touchesX && touchesY && aspect >= CORNER_MIN_ASPECT && aspect <= CORNER_MAX_ASPECT;
+}
+
+/**
  * Quanto deve essere alto il volto rispetto al riquadro che lo contiene perché quel riquadro sia
  * credibile come webcam. Su webcam reali misurato 28-39%; sotto questa soglia si tratta quasi
  * sempre di un volto dentro il contenuto reagito (una faccia in un TikTok dentro il suo player).
@@ -184,6 +205,10 @@ export async function detectWebcamRectDebug(
   ].slice(0, 5);
   const best = ranked[0];
   if (!best) return { rect: null, reason: "nessun rettangolo plausibile attorno al volto", alternatives: [] };
+  const cornerOk = best.score >= MIN_CORNER_RECT_SCORE && isCornerAnchored(best.rect, sourceWidth, sourceHeight);
+  if (best.score < MIN_RECT_SCORE && cornerOk) {
+    return { rect: best.rect, reason: `ok, riquadro d'angolo (bordo più debole ${best.score.toFixed(1)})`, alternatives: ranked };
+  }
   if (best.score < MIN_RECT_SCORE) {
     return {
       rect: null,

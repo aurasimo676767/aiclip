@@ -160,6 +160,25 @@ const SCENE_SUBJECT_MIN_HEIGHT_RATIO = 0.25;
  */
 const MAX_ANCHOR_GAP_SECONDS = 2;
 
+/** Quanti volti candidati provare, per scena, nella ricerca del riquadro della webcam. */
+const CAM_FACE_TRIES = 3;
+
+/**
+ * Un volto per persona: le apparizioni vicine si raggruppano e ognuna vale la sua posizione MEDIA,
+ * non la prima incontrata — una webcam vista 20 volte al suo posto e 2 volte spostata (lo streamer
+ * che si sporge) deve cercare il riquadro dal suo posto abituale. Con la prima occorrenza, presa da
+ * un momento in cui si sporgeva, il riquadro non veniva trovato. Ordine: dal più piccolo.
+ */
+function distinctFaces(faces: FaceBox[]): FaceBox[] {
+  const groups: FaceBox[][] = [];
+  for (const f of faces) {
+    const group = groups.find((g) => isNearBox(averageBox(g), f));
+    if (group) group.push(f);
+    else groups.push([f]);
+  }
+  return groups.map(averageBox).sort((a, b) => a.height - b.height);
+}
+
 /** Da quanti secondi di primo piano senza webcam in poi lo stream ha cambiato inquadratura. */
 const MIN_SUBJECT_GAP_SECONDS = 1;
 
@@ -272,12 +291,21 @@ async function perSceneCompositions(
     const faces = segments
       .filter((seg) => seg.endSeconds > startSeconds + 0.01 && seg.startSeconds < endSeconds - 0.01)
       .flatMap((seg) => seg.allFaces.map((m) => m.avg));
-    const camFace = faces.filter((f) => isWebcamLike(f, sourceWidth, sourceHeight)).sort((a, b) => a.height - b.height)[0];
-    if (!camFace) continue;
+    // Si provano i volti candidati dal più piccolo, fino a CAM_FACE_TRIES, e si tiene il primo che
+    // ha attorno un vero riquadro da webcam: il più piccolo da solo poteva essere una foto profilo
+    // nei commenti di Instagram (50x50px), attorno a cui non c'è nessun riquadro — e la cam vera,
+    // poco più grande, non veniva mai provata (verificato: scena a frame intero invece che split).
+    const camFaces = distinctFaces(faces.filter((f) => isWebcamLike(f, sourceWidth, sourceHeight)).sort((a, b) => a.height - b.height));
+    if (camFaces.length === 0) continue;
     const duration = Math.max(0.1, endSeconds - startSeconds);
     const sampleTimes = Array.from({ length: SCENE_SAMPLE_COUNT }, (_, k) => clipStartSeconds + startSeconds + (duration * (k + 0.5)) / SCENE_SAMPLE_COUNT);
-    const found = await detectWebcamRect(sourceVideoPath, sampleTimes, camFace, sourceWidth, sourceHeight);
-    if (found && !rejectionReasonForWebcamRect(found, sourceWidth, sourceHeight)) cams.push(found);
+    for (const camFace of camFaces.slice(0, CAM_FACE_TRIES)) {
+      const found = await detectWebcamRect(sourceVideoPath, sampleTimes, camFace, sourceWidth, sourceHeight);
+      if (found && !rejectionReasonForWebcamRect(found, sourceWidth, sourceHeight)) {
+        cams.push(found);
+        break;
+      }
+    }
   }
   // UN SOLO riquadro cam per tutta la clip: le scene con la cam sono lo stesso stream ripreso più
   // volte, e riquadri leggermente diversi facevano "respirare" il pannello a ogni stacco.
@@ -302,6 +330,10 @@ async function perSceneCompositions(
 
   fillUnknownUnits(units, isCut);
   smoothKindOutliers(units, isCut);
+  logger.info("Composizione per tratti", {
+    cam: canonicalCam,
+    tratti: units.map((u) => `${u.startSeconds.toFixed(1)} ${u.kind}`).join(" | "),
+  });
 
   // 3) Pannello contenuto per i tratti in split, SENZA MAI tagliare il contenuto: ritaglio
   //    centrato se il contenuto ci sta, altrimenti la finestra dove succede qualcosa, altrimenti il
