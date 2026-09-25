@@ -1,4 +1,7 @@
+import type { TranscriptWord } from "@clipforge/shared";
 import { runFfmpeg } from "../lib/ffmpeg.js";
+import { logger } from "../lib/logger.js";
+import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
 
 export interface SilenceInterval {
   start: number;
@@ -124,4 +127,69 @@ export function buildTimeRemap(keepSegments: TimeSegment[]): (originalTime: numb
     const last = cumulative[cumulative.length - 1];
     return last ? last.newStart + (last.end - last.start) : originalTime;
   };
+}
+
+/**
+ * Quanto il livello di un buco nel parlato deve stare sotto la voce per essere "tempo morto".
+ * Una risata o un urlo senza parole (Whisper non li trascrive) sono forti quanto la voce e restano;
+ * il gioco in sottofondo, i passi, il ventilatore stanno molto più in basso e si tagliano.
+ */
+const QUIET_BELOW_SPEECH_DB = 8;
+
+/**
+ * Buchi nel PARLATO, non nell'audio: tratti fra due parole più lunghi di `minGapSeconds` in cui
+ * l'audio sta chiaramente sotto il livello della voce.
+ *
+ * Perché serve: `detectSilences` cerca il silenzio dell'audio, ma negli stream il gioco fa rumore
+ * anche quando nessuno parla, quindi quei tempi morti non risultavano mai "silenzio" e restavano
+ * dentro lo Short. I tempi delle parole invece dicono esattamente quando qualcuno parla.
+ *
+ * `words` in tempi relativi a `mediaPath` (0 = inizio del file).
+ */
+export async function detectQuietSpeechGaps(mediaPath: string, words: TranscriptWord[], minGapSeconds: number): Promise<SilenceInterval[]> {
+  const sorted = [...words].filter((w) => w.end > w.start).sort((a, b) => a.start - b.start);
+  if (sorted.length < 3) return [];
+  const duration = sorted[sorted.length - 1]!.end + 1;
+
+  let levels: number[];
+  try {
+    levels = await measureRmsWindows(mediaPath, 0, duration);
+  } catch (err) {
+    logger.warn("Misura dei buchi nel parlato fallita, resta solo il taglio dei silenzi audio", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+  const windowsIn = (start: number, end: number) =>
+    levels.slice(Math.max(0, Math.floor(start / WINDOW_SECONDS)), Math.max(0, Math.ceil(end / WINDOW_SECONDS)));
+
+  const speechPeaks = sorted.map((w) => Math.max(-100, ...windowsIn(w.start, w.end))).filter((p) => p > -90);
+  if (speechPeaks.length < 3) return [];
+  const speech = [...speechPeaks].sort((a, b) => a - b)[Math.floor(speechPeaks.length / 2)]!;
+
+  const gaps: SilenceInterval[] = [];
+  let lastEnd = sorted[0]!.end;
+  for (const w of sorted.slice(1)) {
+    if (w.start - lastEnd >= minGapSeconds) {
+      const inside = windowsIn(lastEnd, w.start).sort((a, b) => a - b);
+      // L'80° percentile e non il massimo: un colpo isolato (un tasto, un click) non deve salvare
+      // un buco di due secondi.
+      const loud = inside[Math.floor(inside.length * 0.8)] ?? -100;
+      if (loud <= speech - QUIET_BELOW_SPEECH_DB) gaps.push({ start: lastEnd, end: w.start });
+    }
+    lastEnd = Math.max(lastEnd, w.end);
+  }
+  return gaps;
+}
+
+/** Unisce intervalli sovrapposti (silenzi audio + buchi nel parlato). */
+export function mergeIntervals(intervals: SilenceInterval[]): SilenceInterval[] {
+  const sorted = [...intervals].sort((a, b) => a.start - b.start);
+  const merged: SilenceInterval[] = [];
+  for (const i of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && i.start <= last.end) last.end = Math.max(last.end, i.end);
+    else merged.push({ ...i });
+  }
+  return merged;
 }

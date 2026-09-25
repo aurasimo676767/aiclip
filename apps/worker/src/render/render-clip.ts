@@ -6,7 +6,7 @@ import { logger } from "../lib/logger.js";
 import type { FaceTracker, Layout, TimedCrop } from "../face-tracking/face-tracker.js";
 import { buildAssSubtitles, screamWindows } from "./captions.js";
 import { buildVideoFilterComplex } from "./build-video-filter.js";
-import { detectSilences, computeKeepSegments, buildTimeRemap, type TimeSegment } from "./silence.js";
+import { detectSilences, detectQuietSpeechGaps, mergeIntervals, computeKeepSegments, buildTimeRemap, type TimeSegment } from "./silence.js";
 import { trimToKeepSegments } from "./trim-concat.js";
 import { annotateWordLoudness } from "./word-loudness.js";
 
@@ -45,7 +45,14 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
   let finalDuration = clipDuration;
 
   if (template.silenceRemovalThresholdSeconds !== null && sourceProbe.hasAudio) {
-    const silences = await detectSilences(rawClipPath, { minDurationSeconds: template.silenceRemovalThresholdSeconds });
+    const audioSilences = await detectSilences(rawClipPath, { minDurationSeconds: template.silenceRemovalThresholdSeconds });
+    // Più i buchi nel PARLATO (vedi detectQuietSpeechGaps): negli stream il gioco copre il silenzio.
+    const clipWords = transcriptSegments
+      .flatMap((s) => s.words)
+      .filter((w) => w.start >= clip.start && w.start < clip.end)
+      .map((w) => ({ ...w, start: w.start - clip.start, end: Math.min(clip.end, w.end) - clip.start }));
+    const speechGaps = await detectQuietSpeechGaps(rawClipPath, clipWords, template.silenceRemovalThresholdSeconds);
+    const silences = mergeIntervals([...audioSilences, ...speechGaps]);
     const keepSegments = computeKeepSegments(clipDuration, silences, {
       minDurationToCutSeconds: template.silenceRemovalThresholdSeconds,
     });
@@ -56,7 +63,12 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
       workingClipPath = trimmedPath;
       timeRemap = buildTimeRemap(keepSegments);
       finalDuration = keepSegments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
-      logger.info("Silenzi rimossi dalla clip", { clipDuration, finalDuration, removedSegments: silences.length });
+      logger.info("Silenzi rimossi dalla clip", {
+        clipDuration,
+        finalDuration,
+        silenziAudio: audioSilences.length,
+        buchiNelParlato: speechGaps.map((g) => `${g.start.toFixed(1)}-${g.end.toFixed(1)}`),
+      });
     }
   }
 

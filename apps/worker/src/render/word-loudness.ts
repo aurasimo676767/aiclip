@@ -3,7 +3,7 @@ import { runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 
 /** Finestra di misura del volume: 50ms, abbastanza fine da seguire una singola parola. */
-const WINDOW_SECONDS = 0.05;
+export const WINDOW_SECONDS = 0.05;
 const SAMPLE_RATE = 8000;
 /**
  * Quanto parlato attorno alla clip si usa come riferimento del "parlare normale". Non la clip
@@ -68,7 +68,8 @@ export async function annotateWordLoudness(
   );
 }
 
-async function measureRmsWindows(mediaPath: string, start: number, duration: number): Promise<number[]> {
+/** Livello RMS (dB) dell'audio a finestre di 50ms, da `start` per `duration` secondi. */
+export async function measureRmsWindows(mediaPath: string, start: number, duration: number): Promise<number[]> {
   const samplesPerWindow = Math.round(SAMPLE_RATE * WINDOW_SECONDS);
   const { stdout } = await runFfmpeg([
     "-hide_banner",
