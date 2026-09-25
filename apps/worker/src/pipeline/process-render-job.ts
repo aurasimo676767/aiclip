@@ -9,6 +9,7 @@ import { storageProvider, faceTracker } from "../lib/providers.js";
 import { getOrDownloadSourceFile } from "../lib/source-download-cache.js";
 import { redownloadSourceVideo } from "../lib/redownload-source.js";
 import { renderClip } from "../render/render-clip.js";
+import { planContentViews } from "../providers/ai/content-focus.js";
 import { renderLongformClip } from "../render/render-longform-clip.js";
 import { runFfmpeg } from "../lib/ffmpeg.js";
 import { updateRenderJobStatus } from "../queue/render-queue.js";
@@ -110,6 +111,10 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
         faceTracker,
         workDir: jobDir,
         outputPath,
+        planContentViews:
+          env.ANTHROPIC_MODEL_CONTENT_FOCUS === "off"
+            ? undefined
+            : (input) => planContentViews(input, { apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_CONTENT_FOCUS }),
       });
     }
 

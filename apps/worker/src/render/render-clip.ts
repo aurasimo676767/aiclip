@@ -5,7 +5,7 @@ import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import type { FaceTracker, Layout, TimedCrop } from "../face-tracking/face-tracker.js";
 import { buildAssSubtitles, screamWindows } from "./captions.js";
-import { buildVideoFilterComplex } from "./build-video-filter.js";
+import { buildVideoFilterComplex, type ContentView } from "./build-video-filter.js";
 import { detectSilences, detectQuietSpeechGaps, mergeIntervals, computeKeepSegments, buildTimeRemap, type TimeSegment } from "./silence.js";
 import { trimToKeepSegments } from "./trim-concat.js";
 import { annotateWordLoudness } from "./word-loudness.js";
@@ -18,6 +18,11 @@ export interface RenderClipParams {
   faceTracker: FaceTracker;
   workDir: string;
   outputPath: string;
+  /**
+   * Regia del pannello del gioco (vedi providers/ai/content-focus.ts): quando mostrarlo intero o
+   * zoomare. Assente = gioco riempito per tutta la clip, senza chiamate a pagamento.
+   */
+  planContentViews?: (input: { videoPath: string; layout: Layout; durationSeconds: number; segments: TranscriptSegment[] }) => Promise<ContentView[]>;
 }
 
 /**
@@ -28,7 +33,7 @@ const PUNCH_ZOOM_PER_INTENSITY = 0.12;
 
 /** Renderizza una singola clip end-to-end: taglio, rimozione silenzi, crop 9:16, zoom, captions, loudness. */
 export async function renderClip(params: RenderClipParams): Promise<{ durationSeconds: number }> {
-  const { sourceVideoPath, clip, template, transcriptSegments, faceTracker, workDir, outputPath } = params;
+  const { sourceVideoPath, clip, template, transcriptSegments, faceTracker, workDir, outputPath, planContentViews } = params;
   await fsp.mkdir(workDir, { recursive: true });
 
   const sourceProbe = await probeVideo(sourceVideoPath);
@@ -96,7 +101,15 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
   const assPath = path.join(workDir, "captions.ass");
   await fsp.writeFile(assPath, assContent, "utf-8");
 
+  const contentViews = planContentViews
+    ? await planContentViews({ videoPath: workingClipPath, layout, durationSeconds: finalDuration, segments: clipRelativeSegments }).catch((error) => {
+        logger.warn("Regia del gioco fallita, gioco riempito per tutta la clip", { error: error instanceof Error ? error.message : String(error) });
+        return [];
+      })
+    : [];
+
   const filterComplex = buildVideoFilterComplex({
+    contentViews,
     layout,
     assSubtitlesPath: assPath,
     showProgressBar: template.showProgressBar,

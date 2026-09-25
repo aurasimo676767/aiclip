@@ -1,6 +1,7 @@
 import path from "node:path";
 import { ReactionCamFaceTracker } from "../face-tracking/reaction-cam-face-tracker.js";
-import { buildVideoFilterComplex } from "../render/build-video-filter.js";
+import fs from "node:fs";
+import { buildVideoFilterComplex, type ContentView } from "../render/build-video-filter.js";
 import { runFfmpeg } from "../lib/ffmpeg.js";
 import { toFfmpegFilterPath } from "../render/ffmpeg-filter-utils.js";
 
@@ -8,9 +9,10 @@ import { toFfmpegFilterPath } from "../render/ffmpeg-filter-utils.js";
  * Compone l'INTERA clip col layout del tracker e il filtro ffmpeg di produzione (senza sottotitoli)
  * e ne salva un foglio di N fotogrammi equidistanti: serve a vedere l'inquadratura nel tempo, non
  * un fotogramma solo — i difetti di composizione stanno quasi sempre in un tratto della clip.
- * Uso: tsx src/dev/preview-layout-sheet.ts <video> <width> <height> <start> <end> <out.jpg> [fotogrammi=8]
+ * Uso: tsx src/dev/preview-layout-sheet.ts <video> <width> <height> <start> <end> <out.jpg> [fotogrammi=8] [views.json]
+ * views.json: tratti del pannello del gioco (ContentView[], tempi della clip) da provare a mano.
  */
-const [videoPath, w, h, start, end, outArg, countArg = "8"] = process.argv.slice(2);
+const [videoPath, w, h, start, end, outArg, countArg = "8", viewsArg] = process.argv.slice(2);
 if (!videoPath || !w || !h || !start || !end || !outArg) {
   throw new Error("Uso: tsx preview-layout-sheet.ts <video> <width> <height> <start> <end> <out.jpg> [fotogrammi]");
 }
@@ -33,7 +35,13 @@ if (layout.type === "scenes") {
   console.log("LAYOUT split_vertical: bottom", JSON.stringify(layout.bottom), "top", layout.topCrops.length, "tratti");
 }
 
-const filterComplex = buildVideoFilterComplex({ layout, assSubtitlesPath: "", showProgressBar: false, clipDurationSeconds: duration })
+const filterComplex = buildVideoFilterComplex({
+  layout,
+  assSubtitlesPath: "",
+  showProgressBar: false,
+  clipDurationSeconds: duration,
+  contentViews: viewsArg ? (JSON.parse(fs.readFileSync(viewsArg, "utf8")) as ContentView[]) : [],
+})
   .split(";\n")
   .filter((step) => !step.includes("subtitles=") && !step.includes("[subbed]"))
   // Fotogrammi a metà di ogni intervallo, rimpiccioliti e affiancati in un'unica immagine.

@@ -7,14 +7,20 @@ import { storageProvider } from "../lib/providers.js";
 import { getOrDownloadSourceFile } from "../lib/source-download-cache.js";
 import { renderClip } from "../render/render-clip.js";
 import { ReactionCamFaceTracker } from "../face-tracking/reaction-cam-face-tracker.js";
+import { planContentViews } from "../providers/ai/content-focus.js";
+import type { ContentView } from "../render/build-video-filter.js";
+import { env } from "../env.js";
 
 /**
  * Renderizza una clip VERA (dal database) esattamente come il job di produzione, ma solo in
  * locale: niente upload, niente scritture nel database, nessuna chiamata a servizi a pagamento.
  * Serve a confrontare il render nuovo con quello già pubblicato.
- * Uso: tsx src/dev/render-clip-local.ts <clip_id> <out.mp4>
+ * Uso: tsx src/dev/render-clip-local.ts <clip_id> <out.mp4> [views.json | --ai]
+ * Terzo argomento opzionale, per la regia del pannello del gioco: un file JSON con i tratti
+ * (ContentView[], tempi della clip) per provarli GRATIS, oppure --ai per farli decidere all'AI come
+ * in produzione (A PAGAMENTO, ~3 centesimi). Senza: gioco riempito per tutta la clip.
  */
-const [clipId, outArg] = process.argv.slice(2);
+const [clipId, outArg, viewsArg] = process.argv.slice(2);
 if (!clipId || !outArg) throw new Error("Uso: tsx src/dev/render-clip-local.ts <clip_id> <out.mp4>");
 
 const { data: clipRow, error } = await supabase.from("clips").select("*").eq("id", clipId).single();
@@ -52,5 +58,10 @@ const result = await renderClip({
   faceTracker: new ReactionCamFaceTracker(),
   workDir,
   outputPath: outPath,
+  planContentViews: !viewsArg
+    ? undefined
+    : viewsArg === "--ai"
+      ? (input) => planContentViews(input, { apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_CONTENT_FOCUS })
+      : async () => JSON.parse(await fsp.readFile(viewsArg, "utf8")) as ContentView[],
 });
 console.log(`OK ${outPath} (${result.durationSeconds.toFixed(1)}s, template ${clipRow.template})`);

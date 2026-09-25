@@ -29,6 +29,10 @@ const envSchema = z.object({
   // transcript attorno a ogni confine, quindi pochi token. Opus perché al test sullo stesso VOD è
   // stato più costante di Sonnet (Sonnet cambiava idea fra un giro e l'altro).
   ANTHROPIC_MODEL_LONGFORM_BOUNDARIES: z.string().default("claude-opus-5-5"),
+  // Regia del pannello del gioco negli Shorts (providers/ai/content-focus.ts): quando mostrare il
+  // gioco intero o zoomare su quello che indica lo streamer. Una chiamata con ~30 fotogrammi per
+  // ogni render. "off" = gioco sempre riempito al centro, nessuna chiamata.
+  ANTHROPIC_MODEL_CONTENT_FOCUS: z.string().default("claude-sonnet-5"),
   OPENAI_API_KEY: z.string().min(1),
   TRANSCRIPTION_PROVIDER: z.enum(["openai", "local"]).default("openai"),
   LOCAL_WHISPER_URL: z.string().default("http://127.0.0.1:8765"),

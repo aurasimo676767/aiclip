@@ -11,6 +11,22 @@ export interface VideoFilterParams {
   punchIns?: Array<{ start: number; end: number }>;
   /** Ingrandimento del primo piano (1 = nessuno). */
   punchZoom?: number;
+  /** Tratti in cui il pannello del gioco NON è riempito al centro (vedi ContentView). */
+  contentViews?: ContentView[];
+}
+
+/**
+ * Come mostrare il contenuto (il gioco) nel pannello sotto la webcam per un tratto della clip, in
+ * tempi della clip. Fuori da questi tratti il pannello è RIEMPITO dal centro del gioco (vedi
+ * contentPanelChain); qui si fa come un montatore: "full" rimette il gioco intero per qualche
+ * secondo quando serve vedere i bordi, "zoom" stringe su una cosa che lo streamer indica.
+ */
+export interface ContentView {
+  start: number;
+  end: number;
+  mode: "full" | "zoom";
+  /** Solo per "zoom": la zona da mostrare, in pixel del video sorgente. */
+  region?: CropWindow;
 }
 
 /**
@@ -19,15 +35,20 @@ export interface VideoFilterParams {
  * -> sottotitoli bruciati (ASS) -> progress bar opzionale. Ritorna la stringa da passare a
  * `-filter_complex`, con output finale su label `[vout]`.
  *
- * Nessuno zoom in nessuna delle due composizioni: gli eventi "zoom"/"punch_in" dell'EDL non
- * vengono più applicati al video. L'inquadratura del contenuto resta identica per tutta la clip
- * (richiesta esplicita: il gioco/la reaction devono stare fermi), e la webcam cambia solo con
- * uno stacco netto quando cambia chi parla.
+ * Gli eventi "zoom"/"punch_in" dell'EDL non vengono applicati al video. La webcam cambia solo con
+ * uno stacco netto quando cambia chi parla. Il gioco sotto riempie il pannello (si vede il centro)
+ * e cambia inquadratura solo nei tratti di `contentViews`, sempre con stacchi netti: gioco intero
+ * per qualche secondo o zoom su una cosa indicata (richiesta di simo del 2026-09-25, "come l'edit
+ * tradizionale umano").
  */
 export function buildVideoFilterComplex(params: VideoFilterParams): string {
   const { layout, assSubtitlesPath, showProgressBar, clipDurationSeconds } = params;
 
-  const steps = layout.type === "scenes" ? buildScenesSteps(layout.scenes, clipDurationSeconds) : buildSplitVerticalSteps(layout, clipDurationSeconds);
+  const views = params.contentViews ?? [];
+  const steps =
+    layout.type === "scenes"
+      ? buildScenesSteps(layout.scenes, clipDurationSeconds, views)
+      : buildSplitVerticalSteps(layout, clipDurationSeconds, "", views);
 
   let composed = "scaled";
   const punchIns = (params.punchIns ?? []).filter((p) => p.end > p.start + 0.1 && p.start < clipDurationSeconds);
@@ -116,7 +137,7 @@ function punchCenter(layout: Layout, t: number): { x: number; y: number } {
  * `t` nei parametri dei filtri: ogni pezzo usa solo numeri costanti, quindi non può incappare nel
  * bug di valutazione del parser di espressioni di ffmpeg.
  */
-function buildScenesSteps(scenes: Scene[], totalDuration: number): string[] {
+function buildScenesSteps(scenes: Scene[], totalDuration: number, views: ContentView[]): string[] {
   const steps: string[] = [];
   const outLabels: string[] = [];
 
@@ -126,7 +147,7 @@ function buildScenesSteps(scenes: Scene[], totalDuration: number): string[] {
     const start = Math.max(0, scene.startSeconds);
     const end = i === scenes.length - 1 ? Math.max(start + 0.01, totalDuration) : scene.endSeconds;
     steps.push(`[0:v]trim=start=${start.toFixed(3)}:end=${end.toFixed(3)},setpts=PTS-STARTPTS[${src}]`);
-    steps.push(...buildCompositionSteps(scene.composition, src, out, `sc${i}`));
+    steps.push(...buildCompositionSteps(scene.composition, src, out, `sc${i}`, shiftViews(views, start, end), end - start));
     outLabels.push(`[${out}]`);
   });
 
@@ -140,7 +161,14 @@ function buildScenesSteps(scenes: Scene[], totalDuration: number): string[] {
 }
 
 /** Porta un pezzo di scena da `inLabel` a `outLabel`, a piena canvas verticale. */
-function buildCompositionSteps(composition: SceneComposition, inLabel: string, outLabel: string, prefix: string): string[] {
+function buildCompositionSteps(
+  composition: SceneComposition,
+  inLabel: string,
+  outLabel: string,
+  prefix: string,
+  views: ContentView[],
+  duration: number,
+): string[] {
   const { width: W, height: H } = OUTPUT_RESOLUTION;
 
   if (composition.kind === "crop") {
@@ -181,17 +209,8 @@ function buildCompositionSteps(composition: SceneComposition, inLabel: string, o
     steps.push(`[${last}k][${prefix}patch]overlay=${blur.x}:${blur.y}[${prefix}conb]`);
     last = `${prefix}conb`;
   }
-  // Contenuto intero dentro il pannello, con dietro lo stesso frame sfocato: due bande nere su un
-  // telefono sono due buchi, lo sfondo sfocato no. Stesso trattamento del pannello "contenuto" nel
-  // layout a clip intera (vedi buildSplitVerticalSteps).
-  steps.push(
-    `[${last}]split=2[${prefix}bfg][${prefix}bbgsrc]`,
-    `[${prefix}bbgsrc]scale=${W}:${bottomHeight}:force_original_aspect_ratio=increase:flags=bilinear,` +
-      `crop=${W}:${bottomHeight},boxblur=${FIT_BACKGROUND_BLUR_PX}:2,setsar=1[${prefix}bbg]`,
-    `[${prefix}bfg]scale=${W}:${bottomHeight}:force_original_aspect_ratio=decrease:flags=lanczos,setsar=1[${prefix}bfgs]`,
-    `[${prefix}bbg][${prefix}bfgs]overlay=(W-w)/2:(H-h)/2[${prefix}bottom]`,
-    `[${prefix}top][${prefix}bottom]vstack=inputs=2[${outLabel}]`,
-  );
+  steps.push(...buildContentPanelSteps(last, `${prefix}bottom`, prefix, content, bottomHeight, views, duration));
+  steps.push(`[${prefix}top][${prefix}bottom]vstack=inputs=2[${outLabel}]`);
   return steps;
 }
 
@@ -202,7 +221,12 @@ function buildCompositionSteps(composition: SceneComposition, inLabel: string, o
  */
 const FIT_BACKGROUND_BLUR_PX = 20;
 
-function buildSplitVerticalSteps(layout: Extract<Layout, { type: "split_vertical" }>, totalDuration: number, prefix = ""): string[] {
+function buildSplitVerticalSteps(
+  layout: Extract<Layout, { type: "split_vertical" }>,
+  totalDuration: number,
+  prefix = "",
+  views: ContentView[] = [],
+): string[] {
   const topHeight = evenRound(OUTPUT_RESOLUTION.height * layout.topRatio);
   const bottomHeight = OUTPUT_RESOLUTION.height - topHeight;
   const { topCrops, bottom, blurRegions } = layout;
@@ -240,23 +264,8 @@ function buildSplitVerticalSteps(layout: Extract<Layout, { type: "split_vertical
     lastLabel = nextLabel;
   });
 
-  // Contenuto: mostrato INTERO dentro il pannello, con dietro lo stesso frame allargato e sfocato
-  // a riempire quello che avanza. Nessuno zoom: l'inquadratura resta identica per tutta la clip.
-  //
-  // Prima si scalava e basta a `width x bottomHeight`: funzionava solo perché il crop veniva
-  // cercato con ESATTAMENTE le proporzioni del pannello, e quel vincolo era il problema — su un
-  // pannello quasi quadrato costringeva a un ritaglio largo mezzo schermo, che su una reaction a
-  // Instagram dentro un browser riempiva il pannello di commenti e cornice invece del video. Ora il
-  // crop segue i bordi veri del contenuto (vedi detectContentBounds) e ha proporzioni qualsiasi,
-  // quindi va contenuto, non stirato.
-  steps.push(
-    `[${lastLabel}]split=2[${prefix}bfg][${prefix}bbgsrc]`,
-    `[${prefix}bbgsrc]scale=${OUTPUT_RESOLUTION.width}:${bottomHeight}:force_original_aspect_ratio=increase:flags=bilinear,` +
-      `crop=${OUTPUT_RESOLUTION.width}:${bottomHeight},boxblur=${FIT_BACKGROUND_BLUR_PX}:2,setsar=1[${prefix}bbg]`,
-    `[${prefix}bfg]scale=${OUTPUT_RESOLUTION.width}:${bottomHeight}:force_original_aspect_ratio=decrease:flags=lanczos,setsar=1[${prefix}bfgs]`,
-    `[${prefix}bbg][${prefix}bfgs]overlay=(W-w)/2:(H-h)/2[${prefix}bottom]`,
-    `[${prefix}top][${prefix}bottom]vstack=inputs=2[${prefix}scaled]`,
-  );
+  steps.push(...buildContentPanelSteps(lastLabel, `${prefix}bottom`, prefix, bottom, bottomHeight, views, totalDuration));
+  steps.push(`[${prefix}top][${prefix}bottom]vstack=inputs=2[${prefix}scaled]`);
 
   return steps;
 }
@@ -424,4 +433,116 @@ function cropsEqual(a: CropWindow, b: CropWindow): boolean {
 
 function evenRound(value: number): number {
   return Math.round(value / 2) * 2;
+}
+
+/**
+ * Il gioco va RIEMPITO nel pannello (si vede il centro, i lati si tagliano) solo se è davvero più
+ * largo del pannello: un contenuto già stretto, come un video verticale dentro una reaction, resta
+ * intero — riempirlo taglierebbe via sopra e sotto il video che stanno guardando.
+ */
+const FILL_MIN_ASPECT_EXCESS = 1.15;
+
+/** Lo zoom non stringe sotto questa frazione della larghezza del contenuto: oltre si vedono i pixel. */
+const ZOOM_MIN_WIDTH_FRACTION = 0.22;
+
+/** Solo i tratti che cadono nella finestra [start, end), riportati a tempi relativi a start. */
+function shiftViews(views: ContentView[], start: number, end: number): ContentView[] {
+  return views
+    .filter((v) => v.end > start && v.start < end)
+    .map((v) => ({ ...v, start: Math.max(0, v.start - start), end: Math.min(end, v.end) - start }));
+}
+
+/**
+ * Pannello del contenuto, a tratti: fuori dai `views` il gioco riempie il pannello, dentro si
+ * mostra intero o ingrandito. Stesso metodo trim+concat delle scene, solo numeri costanti.
+ * `inLabel` è già ritagliato su `content` (coordinate sorgente).
+ */
+function buildContentPanelSteps(
+  inLabel: string,
+  outLabel: string,
+  prefix: string,
+  content: CropWindow,
+  panelHeight: number,
+  views: ContentView[],
+  duration: number,
+): string[] {
+  const pieces: Array<{ start: number; end: number; view?: ContentView }> = [];
+  let cursor = 0;
+  for (const v of [...views].sort((a, b) => a.start - b.start)) {
+    const start = Math.max(cursor, v.start);
+    const end = Math.min(duration, v.end);
+    if (end - start < 0.3) continue;
+    if (start - cursor > 0.01) pieces.push({ start: cursor, end: start });
+    pieces.push({ start, end, view: v });
+    cursor = end;
+  }
+  if (duration - cursor > 0.01 || pieces.length === 0) pieces.push({ start: cursor, end: Math.max(duration, cursor + 0.01) });
+
+  if (pieces.length === 1) return contentPanelChain(inLabel, outLabel, `${prefix}cp`, content, panelHeight, pieces[0]!.view);
+
+  const steps = [`[${inLabel}]split=${pieces.length}${pieces.map((_, i) => `[${prefix}cv${i}]`).join("")}`];
+  pieces.forEach((piece, i) => {
+    // L'ultimo pezzo arriva fino in fondo allo stream: mai un fotogramma perso per arrotondamento.
+    const trim = i === pieces.length - 1 ? `trim=start=${piece.start.toFixed(3)}` : `trim=start=${piece.start.toFixed(3)}:end=${piece.end.toFixed(3)}`;
+    steps.push(`[${prefix}cv${i}]${trim},setpts=PTS-STARTPTS[${prefix}cvt${i}]`);
+    steps.push(...contentPanelChain(`${prefix}cvt${i}`, `${prefix}cvo${i}`, `${prefix}cp${i}`, content, panelHeight, piece.view));
+  });
+  steps.push(`${pieces.map((_, i) => `[${prefix}cvo${i}]`).join("")}concat=n=${pieces.length}:v=1:a=0[${outLabel}]`);
+  return steps;
+}
+
+function contentPanelChain(inLabel: string, outLabel: string, p: string, content: CropWindow, H: number, view?: ContentView): string[] {
+  const W = OUTPUT_RESOLUTION.width;
+
+  if (view?.mode === "zoom" && view.region) {
+    const r = zoomCrop(view.region, content, W / H);
+    return [`[${inLabel}]crop=w=${r.width}:h=${r.height}:x=${r.x}:y=${r.y},scale=${W}:${H}:flags=lanczos,setsar=1[${outLabel}]`];
+  }
+
+  if (!view && fillsPanel(content, H)) {
+    // Riempito: si vede il centro del gioco, i lati si tagliano.
+    return [`[${inLabel}]scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H},setsar=1[${outLabel}]`];
+  }
+
+  // Intero, con dietro lo stesso frame allargato e sfocato: due bande nere su un telefono sono due
+  // buchi, lo sfondo sfocato no.
+  return [
+    `[${inLabel}]split=2[${p}fg][${p}bgsrc]`,
+    `[${p}bgsrc]scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bilinear,crop=${W}:${H},boxblur=${FIT_BACKGROUND_BLUR_PX}:2,setsar=1[${p}bg]`,
+    `[${p}fg]scale=${W}:${H}:force_original_aspect_ratio=decrease:flags=lanczos,setsar=1[${p}fgs]`,
+    `[${p}bg][${p}fgs]overlay=(W-w)/2:(H-h)/2[${outLabel}]`,
+  ];
+}
+
+/** Se il contenuto, fuori dai tratti speciali, riempie il pannello alto `panelHeight`. */
+export function fillsPanel(content: CropWindow, panelHeight: number): boolean {
+  return content.width / content.height > (OUTPUT_RESOLUTION.width / panelHeight) * FILL_MIN_ASPECT_EXCESS;
+}
+
+/**
+ * Ritaglio dello zoom, in coordinate LOCALI al contenuto: la zona chiesta allargata alle proporzioni
+ * del pannello (centrata sulla zona), mai più stretta di ZOOM_MIN_WIDTH_FRACTION e sempre dentro il
+ * contenuto.
+ */
+export function zoomCrop(region: CropWindow, content: CropWindow, aspect: number): CropWindow {
+  const cx = region.x + region.width / 2 - content.x;
+  const cy = region.y + region.height / 2 - content.y;
+  let width = Math.max(region.width, region.height * aspect, content.width * ZOOM_MIN_WIDTH_FRACTION);
+  let height = width / aspect;
+  if (height > content.height) {
+    height = content.height;
+    width = height * aspect;
+  }
+  if (width > content.width) {
+    width = content.width;
+    height = width / aspect;
+  }
+  const w = evenRound(width);
+  const h = evenRound(height);
+  return {
+    width: w,
+    height: h,
+    x: Math.round(Math.min(content.width - w, Math.max(0, cx - w / 2))),
+    y: Math.round(Math.min(content.height - h, Math.max(0, cy - h / 2))),
+  };
 }
