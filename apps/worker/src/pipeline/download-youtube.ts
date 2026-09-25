@@ -19,7 +19,12 @@ export function isSupportedYoutubeUrl(url: string): boolean {
  * nel PATH) e ne ritorna titolo/durata reali per popolare progetto e video.
  */
 export async function downloadYoutubeVideo(url: string, outputDir: string): Promise<YoutubeDownloadResult> {
-  const outputPath = path.join(outputDir, "source.mp4");
+  // VOD Twitch (HLS): si tiene il file così come arriva, in MPEG-TS. Senza, finito il download
+  // yt-dlp riscrive TUTTO il file in mp4 (FixupM3u8 + faststart) — misurato il 2026-09-25 su un
+  // VOD da 15GB: 18 minuti di download e poi oltre 20 di sola riscrittura su disco. ffmpeg legge
+  // il .ts direttamente (audio, render), quindi quella riscrittura non serviva a niente.
+  const isHls = /twitch\.tv\//i.test(url);
+  const outputPath = path.join(outputDir, isHls ? "source.ts" : "source.mp4");
 
   const { stdout } = await runYtDlp([
     "-f",
@@ -49,6 +54,7 @@ export async function downloadYoutubeVideo(url: string, outputDir: string): Prom
     // torna a dare problemi di sistema durante un download, riabbassalo.
     "--concurrent-fragments",
     "8",
+    ...(isHls ? ["--hls-use-mpegts", "--fixup", "never"] : []),
     // Alcuni video (età limitata, o che richiedono comunque un account) falliscono SEMPRE
     // senza autenticazione — vedi YT_DLP_COOKIES_FILE / YT_DLP_COOKIES_FROM_BROWSER in env.ts.
     // Il file ha precedenza: bypassa il problema di decrittazione DPAPI di Chrome su Windows.

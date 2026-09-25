@@ -1,4 +1,5 @@
 import fsp from "node:fs/promises";
+import path from "node:path";
 import type { VideoRow } from "@clipforge/db";
 import { supabase } from "./supabase.js";
 import { storageProvider } from "./providers.js";
@@ -37,13 +38,16 @@ export async function redownloadSourceVideo(video: VideoRow, projectUserId: stri
   const sourceUrl = video.source_url;
   const filePath = await getOrRedownloadFromPlatform(video.id, (targetDir) => downloadYoutubeVideo(sourceUrl, targetDir).then((d) => d.filePath));
 
-  const storagePath = `videos/${projectUserId}/${video.id}/source.mp4`;
-  await storageProvider.uploadFile(filePath, storagePath, "video/mp4");
+  // I VOD Twitch arrivano in .ts (vedi download-youtube.ts): estensione e tipo seguono il file vero.
+  const extension = path.extname(filePath) || ".mp4";
+  const mimeType = extension === ".ts" ? "video/mp2t" : "video/mp4";
+  const storagePath = `videos/${projectUserId}/${video.id}/source${extension}`;
+  await storageProvider.uploadFile(filePath, storagePath, mimeType);
   const stat = await fsp.stat(filePath);
 
   const { error } = await supabase
     .from("videos")
-    .update({ storage_path: storagePath, size_bytes: stat.size, mime_type: "video/mp4" })
+    .update({ storage_path: storagePath, size_bytes: stat.size, mime_type: mimeType })
     .eq("id", video.id);
   if (error) {
     throw new Error(`Aggiornamento video (ri-download sorgente) fallito: ${error.message}`);

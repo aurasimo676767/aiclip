@@ -36,9 +36,17 @@ foreach ($target in $targets) {
         $h = [ClipForge.ThreadCtl]::OpenThread(0x0002, $false, $t.Id)
         if ($h -eq [IntPtr]::Zero) { continue }
         if ($Action -eq "suspend") {
-            [ClipForge.ThreadCtl]::SuspendThread($h) | Out-Null
+            # SuspendThread SI SOMMA: il loop di pausa ri-sospende ogni 5 secondi (per prendere anche
+            # i processi partiti dopo), e un thread gia' fermo finiva sospeso 100 volte, mentre la
+            # ripresa lo sbloccava una volta sola -> restava congelato (visto il 2026-09-25: ffmpeg
+            # e whisper fermi dopo "riprendi" dal sito). Se era gia' sospeso si annulla subito.
+            $previous = [ClipForge.ThreadCtl]::SuspendThread($h)
+            if ($previous -ge 1) { [ClipForge.ThreadCtl]::ResumeThread($h) | Out-Null }
         } else {
-            [ClipForge.ThreadCtl]::ResumeThread($h) | Out-Null
+            # Fino a sbloccarlo del tutto, qualunque sospensione si sia accumulata prima di questa
+            # correzione. ResumeThread restituisce il conteggio PRIMA della chiamata: 1 = ora e' libero.
+            $n = 0
+            do { $previous = [ClipForge.ThreadCtl]::ResumeThread($h); $n++ } while ($previous -gt 1 -and $n -lt 10000)
         }
         [ClipForge.ThreadCtl]::CloseHandle($h) | Out-Null
     }

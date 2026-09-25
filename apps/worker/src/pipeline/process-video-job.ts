@@ -63,6 +63,9 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
   // Twitch di ore, scaricato a frammenti) ripartirebbe sempre da zero invece di riprendere dai
   // frammenti già scaricati (yt-dlp lo fa da solo se i file restano, vedi download-youtube.ts).
   let shouldCleanupJobDir = true;
+  // Upload del sorgente scaricato da URL, lasciato andare in parallelo a estrazione audio e
+  // trascrizione (su un VOD sono 15+ GB: aspettarlo prima di cominciare costava altri minuti fermi).
+  let pendingSourceUpload: Promise<void> | null = null;
 
   const { data: project, error: projectFetchError } = await supabase
     .from("projects")
@@ -137,22 +140,26 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
         localVideoPath = downloaded.filePath;
         videoTitle = downloaded.title;
 
-        const storagePath = `videos/${project.user_id}/${video.id}/source.mp4`;
-        await storageProvider.uploadFile(localVideoPath, storagePath, "video/mp4");
-        const stat = await fsp.stat(localVideoPath);
-
-        const { error: videoUpdateError } = await supabase
-          .from("videos")
-          .update({
-            storage_path: storagePath,
-            size_bytes: stat.size,
-            mime_type: "video/mp4",
-            original_filename: downloaded.title,
-          })
-          .eq("id", video.id);
-        if (videoUpdateError) {
-          throw new Error(`Aggiornamento video (import YouTube) fallito: ${videoUpdateError.message}`);
-        }
+        const sourceFile = localVideoPath;
+        const extension = path.extname(sourceFile) || ".mp4";
+        const mimeType = extension === ".ts" ? "video/mp2t" : "video/mp4";
+        const storagePath = `videos/${project.user_id}/${video.id}/source${extension}`;
+        pendingSourceUpload = (async () => {
+          const uploadStartedAt = Date.now();
+          await storageProvider.uploadFile(sourceFile, storagePath, mimeType);
+          const stat = await fsp.stat(sourceFile);
+          const { error: videoUpdateError } = await supabase
+            .from("videos")
+            .update({ storage_path: storagePath, size_bytes: stat.size, mime_type: mimeType, original_filename: downloaded.title })
+            .eq("id", video.id);
+          if (videoUpdateError) {
+            throw new Error(`Aggiornamento video (import YouTube) fallito: ${videoUpdateError.message}`);
+          }
+          logger.info("Sorgente caricato su storage", { videoId: video.id, seconds: Math.round((Date.now() - uploadStartedAt) / 1000) });
+        })();
+        // L'errore si rilancia dove l'upload viene aspettato (prima di inserire le clip): qui si
+        // evita solo che un fallimento a metà trascrizione diventi un "unhandled rejection".
+        pendingSourceUpload.catch(() => undefined);
 
         const { error: projectUpdateError } = await supabase
           .from("projects")
@@ -241,6 +248,8 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     stageDurationsSeconds.aiAnalysisSeconds = (Date.now() - aiAnalysisStartedAt) / 1000;
 
     if (await cancelled()) return;
+    // Le clip si renderizzano dal sorgente su storage: prima di crearle deve esserci.
+    if (pendingSourceUpload) await pendingSourceUpload;
     await updateVideoStatus(video.id, "CLIP_SELECTION");
 
     if (clipsToInsert.length === 0) {
@@ -338,6 +347,8 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       await updateVideoStatus(video.id, "FAILED", { error_message: message });
     }
   } finally {
+    // Mai cancellare il file mentre è ancora in upload (errore o annullamento a metà trascrizione).
+    await pendingSourceUpload?.catch(() => undefined);
     if (shouldCleanupJobDir) {
       await fsp.rm(jobDir, { recursive: true, force: true }).catch(() => undefined);
     }

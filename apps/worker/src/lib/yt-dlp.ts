@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isWorkerPaused } from "./pause-control.js";
 
 export class YtDlpError extends Error {
   constructor(
@@ -36,8 +37,18 @@ export function runYtDlp(args: string[], options: { inactivityTimeoutMs?: number
     function resetTimer(): void {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        timedOut = true;
-        child.kill("SIGKILL");
+        // In pausa dal sito yt-dlp è sospeso apposta e non scrive niente: non è un blocco. Prima
+        // lo si uccideva lo stesso dopo 5 minuti di pausa (visto il 2026-09-25 su un VOD da 15GB).
+        void isWorkerPaused()
+          .catch(() => false)
+          .then((paused) => {
+            if (paused) {
+              resetTimer();
+              return;
+            }
+            timedOut = true;
+            child.kill("SIGKILL");
+          });
       }, inactivityTimeoutMs);
     }
     resetTimer();
