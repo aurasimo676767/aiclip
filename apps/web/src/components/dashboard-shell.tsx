@@ -22,6 +22,7 @@ import {
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { WorkerPauseControl } from "./worker-pause-control";
 import { TooltipProvider } from "./ui-kit/menu";
+import { Logo } from "./ui-kit/logo";
 
 interface NavItem {
   href: string;
@@ -99,7 +100,7 @@ export function DashboardShell({ email, children }: { email: string; children: R
       <nav className="space-y-5">
         {NAV_GROUPS.map((group, i) => (
           <div key={i} className="space-y-0.5">
-            {group.title && !iconOnly && <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-faint">{group.title}</p>}
+            {group.title && !iconOnly && <p className="px-3 pb-1 text-xs font-medium text-faint">{group.title}</p>}
             {group.title && iconOnly && <div className="mx-3 mb-2 border-t border-line" />}
             {group.items.map((item) => {
               const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href);
@@ -113,7 +114,7 @@ export function DashboardShell({ email, children }: { email: string; children: R
                     isActive ? "bg-raised text-ink" : "text-muted hover:bg-raised/60 hover:text-ink"
                   } ${iconOnly ? "justify-center px-0" : ""}`}
                 >
-                  {isActive && <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-gradient" />}
+                  {isActive && <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-400" />}
                   <Icon size={18} className={isActive ? "text-brand-300" : "text-faint group-hover:text-muted"} />
                   {!iconOnly && item.label}
                 </Link>
@@ -209,18 +210,5 @@ export function DashboardShell({ email, children }: { email: string; children: R
       </div>
     </div>
     </TooltipProvider>
-  );
-}
-
-function Logo({ iconOnly = false }: { iconOnly?: boolean }) {
-  return (
-    <Link href="/dashboard" className="flex items-center gap-2.5">
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient shadow-glow">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path d="M8 5v14l11-7L8 5z" fill="white" />
-        </svg>
-      </span>
-      {!iconOnly && <span className="font-display text-lg font-bold tracking-tight text-ink">ClipForge</span>}
-    </Link>
   );
 }

@@ -4,7 +4,7 @@ const TONE_STYLES: Record<Tone, { badge: string; dot: string }> = {
   neutral: { badge: "border-line-strong bg-raised text-muted", dot: "bg-faint" },
   working: { badge: "border-amber-400/30 bg-amber-400/10 text-amber-200", dot: "bg-amber-400 animate-pulse" },
   success: { badge: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200", dot: "bg-emerald-400" },
-  error: { badge: "border-red-400/30 bg-red-400/10 text-red-200", dot: "bg-red-400" },
+  error: { badge: "border-hot/40 bg-hot/10 text-red-200", dot: "bg-hot" },
 };
 
 const STATUS: Record<string, { label: string; tone: Tone }> = {

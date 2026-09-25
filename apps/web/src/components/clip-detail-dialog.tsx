@@ -95,7 +95,7 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
           {clip.videoUrl ? (
             <video ref={videoRef} src={clip.videoUrl} poster={clip.thumbnailUrl ?? undefined} controls playsInline preload="auto" className="h-full w-full bg-black object-contain" />
           ) : (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-[radial-gradient(circle_at_30%_20%,rgba(124,92,255,0.3),transparent_60%)] p-6 text-center">
+            <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-surface p-6 text-center">
               {working ? (
                 <>
                   <Loader2 size={28} className="animate-spin text-brand-300" />
@@ -242,7 +242,7 @@ function ClipInfo({ clip }: { clip: ClipViewModel }) {
     <div className="space-y-5">
       <ScoreBars scores={clip.scores} />
       <div className="space-y-2">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-faint">Gancio</p>
+        <p className="text-xs font-medium text-faint">Gancio</p>
         <p className="text-sm text-ink">&ldquo;{clip.hook}&rdquo;</p>
         <p className="text-sm leading-relaxed text-muted">{clip.reason}</p>
       </div>

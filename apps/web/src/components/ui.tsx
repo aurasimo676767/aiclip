@@ -67,7 +67,7 @@ export function ScoreRing({ score, size = 44 }: { score: number; size?: number }
 export function Stat({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
   return (
     <div className="rounded-xl border border-line bg-raised/60 px-4 py-3">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-faint">{label}</p>
+      <p className="text-xs font-medium text-faint">{label}</p>
       <p className="mt-1 font-display text-lg font-semibold text-ink">{value}</p>
       {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
     </div>

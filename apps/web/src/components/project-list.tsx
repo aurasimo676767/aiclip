@@ -29,21 +29,21 @@ function ProjectCard({ summary }: { summary: ProjectSummary }) {
   return (
     <Link
       href={`/dashboard/projects/${project.id}`}
-      className="group card card-hover flex flex-col overflow-hidden animate-fade-in hover:-translate-y-0.5 hover:shadow-glow"
+      className="group card card-hover flex flex-col overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
     >
       <div className="relative aspect-video overflow-hidden bg-raised">
         {coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={coverUrl} alt="" loading="lazy" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_30%_20%,rgba(124,92,255,0.25),transparent_60%),radial-gradient(circle_at_80%_90%,rgba(255,92,168,0.15),transparent_55%)]">
-            {isVod ? <Radio size={28} className="text-brand-300/70" /> : <Film size={28} className="text-brand-300/70" />}
+          <div className="flex h-full w-full items-center justify-center bg-overlay">
+            {isVod ? <Radio size={28} className="text-twitch-400" /> : <Film size={28} className="text-faint" />}
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/20" />
         <div className="absolute left-3 top-3 flex items-center gap-1.5">
           <StatusBadge status={project.status} className="bg-black/60 backdrop-blur" />
-          {isVod && <span className="rounded-full border border-purple-400/30 bg-purple-500/30 px-2 py-0.5 text-[11px] font-medium text-purple-100 backdrop-blur">VOD Twitch</span>}
+          {isVod && <span className="rounded-full bg-twitch-500 px-2 py-0.5 text-[11px] font-semibold text-white">VOD Twitch</span>}
         </div>
         {topScore !== null && (
           <div className="absolute right-3 top-3">

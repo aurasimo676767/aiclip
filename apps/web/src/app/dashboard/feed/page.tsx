@@ -25,7 +25,7 @@ export default async function FeedPage() {
       <section className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/15 text-purple-300">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-twitch-500/15 text-twitch-300">
               <Radio size={18} />
             </span>
             <div>
@@ -36,7 +36,7 @@ export default async function FeedPage() {
           {twitchChannels && twitchChannels.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {twitchChannels.map((c) => (
-                <Link key={c.id} href={`/dashboard/feed/twitch/${c.id}`} className="chip transition hover:border-purple-400/50 hover:text-ink">
+                <Link key={c.id} href={`/dashboard/feed/twitch/${c.id}`} className="chip transition hover:border-twitch-400/60 hover:text-ink">
                   {c.display_name} <ArrowUpRight size={12} />
                 </Link>
               ))}

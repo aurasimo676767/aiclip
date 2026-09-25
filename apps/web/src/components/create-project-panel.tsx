@@ -5,6 +5,7 @@ import { Link2, Layers, Upload } from "lucide-react";
 import { YoutubeImportForm } from "./youtube-import-form";
 import { UploadForm } from "./upload-form";
 import { BulkYoutubeImportForm } from "./bulk-youtube-import-form";
+import { CaptionHeadline } from "./ui-kit/caption-headline";
 
 type Tab = "youtube" | "bulk" | "upload";
 
@@ -18,17 +19,13 @@ export function CreateProjectPanel() {
   const [tab, setTab] = useState<Tab>("youtube");
 
   return (
-    <section id="nuovo" className="relative overflow-hidden rounded-3xl border border-line bg-surface p-6 shadow-card sm:p-8">
-      {/* Alone colorato dietro al titolo */}
-      <div className="pointer-events-none absolute -top-32 left-1/2 h-64 w-[36rem] -translate-x-1/2 rounded-full bg-brand-500/20 blur-3xl" />
-      <div className="pointer-events-none absolute -top-24 right-0 h-48 w-72 rounded-full bg-hot/10 blur-3xl" />
-
-      <div className="relative mx-auto max-w-2xl space-y-6 text-center">
-        <div className="space-y-2">
-          <h1 className="text-balance font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
-            Dal video lungo agli <span className="bg-brand-gradient bg-clip-text text-transparent">Shorts</span>, in automatico
-          </h1>
-          <p className="text-balance text-sm text-muted sm:text-base">Incolla un link: l&apos;AI trova i momenti migliori, li monta in verticale e li prepara per YouTube.</p>
+    <section id="nuovo" className="relative rounded-3xl border border-line bg-surface px-6 pb-7 pt-10 shadow-card sm:px-10 sm:pb-9 sm:pt-14">
+      <div className="relative mx-auto max-w-2xl space-y-7 text-center">
+        <div className="space-y-4">
+          <CaptionHeadline text="Dalla live agli Shorts" className="text-[1.9rem] sm:text-5xl lg:text-6xl" />
+          <p className="mx-auto max-w-md text-balance text-sm text-muted sm:text-base">
+            Incolla un link: l&apos;AI trova i momenti migliori, li monta in verticale e li prepara per YouTube.
+          </p>
         </div>
 
         <div className="inline-flex rounded-xl border border-line bg-canvas p-1">

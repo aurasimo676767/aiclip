@@ -11,20 +11,32 @@ body {
 }
 
 ::selection {
-  @apply bg-brand-500/40 text-white;
+  @apply bg-brand-400 text-on-brand;
 }
 
 /* Scrollbar discreta: quella di sistema su Windows è un blocco grigio chiaro sul fondo scuro. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #34343f transparent;
+  scrollbar-color: #3a3446 transparent;
+}
+
+/* Chi ha chiesto al sistema meno animazioni non le vede: restano solo i cambi di stato. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
 }
 
 @layer components {
   /* Pulsanti — base + varianti. Usare sempre una variante insieme a .btn. */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition
-      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60 disabled:pointer-events-none disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas
+      disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-sm {
     @apply gap-1.5 px-3 py-1.5 text-xs;
@@ -32,20 +44,21 @@ body {
   .btn-lg {
     @apply px-5 py-3 text-base;
   }
-  .btn-primary {
-    @apply bg-brand-500 text-white shadow-[0_6px_20px_-8px_rgba(124,92,255,0.8)] hover:bg-brand-400;
-  }
+  /* Il pulsante principale è un pezzo di sottotitolo: giallo pieno, testo scuro, "spessore" nero
+     sotto come il contorno delle scritte negli Shorts. Premuto, si abbassa. */
+  .btn-primary,
   .btn-gradient {
-    @apply bg-brand-gradient text-white shadow-[0_8px_24px_-10px_rgba(255,92,168,0.7)] hover:brightness-110;
+    @apply bg-brand-400 text-on-brand shadow-slab hover:bg-brand-300 active:translate-y-[2px] active:shadow-none
+      disabled:bg-raised disabled:text-faint disabled:opacity-100 disabled:shadow-none;
   }
   .btn-secondary {
     @apply border border-line-strong bg-raised text-ink hover:border-faint hover:bg-overlay;
   }
   .btn-ghost {
-    @apply text-muted hover:bg-raised hover:text-ink;
+    @apply font-medium text-muted hover:bg-raised hover:text-ink;
   }
   .btn-danger {
-    @apply border border-red-500/30 bg-red-500/10 text-red-200 hover:border-red-400/60 hover:bg-red-500/15;
+    @apply border border-hot/40 bg-hot/10 text-red-200 hover:border-hot/70 hover:bg-hot/15;
   }
 
   .card {
@@ -57,7 +70,7 @@ body {
 
   .input {
     @apply w-full rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-ink placeholder:text-faint transition
-      focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/25 disabled:opacity-60;
+      focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-400/25 disabled:opacity-60;
   }
   .label {
     @apply mb-1.5 block text-xs font-medium text-muted;
@@ -72,6 +85,68 @@ body {
   }
 
   .skeleton {
-    @apply animate-shimmer rounded-lg bg-[linear-gradient(90deg,#16161c_0%,#22222b_50%,#16161c_100%)] bg-[length:200%_100%];
+    @apply animate-shimmer rounded-lg bg-[linear-gradient(90deg,#1a1622_0%,#262130_50%,#1a1622_100%)] bg-[length:200%_100%];
   }
+
+  /* Scritta "da Short": larga, pesantissima, maiuscola, bianca col bordo nero spesso — la stessa
+     dei sottotitoli che il worker brucia nei video. Solo per i pochi titoli-momento, mai per etichette. */
+  .type-caption {
+    font-weight: 900;
+    font-stretch: 125%;
+    text-transform: uppercase;
+    letter-spacing: -0.01em;
+    line-height: 0.95;
+    color: #fff;
+    -webkit-text-stroke: 0.14em #000;
+    paint-order: stroke fill;
+    text-shadow: 0 0.06em 0 #000;
+  }
+  .type-caption .is-spoken {
+    color: theme("colors.brand.400");
+  }
+}
+
+/* Parole di CaptionHeadline: entrata a schiaffo + accensione in giallo mentre vengono "dette". */
+.caption-word {
+  display: inline-block;
+  animation:
+    caption-pop 420ms cubic-bezier(0.2, 0.9, 0.3, 1.3) both,
+    caption-spoken var(--spoken, 400ms) linear both;
+}
+.caption-word:not(:last-child) {
+  margin-right: 0.28em;
+}
+@keyframes caption-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.35) rotate(var(--tilt, -4deg));
+    filter: blur(6px);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.18) rotate(0deg);
+    filter: blur(0);
+  }
+  78% {
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes caption-spoken {
+  0%,
+  70% {
+    color: #ffd400;
+  }
+  100% {
+    color: #fff;
+  }
+}
+
+/* Parola dell'anteprima Short in home: solo l'entrata a schiaffo, il colore lo decide la parola. */
+.caption-demo {
+  display: inline-block;
+  animation: caption-pop 360ms cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
 }

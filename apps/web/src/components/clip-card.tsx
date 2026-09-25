@@ -44,7 +44,7 @@ export function ClipCard({ clip, rank, selectable, selected, selectionActive, on
           // eslint-disable-next-line @next/next/no-img-element
           <img src={clip.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
         ) : (
-          <div className="absolute inset-0 flex items-center bg-[radial-gradient(circle_at_20%_10%,rgba(124,92,255,0.35),transparent_55%),radial-gradient(circle_at_90%_90%,rgba(255,92,168,0.22),transparent_50%)] px-3 pb-8 pt-12">
+          <div className="absolute inset-0 flex items-center bg-overlay px-3 pb-8 pt-12">
             <p className="line-clamp-5 font-display text-sm font-semibold leading-snug text-white/85">&ldquo;{clip.hook}&rdquo;</p>
           </div>
         )}
@@ -98,7 +98,7 @@ export function ClipCard({ clip, rank, selectable, selected, selectionActive, on
           aria-label={selected ? "Deseleziona" : "Seleziona"}
           className={`absolute left-2 top-9 flex h-6 w-6 items-center justify-center rounded-md border transition ${
             selected
-              ? "border-brand-400 bg-brand-500 text-white"
+              ? "border-brand-400 bg-brand-400 text-on-brand animate-pop-check"
               : `border-white/40 bg-black/50 text-transparent backdrop-blur hover:border-white ${selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`
           }`}
         >
