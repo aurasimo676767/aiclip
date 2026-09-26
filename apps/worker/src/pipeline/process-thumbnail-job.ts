@@ -216,7 +216,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       try {
         const aiPeople = [];
         for (const face of chosenFaces) {
-          const refs = referenceFaces(library, face, 2);
+          const refs = referenceFaces(library, face, 3);
           aiPeople.push({ name: face.label ?? "", photos: await downloadFaces(refs, jobDir) });
         }
         const stylePath = path.resolve("assets", "cover-style", "modello-scritta.jpg");

@@ -74,14 +74,15 @@ export function pickFaces(
 }
 
 /**
- * Foto di riferimento di una persona per GPT Image: quella scelta più le migliori altre (busti
- * interi, non tagliati ai due lati, espressione forte). Più foto = faccia più fedele.
+ * Foto di riferimento di una persona per GPT Image: quella scelta più altre buone (busti, meglio se
+ * non tagliati ai due lati), diverse a ogni copertina. Più foto = faccia più fedele e pose varie.
  */
 export function referenceFaces(library: FaceLibraryIndex, chosen: LibraryFace, n: number): LibraryFace[] {
-  const others = library.faces
-    .filter((f) => f.status === "labeled" && f.label === chosen.label && f.id !== chosen.id && f.bust !== false)
-    .sort((a, b) => (b.bothSidesCut ? 0 : 10) + b.intensity - ((a.bothSidesCut ? 0 : 10) + a.intensity));
-  return [chosen, ...others.slice(0, n - 1)];
+  // Pescate a caso fra le buone: con sempre le stesse foto GPT rifaceva sempre la stessa posa e gli
+  // stessi vestiti (Blur con la sciarpa blu in ogni copertina, bocciato da simo).
+  const good = library.faces.filter((f) => f.status === "labeled" && f.label === chosen.label && f.id !== chosen.id && f.bust !== false);
+  const score = (f: LibraryFace) => (f.bothSidesCut ? 0 : 5) + f.intensity + Math.random() * 8;
+  return [chosen, ...good.sort((a, b) => score(b) - score(a)).slice(0, n - 1)];
 }
 
 /** Scarica i PNG delle facce scelte nella cartella del job. */

@@ -32,6 +32,8 @@ export interface AiCoverParams {
   /** Scritta esatta, già in maiuscolo. */
   title: string;
   gameName: string | null;
+  /** Espressione/atmosfera voluta (es. dall'AI che sceglie la copertina); senza, una di default per tipo. */
+  mood?: string;
   /** Copertina modello per lo stile della scritta (assets/cover-style). */
   styleExamplePath: string | null;
   outputPath: string;
@@ -41,7 +43,7 @@ const OUT_W = 1280;
 const OUT_H = 720;
 
 export async function generateAiCover(params: AiCoverParams): Promise<void> {
-  const images: Array<{ label: string; path: string }> = [
+  const images: Array<{ label: string; path: string; textBandOnly?: boolean }> = [
     { label: "the layout draft", path: params.draftPath },
     { label: "the real background", path: params.backgroundPath },
   ];
@@ -50,9 +52,15 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     const first = images.length + 1;
     for (const p of person.photos) images.push({ label: person.name, path: p });
     const last = images.length;
-    personLines.push(`- image${first === last ? ` ${first}` : `s ${first}-${last}`}: reference photos of the real person ${person.name}`);
+    personLines.push(
+      first === last
+        ? `- image ${first}: reference photo of the real streamer nicknamed "${person.name}"`
+        : `- images ${first}-${last}: ${last - first + 1} different photos of the SAME single streamer, nicknamed "${person.name}" (draw them only once)`,
+    );
   }
-  if (params.styleExamplePath) images.push({ label: "style example", path: params.styleExamplePath });
+  // Solo la striscia bassa con la scritta: dall'esempio intero GPT copiava anche le persone (Marza
+  // spuntava in una copertina dove doveva esserci solo Blur).
+  if (params.styleExamplePath) images.push({ label: "style example", path: params.styleExamplePath, textBandOnly: true });
 
   const [line1, line2] = splitTitle(params.title);
   const protagonist = params.people[0]?.name;
@@ -64,16 +72,26 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     "Create a YouTube thumbnail (16:9) for an Italian Twitch clip channel, in the style of the biggest Italian clip channels.",
     "",
     "Input images:",
-    "- image 1: rough layout draft. Keep this composition: who is where, their size, the text position.",
+    "- image 1: rough layout draft. Use it ONLY for the composition: who is where, their size, the text position. Do NOT copy the people's poses, hands, clothes or expressions from it.",
     `- image 2: the background, ${background}.`,
     ...personLines,
-    ...(params.styleExamplePath ? [`- image ${images.length}: style reference for the TEXT ONLY (font, colors, outline, brush stroke). Do not copy its people or its words.`] : []),
+    ...(params.styleExamplePath ? [`- image ${images.length}: style reference for the TEXT ONLY (font, colors, outline, brush stroke). Do not copy its words or anything else from it.`] : []),
     "",
-    "The people are real streamers. Their faces must stay EXACTLY these people: same face shape, eyes, nose, beard, glasses, hairline, skin tone, headphones. Do not beautify, change age, or make them look like someone else. It is better to keep the photo as it is than to change a face.",
+    // "Blur" preso alla lettera: la faccia di Blur usciva sfocata.
+    `Names like "Blur" are only nicknames: never blur, soften or hide anyone; every face must be perfectly sharp and in focus.`,
+    "The people are real streamers. Their faces must stay EXACTLY these people: same face shape, eyes, nose, beard, glasses, hairline, skin tone. Do not beautify, change age, or make them look like someone else.",
+    // simo (2026-09-26): Blur usciva sempre con la stessa foto e la sciarpa blu, che nel tour della
+    // casa di Murri "non ha senso". Le foto servono solo per il volto: posa, vestiti ed espressione
+    // li decide il modello in base al video.
+    "Use the reference photos ONLY to know what each face looks like. Do NOT copy a single photo: create a NEW natural pose and expression for each person, and do not reuse clothes or accessories (scarves, jerseys, props) that don't fit this video; plain streamer clothes (t-shirt or hoodie, gaming headphones) are fine. Hands and arms must be anatomically realistic, or keep them out of the frame.",
     // La bozza può averne scartato qualcuno (ritaglio tagliato male per il posto libero): GPT li
     // rimette, sennò nella copertina di GTA con Blur, Manuxo e Pesh mancava Pesh.
-    `ALL ${params.people.length} people must appear in the thumbnail: ${params.people.map((p) => p.name).join(", ")}. If someone is missing from the draft, add them next to the others, same size and style.`,
-    `Make the people huge: head and shoulders rising from the bottom edge, faces big and sharp, with strong exaggerated expressions${protagonist ? `; ${protagonist} is the main character` : ""}. Clean cutout edges with a subtle white outline, lit to match the background.`,
+    // Con 3 foto della stessa persona GPT disegnava tre ragazzi diversi (copertina di Murri, 2026-09-26).
+    `Exactly ${params.people.length} streamer${params.people.length === 1 ? "" : "s"} in the foreground, each drawn ONCE: ${params.people.map((p) => `"${p.name}"`).join(", ")}. Never duplicate a person and never add other streamers. If someone is missing from the draft, add them next to the others, same size and style.`,
+    ...(params.kind === "reaction"
+      ? ["Keep the main person or subject of the original thumbnail (image 2) clearly visible in the background: it is what the streamers are reacting to."]
+      : []),
+    `Make the people huge: head and shoulders rising from the bottom edge, faces big and sharp${protagonist ? `; ${protagonist} is the main character` : ""}. Mood: ${params.mood ?? (params.kind === "reaction" ? "watching and reacting to the video: curious, amused or surprised, relaxed natural pose" : "playing the game with friends: hyped, shocked or laughing, strong exaggerated expressions")}. Clean cutout edges with a subtle white outline, lit to match the background.`,
     "",
     line2
       ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Heavy condensed italic sans-serif (like Anton), very big, bottom center, in front of the people, covering their chests but never their faces. First line white, second line yellow-to-orange gradient, thick black outline, solid drop shadow, a red paint brush stroke behind the second line.`
@@ -89,7 +107,12 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
   form.append("output_format", "png");
   form.append("n", "1");
   for (const img of images) {
-    const buffer = await fsp.readFile(img.path);
+    let buffer: Buffer = await fsp.readFile(img.path);
+    if (img.textBandOnly) {
+      const { width = 0, height = 0 } = await sharp(buffer).metadata();
+      const top = Math.round(height * 0.6);
+      buffer = await sharp(buffer).extract({ left: 0, top, width, height: height - top }).jpeg({ quality: 92 }).toBuffer();
+    }
     const type = img.path.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
     form.append("image[]", new Blob([buffer], { type }), path.basename(img.path));
   }

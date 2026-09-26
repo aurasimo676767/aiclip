@@ -29,7 +29,7 @@ await composeCover({ backgroundPath: background, kind: kind as "reaction" | "gam
 console.log("ok", out, faces.map((f) => `${f.label}:${f.expression}:${f.intensity}:${f.id.slice(0, 8)}`).join(" "));
 if (process.env.AI === "1") {
   const people = [];
-  for (const f of faces) people.push({ name: f.label ?? "", photos: await downloadFaces(referenceFaces(library, f, 2), work) });
+  for (const f of faces) people.push({ name: f.label ?? "", photos: await downloadFaces(referenceFaces(library, f, 3), work) });
   const aiOut = path.resolve(out!).replace(/.jpg$/i, "") + "-ai.jpg";
   const style = path.resolve("assets", "cover-style", "modello-scritta.jpg");
   await generateAiCover({
