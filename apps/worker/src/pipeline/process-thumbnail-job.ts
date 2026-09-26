@@ -11,7 +11,8 @@ import { runFfmpeg, probeVideo } from "../lib/ffmpeg.js";
 import { selectThumbnailAssets } from "../providers/ai/thumbnail-selection.js";
 import { composeCover, COVER_THEMES } from "../render/compose-cover.js";
 import { readFaceLibrary } from "../lib/face-library.js";
-import { participantsFromTitle, pickFaces, downloadFaces, findSteamHero } from "./cover-builder.js";
+import { participantsFromTitle, pickFaces, downloadFaces, findSteamHero, referenceFaces } from "./cover-builder.js";
+import { generateAiCover } from "../providers/ai/cover-image-ai.js";
 import {
   setYoutubeThumbnail,
   findYoutubeThumbnailUrlBySearch,
@@ -198,15 +199,46 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       : (selection.coverWords ?? extractBannerText(clip.title));
     logger.info("Copertina", { jobId: job.id, tipo: isReaction ? "reaction" : "gioco", gioco: selection.gameName, persone: people, facce: chosenFaces.map((f) => `${f.label}:${f.expression}`), scritta: title });
 
-    const composedPath = path.join(jobDir, "thumbnail.jpg");
+    const draftPath = path.join(jobDir, "thumbnail-draft.jpg");
     await composeCover({
       backgroundPath: backgroundFullPath,
       kind: isReaction ? "reaction" : "game",
       faces: facePaths,
       title,
       theme: COVER_THEMES[selection.coverColor] ?? COVER_THEMES.giallo!,
-      outputPath: composedPath,
+      outputPath: draftPath,
     });
+
+    // Rifinitura con GPT Image (COVER_AI_MODEL): la bozza montata diventa una copertina da grafico.
+    // Se fallisce resta la bozza, che è già una copertina completa.
+    let composedPath = draftPath;
+    if (env.COVER_AI_MODEL !== "off" && chosenFaces.length > 0 && facePaths.length === chosenFaces.length) {
+      try {
+        const aiPeople = [];
+        for (const face of chosenFaces) {
+          const refs = referenceFaces(library, face, 2);
+          aiPeople.push({ name: face.label ?? "", photos: await downloadFaces(refs, jobDir) });
+        }
+        const stylePath = path.resolve("assets", "cover-style", "modello-scritta.jpg");
+        const aiPath = path.join(jobDir, "thumbnail-ai.jpg");
+        await generateAiCover({
+          apiKey: env.OPENAI_API_KEY,
+          model: env.COVER_AI_MODEL,
+          quality: env.COVER_AI_QUALITY,
+          kind: isReaction ? "reaction" : "game",
+          draftPath,
+          backgroundPath: backgroundFullPath,
+          people: aiPeople,
+          title: title.toUpperCase(),
+          gameName: selection.gameName ?? null,
+          styleExamplePath: await fsp.access(stylePath).then(() => stylePath, () => null),
+          outputPath: aiPath,
+        });
+        composedPath = aiPath;
+      } catch (err) {
+        logger.warn("Rifinitura GPT Image fallita, resta la copertina montata", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
 
     // 5) Carica la copertina generata su R2 e la imposta come thumbnail_path della clip (upgrade
     // rispetto al frame grezzo estratto al render).

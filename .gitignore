@@ -48,3 +48,5 @@ __pycache__/
 
 # Modello di scontorno BiRefNet (~930 MB): si scarica a parte, vedi apps/worker/src/render/birefnet.ts
 apps/worker/models/BiRefNet*.onnx
+# Copertine d'esempio mandate da simo (di altri canali): solo riferimento di stile in locale.
+apps/worker/assets/cover-style/

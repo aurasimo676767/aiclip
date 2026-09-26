@@ -34,6 +34,12 @@ const envSchema = z.object({
   // ogni render. "off" = gioco sempre riempito al centro, nessuna chiamata.
   ANTHROPIC_MODEL_CONTENT_FOCUS: z.string().default("claude-sonnet-5"),
   OPENAI_API_KEY: z.string().min(1),
+  // Rifinitura delle copertine con GPT Image (providers/ai/cover-image-ai.ts): la copertina montata
+  // coi ritagli fa da bozza e il modello la ridisegna come un grafico. ~5-10 centesimi a copertina a
+  // qualità "medium". "off" = resta la copertina montata, nessuna chiamata. Modello provato:
+  // gpt-image-2.5-sunburst (lo stesso di ChatGPT a settembre 2026).
+  COVER_AI_MODEL: z.string().default("off"),
+  COVER_AI_QUALITY: z.enum(["low", "medium", "high"]).default("medium"),
   TRANSCRIPTION_PROVIDER: z.enum(["openai", "local"]).default("openai"),
   // Lingua passata a Whisper. Senza, la deduce dai primi 30 secondi di ogni blocco da ~20 minuti:
   // un VOD che si apriva con un audio in inglese è stato trascritto (e tradotto) in inglese per

@@ -73,6 +73,17 @@ export function pickFaces(
   return picked;
 }
 
+/**
+ * Foto di riferimento di una persona per GPT Image: quella scelta più le migliori altre (busti
+ * interi, non tagliati ai due lati, espressione forte). Più foto = faccia più fedele.
+ */
+export function referenceFaces(library: FaceLibraryIndex, chosen: LibraryFace, n: number): LibraryFace[] {
+  const others = library.faces
+    .filter((f) => f.status === "labeled" && f.label === chosen.label && f.id !== chosen.id && f.bust !== false)
+    .sort((a, b) => (b.bothSidesCut ? 0 : 10) + b.intensity - ((a.bothSidesCut ? 0 : 10) + a.intensity));
+  return [chosen, ...others.slice(0, n - 1)];
+}
+
 /** Scarica i PNG delle facce scelte nella cartella del job. */
 export async function downloadFaces(faces: LibraryFace[], dir: string): Promise<string[]> {
   const paths: string[] = [];
