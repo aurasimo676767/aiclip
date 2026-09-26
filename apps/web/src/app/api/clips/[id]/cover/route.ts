@@ -68,6 +68,16 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   if (!job) return NextResponse.json({ job: null });
 
   const url = job.result_storage_path ? await getPresignedDownloadUrl(job.result_storage_path).catch(() => null) : null;
+  // Id del video su YouTube, per aprire la sua pagina di Studio (copertina verticale degli Shorts).
+  const { data: published } = await supabase
+    .from("youtube_publish_jobs")
+    .select("youtube_video_id")
+    .eq("clip_id", params.id)
+    .eq("status", "COMPLETED")
+    .not("youtube_video_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   return NextResponse.json({
     job: {
       id: job.id,
@@ -76,6 +86,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
       url,
       applyRequested: job.apply_requested,
       youtubeSet: job.youtube_thumbnail_set,
+      youtubeVideoId: published?.youtube_video_id ?? null,
     },
   });
 }

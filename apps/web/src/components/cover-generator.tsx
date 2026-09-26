@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Image as ImageIcon, Loader2, RefreshCw, Upload } from "lucide-react";
+import { Check, ExternalLink, Image as ImageIcon, Loader2, RefreshCw, Upload } from "lucide-react";
 
 interface CoverJob {
   id: string;
@@ -10,6 +10,7 @@ interface CoverJob {
   url: string | null;
   applyRequested: boolean;
   youtubeSet: boolean;
+  youtubeVideoId: string | null;
 }
 
 /**
@@ -169,6 +170,27 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
               </a>
             </div>
           )}
+        </div>
+      )}
+
+      {ready && isShort && (
+        <div className="space-y-1.5 border-t border-line pt-3">
+          <p className="text-xs leading-relaxed text-muted">
+            Nella scheda Shorts del canale YouTube mostra la copertina verticale solo se la carichi a mano da Studio (dall&apos;API non si può).
+          </p>
+          {job.youtubeVideoId ? (
+            <a
+              href={`/api/thumbnails/${job.id}/download`}
+              download
+              onClick={() => window.open(`https://studio.youtube.com/video/${job.youtubeVideoId}/edit`, "_blank", "noopener")}
+              className="btn btn-secondary btn-sm"
+            >
+              <ExternalLink size={14} /> Scarica e apri Studio
+            </a>
+          ) : (
+            <p className="text-xs text-faint">Quando lo Short è pubblicato qui compare il pulsante per aprirlo su Studio.</p>
+          )}
+          <p className="text-xs text-faint">Su Studio: Miniatura → Carica miniatura → scegli il file appena scaricato → Salva.</p>
         </div>
       )}
 
