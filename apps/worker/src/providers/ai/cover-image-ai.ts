@@ -70,6 +70,9 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     ...(params.styleExamplePath ? [`- image ${images.length}: style reference for the TEXT ONLY (font, colors, outline, brush stroke). Do not copy its people or its words.`] : []),
     "",
     "The people are real streamers. Their faces must stay EXACTLY these people: same face shape, eyes, nose, beard, glasses, hairline, skin tone, headphones. Do not beautify, change age, or make them look like someone else. It is better to keep the photo as it is than to change a face.",
+    // La bozza può averne scartato qualcuno (ritaglio tagliato male per il posto libero): GPT li
+    // rimette, sennò nella copertina di GTA con Blur, Manuxo e Pesh mancava Pesh.
+    `ALL ${params.people.length} people must appear in the thumbnail: ${params.people.map((p) => p.name).join(", ")}. If someone is missing from the draft, add them next to the others, same size and style.`,
     `Make the people huge: head and shoulders rising from the bottom edge, faces big and sharp, with strong exaggerated expressions${protagonist ? `; ${protagonist} is the main character` : ""}. Clean cutout edges with a subtle white outline, lit to match the background.`,
     "",
     line2
