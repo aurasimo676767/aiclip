@@ -120,10 +120,7 @@ export async function downloadFaces(faces: LibraryFace[], dir: string): Promise<
  */
 export async function findSteamHero(gameName: string, outPath: string): Promise<string | null> {
   try {
-    const search = (await (
-      await fetch(`https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&cc=it&l=italian`)
-    ).json()) as { items?: Array<{ id: number; name: string }> };
-    const item = bestMatch(gameName, search.items ?? []);
+    const item = await findSteamApp(gameName);
     if (!item) return null;
     // Candidati: la grafica ufficiale e i primi screenshot veri del gioco. Si tiene il più colorato e
     // luminoso: la grafica ufficiale a volte è scurissima (Black Ops 2: un soldato nel buio, bocciato
@@ -151,6 +148,36 @@ export async function findSteamHero(gameName: string, outPath: string): Promise<
     }
   } catch (error) {
     logger.warn("Ricerca Steam fallita, sfondo dalla live", { gameName, error: error instanceof Error ? error.message : String(error) });
+  }
+  return null;
+}
+
+/** Il gioco su Steam col nome più simile a quello cercato (null se nessuno somiglia abbastanza). */
+async function findSteamApp(gameName: string): Promise<{ id: number; name: string } | null> {
+  const search = (await (
+    await fetch(`https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&cc=it&l=italian`)
+  ).json()) as { items?: Array<{ id: number; name: string }> };
+  return bestMatch(gameName, search.items ?? []);
+}
+
+/**
+ * Logo VERO del gioco da Steam, da far mettere in copertina (come fa AvraiAuraBooter: QUIPLASH,
+ * GOLF WITH YOUR FRIENDS, DUB TOGETHER in grande). Prima il logo trasparente; se il gioco non ce
+ * l'ha, la testata ufficiale, che contiene il logo. null se il gioco non è su Steam.
+ */
+export async function findSteamLogo(gameName: string, outPath: string): Promise<string | null> {
+  try {
+    const item = await findSteamApp(gameName);
+    if (!item) return null;
+    for (const file of ["logo.png", "header.jpg"]) {
+      const res = await fetch(`https://cdn.akamai.steamstatic.com/steam/apps/${item.id}/${file}`);
+      if (!res.ok) continue;
+      const target = outPath.replace(/\.[a-z]+$/i, file.endsWith(".png") ? ".png" : ".jpg");
+      await fsp.writeFile(target, Buffer.from(await res.arrayBuffer()));
+      return target;
+    }
+  } catch (error) {
+    logger.warn("Logo Steam non trovato", { gameName, error: error instanceof Error ? error.message : String(error) });
   }
   return null;
 }

@@ -11,7 +11,7 @@ import { runFfmpeg, probeVideo } from "../lib/ffmpeg.js";
 import { selectThumbnailAssets } from "../providers/ai/thumbnail-selection.js";
 import { composeCover, COVER_THEMES } from "../render/compose-cover.js";
 import { readFaceLibrary } from "../lib/face-library.js";
-import { participantsFromTitle, pickFaces, downloadFaces, findSteamHero, referenceFaces, PERSON_STYLE } from "./cover-builder.js";
+import { participantsFromTitle, pickFaces, downloadFaces, findSteamHero, findSteamLogo, referenceFaces, PERSON_STYLE } from "./cover-builder.js";
 import { generateAiCover } from "../providers/ai/cover-image-ai.js";
 import {
   setYoutubeThumbnail,
@@ -233,8 +233,10 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
 
     // 5) Scritta: "<PROTAGONISTA> REACTION" per le reaction (la copertina originale ha già il suo
     //    testo), le 1-3 parole scelte dall'AI per i giochi.
-    const title =
-      isReaction
+    const manualText = (job as { cover_text?: string | null }).cover_text?.trim();
+    const title = manualText
+      ? manualText
+      : isReaction
         ? `${people[0] ?? streamerAlias ?? "BLUR"} REACTION`
         : (selection.coverWords ?? extractBannerText(clip.title));
     logger.info("Copertina", { jobId: job.id, tipo: isShort ? "short" : isReaction ? "reaction" : "gioco", gioco: selection.gameName, persone: people, facce: chosenFaces.map((f) => `${f.label}:${f.expression}`), scritta: title });
@@ -260,6 +262,8 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           aiPeople.push({ name: face.label ?? "", photos: await downloadFaces(refs, jobDir), styleNote: face.label ? PERSON_STYLE[face.label]?.note : undefined });
         }
         const stylePath = path.resolve("assets", "cover-style", "modello-scritta.jpg");
+        // Logo vero del gioco (come nelle copertine di AvraiAuraBooter), anche negli Short di gioco.
+        const logoPath = !isReaction && selection.gameName ? await findSteamLogo(selection.gameName, path.join(jobDir, "logo.png")) : null;
         const aiPath = path.join(jobDir, "thumbnail-ai.jpg");
         await generateAiCover({
           apiKey: env.OPENAI_API_KEY,
@@ -272,6 +276,8 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           title: title.toUpperCase(),
           gameName: selection.gameName ?? null,
           styleExamplePath: await fsp.access(stylePath).then(() => stylePath, () => null),
+          logoPath,
+          videoTitle: clip.title,
           outputPath: aiPath,
         });
         composedPath = aiPath;

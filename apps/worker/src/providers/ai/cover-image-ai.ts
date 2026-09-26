@@ -39,6 +39,10 @@ export interface AiCoverParams {
   mood?: string;
   /** Copertina modello per lo stile della scritta (assets/cover-style). */
   styleExamplePath: string | null;
+  /** Logo ufficiale del gioco (Steam), da mettere in copertina. */
+  logoPath?: string | null;
+  /** Titolo del video: spunto per i bigliettini (non va scritto uguale). */
+  videoTitle?: string;
   outputPath: string;
 }
 
@@ -77,6 +81,10 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
   }
   // Solo la striscia bassa con la scritta: dall'esempio intero GPT copiava anche le persone (Marza
   // spuntava in una copertina dove doveva esserci solo Blur).
+  if (params.logoPath) {
+    const n = add(params.logoPath);
+    inputLines.push(`- image ${n}: the OFFICIAL logo of the game${params.gameName ? ` "${params.gameName}"` : ""}: put this exact logo big and readable in the thumbnail (top area), do not redraw it differently.`);
+  }
   if (params.styleExamplePath) {
     const n = add(params.styleExamplePath, true);
     inputLines.push(`- image ${n}: style reference for the TEXT ONLY (font, colors, outline, brush stroke). Do not copy its words or anything else from it.`);
@@ -122,11 +130,16 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
       ? [`Keep the main person or subject of the original thumbnail (image ${bgIndex}) clearly visible in the background: it is what the streamers are reacting to.`]
       : []),
     `${layout}${protagonist ? ` "${protagonist}" is the main character.` : ""} Mood: ${mood}. Clean cutout edges with a subtle white outline, lit to match the background.`,
+    // Stile scelto da simo il 2026-09-26: le copertine del canale AvraiAuraBooter (fatte anche loro
+    // con l'AI): piene, sature, facce enormi, logo del gioco, bigliettini, costumi a tema.
+    "Visual style: like the top Italian clip channels (e.g. \"Avrai Aura Booter\"): a dense, busy, hyper-saturated composition, glossy and dramatic, strong rim light and colored glow around the people, subtle vignette, bright complementary colors (blue/orange, purple/yellow, red/yellow). The people fill most of the frame, big faces close together, slightly overlapping, the main one biggest.",
+    "When it fits the video and is funny, dress the people for the theme (e.g. hard hats for a building game, costumes for a party game) and add a few themed props from the game or the topic around them.",
+    `Add 2-4 small sticker labels in ITALIAN (1-3 words each, white or yellow paper notes or speech bubbles, simple correct Italian words) with funny comments about the video${params.videoTitle ? ` ("${params.videoTitle}")` : ""}, plus 1-2 red arrows or question marks pointing at the key thing. Keep them small, at the edges, never over faces.`,
     "",
     line2
-      ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Heavy condensed italic sans-serif (like Anton), ${textPlace}. First line white, second line ${vertical ? "bright red or yellow-to-orange, whichever reads best on the background" : "yellow-to-orange gradient"}, thick black outline, solid drop shadow${vertical ? "" : ", a red paint brush stroke behind the second line"}.`
-      : `Text: exactly "${line1}", spelled exactly, one line. Heavy condensed italic sans-serif (like Anton), ${textPlace}. Yellow-to-orange gradient, thick black outline, solid drop shadow, a red paint brush stroke behind it.`,
-    "No other text, no logos, no watermarks, no borders. Vivid colors, high contrast, very sharp.",
+      ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. First line white with a light grey gradient, second line in one bold color that fits the video (red, yellow-orange, purple, green or blue gradient with a glossy highlight), thick dark outline, 3D extrusion and drop shadow, soft glow.`
+      : `Text: exactly "${line1}", spelled exactly, one line. Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. One bold color that fits the video (red, yellow-orange, purple, green or blue gradient with a glossy highlight), thick dark outline, 3D extrusion and drop shadow, soft glow.`,
+    "Apart from the title, the game logo and the small stickers: no other text, no channel logos, no watermarks, no borders. Very sharp.",
   ].join("\n");
 
   const form = new FormData();

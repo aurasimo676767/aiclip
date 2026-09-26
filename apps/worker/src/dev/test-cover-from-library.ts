@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { supabase } from "../lib/supabase.js";
 import { readFaceLibrary } from "../lib/face-library.js";
-import { pickFaces, downloadFaces, findSteamHero, referenceFaces } from "../pipeline/cover-builder.js";
+import { pickFaces, downloadFaces, findSteamHero, findSteamLogo, referenceFaces, PERSON_STYLE } from "../pipeline/cover-builder.js";
 import { generateAiCover } from "../providers/ai/cover-image-ai.js";
 import { env } from "../env.js";
 import { composeCover, COVER_THEMES } from "../render/compose-cover.js";
@@ -29,7 +29,7 @@ await composeCover({ backgroundPath: background, kind: kind as "reaction" | "gam
 console.log("ok", out, faces.map((f) => `${f.label}:${f.expression}:${f.intensity}:${f.id.slice(0, 8)}`).join(" "));
 if (process.env.AI === "1") {
   const people = [];
-  for (const f of faces) people.push({ name: f.label ?? "", photos: await downloadFaces(referenceFaces(library, f, 3), work) });
+  for (const f of faces) people.push({ name: f.label ?? "", photos: await downloadFaces(referenceFaces(library, f, 3), work), styleNote: f.label ? PERSON_STYLE[f.label]?.note : undefined });
   const aiOut = path.resolve(out!).replace(/.jpg$/i, "") + "-ai.jpg";
   const style = path.resolve("assets", "cover-style", "modello-scritta.jpg");
   await generateAiCover({
@@ -43,6 +43,8 @@ if (process.env.AI === "1") {
     title: title!.toUpperCase(),
     gameName: bgArg!.startsWith("steam:") ? bgArg!.slice(6) : null,
     styleExamplePath: await fsp.access(style).then(() => style, () => null),
+    logoPath: bgArg!.startsWith("steam:") ? await findSteamLogo(bgArg!.slice(6), path.join(work, "logo.png")) : null,
+    videoTitle: process.env.VIDEO_TITLE,
     outputPath: aiOut,
   });
   console.log("ai", aiOut);

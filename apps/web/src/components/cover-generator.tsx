@@ -22,6 +22,7 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
   const [job, setJob] = useState<CoverJob | null>(null);
   const [people, setPeople] = useState<string[]>([]);
   const [chosen, setChosen] = useState<string[]>([]);
+  const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,7 +54,7 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
       const res = await fetch(`/api/clips/${clipId}/cover`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ people: chosen.length ? chosen : undefined }),
+        body: JSON.stringify({ people: chosen.length ? chosen : undefined, text: text.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Avvio fallito");
@@ -120,6 +121,16 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
         </div>
       )}
 
+      {!working && (
+        <input
+          value={text}
+          maxLength={40}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Scritta (facoltativa, se no la sceglie l'AI)"
+          className="input text-sm"
+        />
+      )}
+
       {working && (
         <p className="flex items-center gap-2 text-xs text-muted">
           <Loader2 size={14} className="animate-spin text-brand-300" />
@@ -127,7 +138,13 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
         </p>
       )}
 
-      {job?.status === "FAILED" && <p className="text-xs text-red-300">Non riuscita: {job.error ?? "errore sconosciuto"}. Premi Rigenera.</p>}
+      {job?.status === "FAILED" && (
+        <p className="text-xs text-red-300">
+          {job.error?.includes("safety")
+            ? "OpenAI ha rifiutato l'argomento (i suoi filtri bloccano temi come simboli d'odio o sesso). Prova con una scritta diversa; se il tema si vede nel video potrebbe non riuscire comunque."
+            : `Non riuscita: ${job.error ?? "errore sconosciuto"}. Premi Rigenera.`}
+        </p>
+      )}
 
       {ready && (
         <div className="space-y-2">

@@ -12,6 +12,8 @@ import { getPresignedDownloadUrl } from "@/lib/storage/r2";
 const bodySchema = z.object({
   /** Persone da mettere in copertina, nell'ordine (il primo è il protagonista). Vuoto = dal titolo. */
   people: z.array(z.string().trim().min(1).max(40)).max(4).optional(),
+  /** Scritta scelta a mano (vince su quella dell'AI). */
+  text: z.string().trim().max(40).optional(),
 });
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -29,11 +31,17 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (clip.status !== "COMPLETED") return NextResponse.json({ error: "Prima serve il video renderizzato" }, { status: 409 });
 
   const people = parsed.data.people?.map((p) => p.toUpperCase());
-  const { data: inserted, error } = await supabase
+  const text = parsed.data.text?.toUpperCase();
+  const row = { clip_id: clip.id, ...(people?.length ? { cover_people: people } : {}) };
+  let { data: inserted, error } = await supabase
     .from("thumbnail_jobs")
-    .insert({ clip_id: clip.id, ...(people?.length ? { cover_people: people } : {}) })
+    .insert({ ...row, ...(text ? { cover_text: text } : {}) })
     .select("id")
     .single();
+  // Prima della migrazione 0027 la colonna cover_text non c'è: si genera con la scritta dell'AI.
+  if (error?.message.includes("cover_text")) {
+    ({ data: inserted, error } = await supabase.from("thumbnail_jobs").insert(row).select("id").single());
+  }
   if (error || !inserted) {
     // Prima della migrazione 0026 il link YouTube è obbligatorio.
     const hint = error?.message.includes("youtube_url") ? " (manca la migrazione 0026 su Supabase)" : "";
