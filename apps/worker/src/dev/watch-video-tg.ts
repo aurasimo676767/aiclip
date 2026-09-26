@@ -72,7 +72,7 @@ while (Date.now() - started < MAX_RUN_MS) {
     const name = video.original_filename ? ` "${video.original_filename}"` : "";
     if (video.status === "FAILED") await say(`VOD${name} FALLITO: ${video.error_message ?? "nessun dettaglio"}`);
     else if (!lastStatus) await say(`Seguo il VOD${name}. Fase attuale: ${PHASES[video.status] ?? video.status}.`);
-    else await say(`VOD: ${PHASES[lastStatus] ?? lastStatus} finito. Ora: ${PHASES[video.status] ?? video.status}.`);
+    else await say(`VOD, fatto: ${PHASES[lastStatus] ?? lastStatus}. Ora: ${PHASES[video.status] ?? video.status}.`);
     lastStatus = video.status;
     lastDownloadReport = Date.now();
   } else if (video.status === "DOWNLOADING" && Date.now() - lastDownloadReport > DOWNLOAD_REPORT_MS) {
