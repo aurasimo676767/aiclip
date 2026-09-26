@@ -45,3 +45,6 @@ __pycache__/
 
 # typescript build info
 *.tsbuildinfo
+
+# Modello di scontorno BiRefNet (~930 MB): si scarica a parte, vedi apps/worker/src/render/birefnet.ts
+apps/worker/models/BiRefNet*.onnx

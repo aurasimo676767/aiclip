@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { removeBackground } from "@imgly/background-removal-node";
+import { cutoutPerson } from "../render/birefnet.js";
 import { runYtDlp } from "../lib/yt-dlp.js";
 import { detectFaces } from "../face-tracking/onnx-face-detector.js";
 
@@ -54,6 +54,8 @@ for (const channel of sources) {
       await fsp.writeFile(coverPath, Buffer.from(await res.arrayBuffer()));
     }
 
+    // Solo copertine in HD: le 480p ingrandite davano ritagli impastati.
+    if (((await sharp(coverPath).metadata()).width ?? 0) < 1280) continue;
     const cover = sharp(coverPath).resize(1280, 720, { fit: "cover" });
     const coverBuf = await cover.clone().jpeg().toBuffer();
     const rgb = await sharp(coverBuf).resize(DETECT_W, DETECT_H, { fit: "fill" }).removeAlpha().raw().toBuffer();
@@ -70,12 +72,13 @@ for (const channel of sources) {
       const left = Math.max(0, Math.round(f.x - f.width * (body ? 1.0 : 0.7)));
       const top = Math.max(0, Math.round(f.y - f.height * 0.55));
       const right = Math.min(1280, Math.round(f.x + f.width * (body ? 2.0 : 1.7)));
-      const bottom = Math.min(720, Math.round(f.y + f.height * (body ? 2.6 : 1.45)));
+      // 2.2 e non di più: sotto il petto nelle copertine c'è quasi sempre la scritta, che toccando il
+      // corpo verrebbe scontornata insieme alla persona.
+      const bottom = Math.min(720, Math.round(f.y + f.height * (body ? 2.2 : 1.45)));
       if (right - left < 60 || bottom - top < 60) continue;
       const cropBuf = await sharp(coverBuf).extract({ left, top, width: right - left, height: bottom - top }).png().toBuffer();
       try {
-        const blob = await removeBackground(new Blob([cropBuf], { type: "image/png" }));
-        const cut = await sharp(Buffer.from(await blob.arrayBuffer())).trim().png().toBuffer();
+        const cut = await sharp(await cutoutPerson(cropBuf, { x: f.x + f.width / 2 - left, y: f.y + f.height / 2 - top })).trim().png().toBuffer();
         const file = `${id}-${n}.png`;
         await fsp.writeFile(path.join(outDir, "faces", file), cut);
         index.push({ file, videoId: id, channel, face: f });

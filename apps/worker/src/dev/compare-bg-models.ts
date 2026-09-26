@@ -2,9 +2,10 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { removeBackground } from "@imgly/background-removal-node";
+import { cutoutPerson } from "../render/birefnet.js";
 
 /**
- * Confronta i modelli di scontorno (medium/large) sugli stessi ritagli: foglio con le versioni
+ * Confronta gli scontorni (imgly medium e BiRefNet) sugli stessi ritagli: foglio con le versioni
  * affiancate su sfondo colorato. Uso: tsx src/dev/compare-bg-models.ts <out.jpg> <copertina.jpg:left,top,w,h> ...
  */
 const [out, ...items] = process.argv.slice(2);
@@ -14,10 +15,12 @@ for (const item of items) {
   const [left, top, width, height] = box!.split(",").map(Number);
   const crop = await sharp(file!).resize(1280, 720, { fit: "cover" }).extract({ left: left!, top: top!, width: width!, height: height! }).png().toBuffer();
   const cells: Buffer[] = [];
-  for (const model of ["medium", "large"] as const) {
+  for (const model of ["medium", "birefnet"] as const) {
     const t = Date.now();
-    const blob = await removeBackground(new Blob([crop], { type: "image/png" }), { model });
-    const png = Buffer.from(await blob.arrayBuffer());
+    const png =
+      model === "birefnet"
+        ? await cutoutPerson(crop)
+        : Buffer.from(await (await removeBackground(new Blob([crop], { type: "image/png" }), { model })).arrayBuffer());
     console.log(model, path.basename(file!), `${Date.now() - t}ms`);
     cells.push(await sharp(png).resize(360, 360, { fit: "contain", background: { r: 40, g: 110, b: 200, alpha: 1 } }).flatten({ background: "#286ec8" }).jpeg().toBuffer());
   }

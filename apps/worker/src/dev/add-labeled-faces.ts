@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
-import { removeBackground } from "@imgly/background-removal-node";
+import { cutoutPerson } from "../render/birefnet.js";
 import { detectFaces } from "../face-tracking/onnx-face-detector.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
@@ -69,8 +69,8 @@ for (const photo of photos) {
     .sharpen({ sigma: 0.8, m1: 0.5, m2: 1.5 })
     .png()
     .toBuffer();
-  const blob = await removeBackground(new Blob([crop], { type: "image/png" }));
-  cut = await sharp(Buffer.from(await blob.arrayBuffer())).trim().resize({ height: 800, withoutEnlargement: true }).png({ compressionLevel: 9 }).toBuffer();
+  const scale = targetH / cropH;
+  cut = await sharp(await cutoutPerson(crop, { x: (f.x + f.width / 2 - left) * scale, y: (f.y + f.height / 2 - top) * scale })).trim().resize({ height: 800, withoutEnlargement: true }).png({ compressionLevel: 9 }).toBuffer();
   }
 
   const id = crypto.randomUUID();
