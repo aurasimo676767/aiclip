@@ -36,7 +36,8 @@ import { planLongformVideos, fmt } from "../providers/ai/longform-plan.js";
 import { refineVideoBoundaries } from "../providers/ai/longform-boundaries.js";
 import { describePlannedVideos } from "../providers/ai/longform-metadata.js";
 import { fetchTwitchChapters } from "../lib/twitch-chapters.js";
-import { sanitizeShortClips } from "./short-clip-boundaries.js";
+import { sanitizeShortClips, alignReactionStarts } from "./short-clip-boundaries.js";
+import { detectSceneCuts } from "../face-tracking/scene-detect.js";
 import { detectLoudMoments } from "./vocal-energy.js";
 import { updateVideoStatus } from "../queue/video-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
@@ -431,7 +432,8 @@ async function buildShortClipsToInsert(
 
   // Correzione deterministica dei confini PRIMA di tagliare ai primi N: senza, le clip scartate
   // (troppo corte, sovrapposte) avrebbero comunque occupato uno slot dei suggerimenti.
-  return sanitizeShortClips(rankedClips, segments, video.id)
+  const sanitized = await alignReactionStarts(sanitizeShortClips(rankedClips, segments, video.id), segments, localVideoPath, video.id, detectSceneCuts);
+  return sanitized
     .slice(0, MAX_SUGGESTED_CLIPS)
     .map((clip) => enforceHardDurationCap(clip, video.id))
     .map((clip) =>

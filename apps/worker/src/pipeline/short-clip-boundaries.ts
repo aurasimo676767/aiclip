@@ -173,3 +173,61 @@ function dropOverlapping(clips: RankedClip[], videoId: string): RankedClip[] {
   // in cui compaiono nel video, non in ordine di punteggio.
   return kept.sort((a, b) => a.start - b.start);
 }
+
+/** Quanto prima del gancio può iniziare il video reagito perché si parta da lì (oltre, il gancio arriverebbe troppo tardi). */
+const MAX_REACTION_LEAD_SECONDS = 12;
+
+/**
+ * Reaction a un TikTok/video: lo Short parte dall'INIZIO del contenuto reagito, non a metà
+ * (simo, 2026-09-26: "10.000 PERSONE... ERA UN'IA" partiva con "E c'era statizia", a metà del
+ * video, e non si capiva di cosa parlassero). L'AI del ranking dice dove parte il contenuto
+ * (reactedContentStart); qui lo si aggancia allo stacco di scena vero più vicino (il TikTok che
+ * parte cambia di colpo mezzo schermo), altrimenti a quel secondo con mezzo secondo di respiro.
+ * Solo se il contenuto parte al massimo MAX_REACTION_LEAD_SECONDS prima del gancio.
+ */
+export async function alignReactionStarts(
+  clips: RankedClip[],
+  segments: TranscriptSegment[],
+  videoPath: string,
+  videoId: string,
+  detectCuts: (path: string, absStart: number, duration: number) => Promise<number[]>,
+): Promise<RankedClip[]> {
+  const out: RankedClip[] = [];
+  for (const clip of clips) {
+    const reacted = clip.reactedContentStart;
+    if (reacted == null || reacted >= clip.start - 0.3 || clip.start - reacted > MAX_REACTION_LEAD_SECONDS) {
+      out.push(clip);
+      continue;
+    }
+    let start = Math.max(0, reacted - HOOK_LEAD_SECONDS);
+    try {
+      const windowStart = Math.max(0, reacted - 3);
+      const cuts = (await detectCuts(videoPath, windowStart, 6)).map((t) => windowStart + t);
+      const nearest = cuts.sort((a, b) => Math.abs(a - reacted) - Math.abs(b - reacted))[0];
+      if (nearest !== undefined && Math.abs(nearest - reacted) <= 3) start = nearest + 0.05;
+    } catch (err) {
+      logger.warn("Stacchi di scena non letti, parto dal secondo indicato dall'AI", { videoId, error: err instanceof Error ? err.message : String(err) });
+    }
+    // Più lungo del tetto: si accorcia il finale sull'ultima frase che ci sta.
+    let end = clip.end;
+    if (end - start > CLIP_DURATION_TARGET.hardMax) {
+      const limit = start + CLIP_DURATION_TARGET.hardMax;
+      const lastFitting = segments.filter((s) => s.start >= start && s.end <= limit).pop();
+      end = lastFitting ? lastFitting.end : limit;
+    }
+    logger.info("Reaction: lo Short parte dall'inizio del contenuto reagito", {
+      videoId,
+      hook: clip.hook,
+      from: clip.start.toFixed(1),
+      to: start.toFixed(1),
+    });
+    out.push({
+      ...clip,
+      start,
+      end,
+      duration: end - start,
+      edl: { ...clip.edl, events: clip.edl.events.filter((event) => event.time >= start && event.time <= end) },
+    });
+  }
+  return out;
+}

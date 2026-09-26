@@ -113,6 +113,11 @@ const RANKING_TOOL_SCHEMA = {
               description:
                 "Didascalia pronta per la pubblicazione (YouTube Shorts/TikTok), da mostrare al pubblico. 1-2 frasi brevi, in italiano colloquiale/slang naturale (quello che si usa davvero nei titoli/descrizioni di Shorts), DIVERTENTE o ad effetto, MAI cringe o forzata. NON deve spiegare o analizzare la clip (quello è il campo 'reason', che resta interno) — deve essere il testo che leggerebbe un utente reale sotto il video, tipo hook/teaser, non un riassunto.",
             },
+            reactedContentStart: {
+              type: "number",
+              description:
+                "SOLO se la clip è una reaction a un TikTok, un video o una clip di altri: il secondo (stessa timeline di start) in cui PARTE il contenuto reagito, cioè quando si comincia a sentire il TikTok/video (voci diverse, musica) o lo si vede partire nei fotogrammi. Ometti se non è una reaction.",
+            },
             badges: {
               type: "array",
               maxItems: 5,

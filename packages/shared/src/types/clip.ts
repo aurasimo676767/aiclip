@@ -60,6 +60,11 @@ export interface RankedClip {
    * una spiegazione interna (per la dashboard) del perché la clip funziona.
    */
   caption: string;
+  /**
+   * Solo per le reaction a un TikTok/video/clip altrui: secondo (timeline del video sorgente) in cui
+   * parte il contenuto reagito. Lo Short deve partire da lì, non a metà (richiesta di simo).
+   */
+  reactedContentStart?: number | null;
 }
 
 /** Media (0-100) dei sei punteggi, usata come "score" complessivo mostrato in dashboard. */

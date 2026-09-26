@@ -31,6 +31,7 @@ export const rankedClipSchema = z.object({
   hashtags: z.array(z.string().min(1).max(30)).max(10).default([]),
   caption: z.string().min(1).max(300),
   badges: z.array(z.enum(CLIP_BADGES)).max(5).default([]),
+  reactedContentStart: z.number().nonnegative().nullable().optional(),
 });
 
 export const rankedClipsResponseSchema = z.object({
