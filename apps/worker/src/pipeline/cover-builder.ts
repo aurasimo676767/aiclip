@@ -1,5 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import { logger } from "../lib/logger.js";
 import { storageProvider } from "../lib/providers.js";
 import type { FaceLibraryIndex, LibraryFace } from "../lib/face-library.js";
@@ -53,7 +54,9 @@ export function pickFaces(library: FaceLibraryIndex, people: string[], expressio
     const score = (f: LibraryFace) => {
       const rank = wanted.indexOf(f.expression);
       // Il busto conta più dell'espressione: una testa che galleggia rovina la copertina.
-      return (f.bust === false ? -100 : f.bust ? 30 : 0) + (rank >= 0 ? (wanted.length - rank) * 10 : 0) + f.intensity * 2 + Math.random() * 3;
+      // Tagliata su entrambi i lati: un taglio resterebbe in mezzo alla copertina (va sfumato), meglio evitarla.
+      const cut = f.bothSidesCut ? -25 : 0;
+      return (f.bust === false ? -100 : f.bust ? 30 : 0) + cut + (rank >= 0 ? (wanted.length - rank) * 10 : 0) + f.intensity * 2 + Math.random() * 3;
     };
     picked.push(faces.sort((a, b) => score(b) - score(a))[0]!);
   }
@@ -83,11 +86,28 @@ export async function findSteamHero(gameName: string, outPath: string): Promise<
     ).json()) as { items?: Array<{ id: number; name: string }> };
     const item = bestMatch(gameName, search.items ?? []);
     if (!item) return null;
-    for (const file of ["library_hero.jpg", "page_bg_raw.jpg", "header.jpg"]) {
-      const res = await fetch(`https://cdn.akamai.steamstatic.com/steam/apps/${item.id}/${file}`);
+    // Candidati: la grafica ufficiale e i primi screenshot veri del gioco. Si tiene il più colorato e
+    // luminoso: la grafica ufficiale a volte è scurissima (Black Ops 2: un soldato nel buio, bocciato
+    // da simo).
+    const urls = [`https://cdn.akamai.steamstatic.com/steam/apps/${item.id}/library_hero.jpg`];
+    const details = (await (await fetch(`https://store.steampowered.com/api/appdetails?appids=${item.id}`)).json()) as Record<
+      string,
+      { data?: { screenshots?: Array<{ path_full: string }> } }
+    >;
+    // La risposta è indicizzata con l'id del pacchetto, che non sempre è quello del gioco cercato.
+    const shots = Object.values(details)[0]?.data?.screenshots ?? [];
+    for (const shot of shots.slice(0, 7)) urls.push(shot.path_full);
+    let best: { score: number; image: Buffer; url: string } | null = null;
+    for (const url of urls) {
+      const res = await fetch(url);
       if (!res.ok) continue;
-      await fsp.writeFile(outPath, Buffer.from(await res.arrayBuffer()));
-      logger.info("Sfondo copertina da Steam", { gameName, steam: item.name, file });
+      const image = Buffer.from(await res.arrayBuffer());
+      const score = await vividness(image);
+      if (!best || score > best.score) best = { score, image, url };
+    }
+    if (best) {
+      await fsp.writeFile(outPath, best.image);
+      logger.info("Sfondo copertina da Steam", { gameName, steam: item.name, url: best.url });
       return outPath;
     }
   } catch (error) {
@@ -111,4 +131,13 @@ function bestMatch(query: string, items: Array<{ id: number; name: string }>): {
     if (!best || score > best.score) best = { item, score };
   }
   return best && best.score >= 0.5 ? best.item : null;
+}
+
+/** Quanto un'immagine è colorata e luminosa (per scegliere lo sfondo): colore + luce + dettaglio. */
+async function vividness(image: Buffer): Promise<number> {
+  const { channels, entropy } = await sharp(image).resize(320, 180, { fit: "cover" }).stats();
+  const [r, g, b] = channels;
+  const brightness = (r!.mean + g!.mean + b!.mean) / 3;
+  const colorfulness = Math.abs(r!.mean - g!.mean) + Math.abs(g!.mean - b!.mean) + (r!.stdev + g!.stdev + b!.stdev) / 3;
+  return colorfulness * 0.6 + brightness * 0.5 + entropy * 8;
 }

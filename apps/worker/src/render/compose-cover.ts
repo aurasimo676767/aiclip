@@ -1,6 +1,8 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
+import { measureCutout, type CutoutShape } from "../lib/face-library.js";
 
 /**
  * Copertina long-form nello stile dei canali di clip su Blur/Marza/Pesh (studiati il 2026-09-25):
@@ -53,24 +55,30 @@ export async function composeCover(params: ComposeCoverParams): Promise<void> {
   const bgTone = { r: Math.round(stats.channels[0]!.mean), g: Math.round(stats.channels[1]!.mean), b: Math.round(stats.channels[2]!.mean) };
   const layers: sharp.OverlayOptions[] = [{ input: vignette(), left: 0, top: 0 }];
 
-  const slots = faceSlots(params.kind, params.faces.length).slice(0, params.faces.length);
-  // Le facce laterali si disegnano prima, così la principale resta davanti.
-  const order = slots.map((s, i) => ({ s, i })).sort((a, b) => a.s.z - b.s.z);
-  for (const { s, i } of order) {
-    const face = await styledFace(params.faces[i]!, Math.round(H * s.height), Math.round(W * s.maxWidth), { bgTone, glow: params.theme.fillBottom });
-    const left = Math.round(W * s.centerX - face.width / 2);
-    // Busti che salgono dal FONDO della copertina (richiesta di simo): il bordo basso della faccia
-    // esce un filo sotto il canvas, mai una testa che galleggia a metà.
-    const top = H - face.height + Math.round(H * s.sink);
+  const placed = await placeFaces(params.kind, params.faces);
+  // Chi sta dietro si disegna prima, così il protagonista resta davanti.
+  for (const p of [...placed].sort((a, b) => a.slot.z - b.slot.z)) {
+    const face = await styledFace(p.cutout.png, Math.round(H * p.slot.height), Math.round(W * p.slot.maxWidth), p.mirror, p.fade, {
+      bgTone,
+      glow: params.theme.fillBottom,
+    });
+    // Il margine trasparente (contorno e bagliore) sta FUORI dal canvas: la persona tocca il bordo
+    // basso esattamente, e negli angoli tocca il bordo laterale col lato tagliato. "sink" la
+    // abbassa ancora: il fondo del busto esce dal canvas e la testa scende.
+    const top = H - face.height + face.pad + Math.round(H * (p.slot.sink ?? 0));
+    const left =
+      p.slot.anchor === "left" ? -face.pad : p.slot.anchor === "right" ? W - face.width + face.pad : Math.round(W * p.slot.centerX - face.width / 2);
     layers.push(...(await clampOverlay(face.buffer, face.width, face.height, left, top)));
   }
 
   if (params.kind === "reaction") {
-    // Reaction: la scritta è "<STREAMER> REACTION", in basso a sinistra (le facce stanno a destra):
-    // la copertina originale ha quasi sempre già un suo testo, un secondo titolo ci finirebbe sopra.
-    layers.push({ input: cornerShade(), left: 0, top: 0 });
-    const title = renderTitle(params.title.toUpperCase(), params.theme, 700);
-    layers.push({ input: title.buffer, left: 10, top: H - title.height - 4 });
+    // Reaction: "<STREAMER> REACTION". Con una sola faccia (a destra) la scritta sta in basso a
+    // sinistra sopra un'ombra che copre il testo della copertina originale; con due facce (negli
+    // angoli) sta al centro fra le due.
+    const two = placed.length >= 2;
+    if (!two) layers.push({ input: cornerShade(), left: 0, top: 0 });
+    const title = renderTitle(params.title.toUpperCase(), params.theme, two ? 640 : 700);
+    layers.push({ input: title.buffer, left: two ? Math.round((W - title.width) / 2) : 10, top: H - title.height - 4 });
   } else {
     const title = renderTitle(params.title.toUpperCase(), params.theme, 1120);
     layers.push({ input: title.buffer, left: Math.round((W - title.width) / 2), top: H - title.height - 4 });
@@ -80,101 +88,182 @@ export async function composeCover(params: ComposeCoverParams): Promise<void> {
 }
 
 interface FaceSlot {
-  /** Centro orizzontale, frazione della larghezza. */
+  /** "left"/"right": angolo, la persona tocca quel bordo. "free": centrata su centerX. */
+  anchor: "left" | "right" | "free";
   centerX: number;
-  /** Quanto il fondo del busto esce sotto il canvas (frazione dell'altezza). */
-  sink: number;
-  /** Altezza massima e larghezza massima, frazioni del canvas (vince la più stretta). */
+  /** Altezza e larghezza massime, frazioni del canvas (vince la più stretta). */
   height: number;
   maxWidth: number;
-  /** Ordine di disegno: più alto = più davanti. Chi sta dietro spunta dalla spalla di chi sta davanti. */
+  /** Ordine di disegno: più alto = più davanti. */
   z: number;
+  /** Quanto scende sotto il bordo basso, frazione dell'altezza del canvas. */
+  sink?: number;
 }
 
 /**
- * Disposizione a strati presa dalle copertine studiate: i busti salgono dal fondo, quelli davanti
- * più grandi ai lati, quelli dietro un po' più piccoli e parzialmente coperti dalla spalla di chi
- * sta davanti. La scritta in basso copre i petti.
+ * Posti delle facce. Regole di simo: i busti partono ESATTAMENTE dal bordo basso; chi è tagliato su
+ * un lato va in un angolo col lato tagliato contro il bordo (effetto "entra da fuori"), specchiato
+ * se serve; nel mezzo della copertina non devono MAI vedersi tagli. Il protagonista (il primo) va
+ * nell'angolo sinistro nei giochi e in quello destro nelle reaction (a sinistra resta il video
+ * reagito).
  */
-function faceSlots(kind: "reaction" | "game", n: number): FaceSlot[] {
+function slotsFor(kind: "reaction" | "game", n: number): FaceSlot[] {
+  const left: FaceSlot = { anchor: "left", centerX: 0, height: 0.94, maxWidth: 0.46, z: 3 };
+  const right: FaceSlot = { anchor: "right", centerX: 1, height: 0.94, maxWidth: 0.46, z: 3 };
   if (kind === "reaction") {
-    if (n <= 1) return [{ centerX: 0.8, sink: 0.04, height: 0.95, maxWidth: 0.48, z: 2 }];
+    if (n <= 1) return [{ ...right, height: 1, maxWidth: 0.5, sink: 0.08 }];
     return [
-      { centerX: 0.83, sink: 0.04, height: 0.93, maxWidth: 0.42, z: 2 },
-      { centerX: 0.6, sink: 0.04, height: 0.8, maxWidth: 0.34, z: 1 },
-    ].slice(0, n);
+      { ...right, height: 1, maxWidth: 0.46, sink: 0.1 },
+      { ...left, height: 0.92, maxWidth: 0.42, z: 2, sink: 0.03 },
+    ];
   }
-  const layouts: Record<number, FaceSlot[]> = {
-    1: [{ centerX: 0.74, sink: 0.04, height: 0.95, maxWidth: 0.5, z: 2 }],
-    2: [
-      { centerX: 0.26, sink: 0.04, height: 0.94, maxWidth: 0.46, z: 2 },
-      { centerX: 0.72, sink: 0.04, height: 0.88, maxWidth: 0.44, z: 1 },
-    ],
-    3: [
-      { centerX: 0.2, sink: 0.04, height: 0.92, maxWidth: 0.4, z: 2 },
-      { centerX: 0.5, sink: 0.06, height: 0.78, maxWidth: 0.34, z: 1 },
-      { centerX: 0.8, sink: 0.04, height: 0.92, maxWidth: 0.4, z: 2 },
-    ],
-    4: [
-      { centerX: 0.17, sink: 0.04, height: 0.9, maxWidth: 0.34, z: 3 },
-      { centerX: 0.39, sink: 0.06, height: 0.76, maxWidth: 0.3, z: 1 },
-      { centerX: 0.61, sink: 0.06, height: 0.76, maxWidth: 0.3, z: 1 },
-      { centerX: 0.83, sink: 0.04, height: 0.9, maxWidth: 0.34, z: 3 },
-    ],
-  };
-  return layouts[Math.min(4, Math.max(1, n))]!;
+  if (n <= 1) return [{ ...right, height: 0.97, maxWidth: 0.52 }];
+  if (n === 2) return [left, right];
+  if (n === 3) return [left, right, { anchor: "free", centerX: 0.5, height: 0.8, maxWidth: 0.34, z: 1 }];
+  return [
+    left,
+    right,
+    { anchor: "free", centerX: 0.38, height: 0.78, maxWidth: 0.28, z: 1 },
+    { anchor: "free", centerX: 0.62, height: 0.78, maxWidth: 0.28, z: 1 },
+  ];
 }
 
-/** Faccia ridimensionata con contorno bianco spesso e ombra morbida, come nelle copertine dei grafici. */
+interface Cutout {
+  png: Buffer;
+  shape: CutoutShape;
+}
+
 /**
- * Faccia pronta per la copertina: pulizia della trasparenza, sfumatura del fondo, color correction
- * (più contrasto, colore e nitidezza, tono tirato verso quello dello sfondo così non sembra
- * incollata), contorno bianco, bagliore del colore della scritta e ombra.
+ * Persona ritagliata stretta (via le righe e colonne vuote attorno), così il fondo del busto è il
+ * fondo dell'immagine e in copertina parte ESATTAMENTE dal bordo basso.
+ */
+async function tightCutout(pngPath: string): Promise<Cutout> {
+  const source = await fs.readFile(pngPath);
+  const shape = await measureCutout(source);
+  const png = await sharp(source).ensureAlpha().extract(shape.box).png().toBuffer();
+  return { png, shape };
+}
+
+interface PlacedFace {
+  cutout: Cutout;
+  slot: FaceSlot;
+  mirror: boolean;
+  /** Lato (già specchiato) che resterebbe tagliato in mezzo alla copertina: si sfuma. */
+  fade: "left" | "right" | null;
+}
+
+/**
+ * Assegna le facce ai posti (vedi slotsFor). Negli angoli prima chi è tagliato di lato, col taglio
+ * contro il bordo (specchiato se serve); in mezzo solo facce SENZA tagli laterali, altrimenti quel
+ * posto resta vuoto. Chi è tagliato su entrambi i lati va comunque in un angolo (il taglio più lungo
+ * contro il bordo) e il lato interno si sfuma: pickFaces le evita quando ci sono alternative.
+ */
+async function placeFaces(kind: "reaction" | "game", paths: string[]): Promise<PlacedFace[]> {
+  const faces = (await Promise.all(paths.map(async (path, order) => ({ order, cutout: await tightCutout(path) })))).filter(
+    (f) => !f.cutout.shape.cuts.top,
+  );
+  const slots = slotsFor(kind, faces.length);
+  const cornerSlots = slots.filter((s) => s.anchor !== "free");
+  const isCut = (f: (typeof faces)[number]) => f.cutout.shape.cuts.left || f.cutout.shape.cuts.right;
+  // Nelle reaction il protagonista prende sempre il primo angolo; nei giochi gli angoli vanno prima
+  // a chi è tagliato (in mezzo non potrebbe stare), nell'ordine del titolo.
+  const cornerQueue = kind === "reaction" ? [...faces] : [...faces.filter(isCut), ...faces.filter((f) => !isCut(f))];
+  const placed: PlacedFace[] = [];
+  const used = new Set<number>();
+  for (const slot of cornerSlots) {
+    const f = cornerQueue.find((c) => !used.has(c.order));
+    if (!f) break;
+    used.add(f.order);
+    const { leftCover, rightCover } = f.cutout.shape;
+    const { left, right } = f.cutout.shape.cuts;
+    // Il lato tagliato (il più lungo se sono due) deve guardare il bordo dell'angolo.
+    const cutSide = left && right ? (leftCover >= rightCover ? "left" : "right") : left ? "left" : right ? "right" : null;
+    const mirror = cutSide !== null && cutSide !== slot.anchor;
+    const fade = left && right ? (slot.anchor === "left" ? "right" : "left") : null;
+    placed.push({ cutout: f.cutout, slot, mirror, fade });
+  }
+  for (const slot of slots.filter((s) => s.anchor === "free")) {
+    const f = faces.find((c) => !used.has(c.order) && !isCut(c));
+    if (!f) continue;
+    used.add(f.order);
+    placed.push({ cutout: f.cutout, slot, mirror: false, fade: null });
+  }
+  return placed;
+}
+
+/**
+ * Faccia pronta per la copertina: pulizia della trasparenza, color correction (più contrasto,
+ * colore e nitidezza, tono tirato verso quello dello sfondo così non sembra incollata), contorno
+ * bianco, bagliore del colore della scritta e ombra. Nessuna sfumatura sul fondo: il busto tocca il
+ * bordo della copertina. Restituisce anche il margine trasparente aggiunto attorno (pad), che in
+ * copertina va messo fuori dal canvas.
  */
 async function styledFace(
-  pngPath: string,
+  png: Buffer,
   maxHeight: number,
   maxWidth: number,
+  mirror: boolean,
+  fade: "left" | "right" | null,
   look: { bgTone: { r: number; g: number; b: number }; glow: string },
-): Promise<{ buffer: Buffer; width: number; height: number }> {
-  const resized = await sharp(pngPath).resize({ height: maxHeight, width: maxWidth, fit: "inside" }).ensureAlpha().png().toBuffer();
-  const { width: fw, height: fh } = await sharp(resized).metadata();
-  // Trasparenza pulita: lo scontorno lascia aloni quasi trasparenti (residui dello sfondo della
-  // copertina di partenza) che il contorno bianco trasformava in chiazze. Si tiene solo il pieno,
-  // con un filo di morbidezza sul bordo, e si sfuma il fondo così il taglio dritto delle spalle
-  // sparisce, come fanno i grafici.
-  const fade = Buffer.from(
-    `<svg width="${fw}" height="${fh}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="84%" stop-color="#fff"/><stop offset="100%" stop-color="#000"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#f)"/></svg>`,
-  );
-  const fadeMask = await sharp(fade).greyscale().raw().toBuffer();
-  const solid = await sharp(resized).extractChannel(3).threshold(120).blur(1.2).raw().toBuffer();
-  const cleanAlpha = Buffer.alloc(solid.length);
-  for (let i = 0; i < solid.length; i++) cleanAlpha[i] = Math.round((solid[i]! * fadeMask[i * (fadeMask.length / solid.length)]!) / 255);
+): Promise<{ buffer: Buffer; width: number; height: number; pad: number }> {
+  let base = sharp(png).resize({ height: maxHeight, width: maxWidth, fit: "inside" }).ensureAlpha();
+  if (mirror) base = base.flop();
+  // Tutto in raw con i canali contati a mano: passando per PNG intermedi sharp a volte teneva
+  // l'alpha della color correction e la trasparenza finiva sul nero di barba e capelli.
+  const { data: rgba, info } = await base.raw().toBuffer({ resolveWithObject: true });
+  const fw = info.width;
+  const fh = info.height;
+  const n = fw * fh;
+  const rgbRaw = Buffer.alloc(n * 3);
+  const alphaRaw = Buffer.alloc(n);
+  for (let i = 0; i < n; i++) {
+    rgbRaw[i * 3] = rgba[i * 4]!;
+    rgbRaw[i * 3 + 1] = rgba[i * 4 + 1]!;
+    rgbRaw[i * 3 + 2] = rgba[i * 4 + 2]!;
+    alphaRaw[i] = rgba[i * 4 + 3]!;
+  }
+  // Trasparenza pulita: via gli aloni quasi trasparenti (residui dello sfondo di partenza) che il
+  // contorno bianco trasformava in chiazze; resta il pieno con un filo di morbidezza sul bordo.
+  const cleanAlpha = await sharp(alphaRaw, { raw: { width: fw, height: fh, channels: 1 } })
+    .threshold(120)
+    .blur(1.2)
+    .extractChannel(0)
+    .raw()
+    .toBuffer();
   // Color correction: più contrasto e colore, nitidezza, poi un velo del tono dello sfondo in
   // "luce morbida" (12%) che lega la faccia alla scena senza cambiarle la pelle.
-  const graded = await sharp(resized).removeAlpha().modulate({ saturation: 1.18, brightness: 1.03 }).linear(1.1, -8).sharpen({ sigma: 1.1 }).toBuffer();
-  const toneLayer = await sharp({ create: { width: fw!, height: fh!, channels: 4, background: { ...look.bgTone, alpha: 0.12 } } }).png().toBuffer();
-  const rgb = await sharp(graded).composite([{ input: toneLayer, blend: "soft-light" }]).removeAlpha().toBuffer();
-  const face = await sharp(rgb)
-    .joinChannel(await sharp(cleanAlpha, { raw: { width: fw!, height: fh!, channels: 1 } }).png().toBuffer())
+  const graded = await sharp(rgbRaw, { raw: { width: fw, height: fh, channels: 3 } })
+    .modulate({ saturation: 1.18, brightness: 1.03 })
+    .linear(1.1, -8)
+    .sharpen({ sigma: 1.1 })
     .png()
     .toBuffer();
-  const targetHeight = fh!;
-  const meta = { width: fw, height: fh };
-  const stroke = Math.max(6, Math.round(targetHeight * 0.014));
+  const toneLayer = await sharp({ create: { width: fw, height: fh, channels: 4, background: { ...look.bgTone, alpha: 0.12 } } }).png().toBuffer();
+  const toned = await sharp(graded).composite([{ input: toneLayer, blend: "soft-light" }]).png().toBuffer();
+  const { data: tonedRaw, info: tonedInfo } = await sharp(toned).raw().toBuffer({ resolveWithObject: true });
+  const faceRaw = Buffer.alloc(n * 4);
+  for (let i = 0; i < n; i++) {
+    faceRaw[i * 4] = tonedRaw[i * tonedInfo.channels]!;
+    faceRaw[i * 4 + 1] = tonedRaw[i * tonedInfo.channels + 1]!;
+    faceRaw[i * 4 + 2] = tonedRaw[i * tonedInfo.channels + 2]!;
+    faceRaw[i * 4 + 3] = cleanAlpha[i]!;
+  }
+  const stroke = Math.max(6, Math.round(fh * 0.014));
   const pad = stroke * 3 + 16;
-  const w = meta.width! + pad * 2;
-  const h = meta.height! + pad * 2;
-  const padded = await sharp(face).extend({ top: pad, bottom: pad, left: pad, right: pad, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+  const w = fw + pad * 2;
+  const h = fh + pad * 2;
+  const padded = await sharp(faceRaw, { raw: { width: fw, height: fh, channels: 4 } })
+    .extend({ top: pad, bottom: pad, left: pad, right: pad, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer();
 
-  const alpha = await sharp(padded).extractChannel(3).toBuffer();
-  // Soglia alta: dove la faccia sfuma (fondo) il contorno non deve comparire, altrimenti resta un velo bianco.
-  const outline = await sharp(alpha).blur(stroke * 0.8).threshold(90).toBuffer();
+  const alpha = await sharp(padded).extractChannel(3).png().toBuffer();
+  const outline = await sharp(alpha).blur(stroke * 0.8).threshold(90).extractChannel(0).png().toBuffer();
   const white = await sharp({ create: { width: w, height: h, channels: 3, background: "#ffffff" } }).joinChannel(outline).png().toBuffer();
-  const shadowAlpha = await sharp(outline).blur(12).linear(0.55, 0).toBuffer();
+  const shadowAlpha = await sharp(outline).blur(12).linear(0.55, 0).extractChannel(0).png().toBuffer();
   const shadow = await sharp({ create: { width: w, height: h, channels: 3, background: "#000000" } }).joinChannel(shadowAlpha).png().toBuffer();
   // Bagliore del colore della scritta attorno alla persona, come nelle copertine dei grafici.
-  const glowAlpha = await sharp(outline).blur(Math.max(8, stroke * 2.2)).linear(0.7, 0).toBuffer();
+  const glowAlpha = await sharp(outline).blur(Math.max(8, stroke * 2.2)).linear(0.7, 0).extractChannel(0).png().toBuffer();
   const glow = await sharp({ create: { width: w, height: h, channels: 3, background: look.glow } }).joinChannel(glowAlpha).png().toBuffer();
 
   const buffer = await sharp({ create: { width: w, height: h, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
@@ -186,7 +275,18 @@ async function styledFace(
     ])
     .png()
     .toBuffer();
-  return { buffer, width: w, height: h };
+  if (!fade) return { buffer, width: w, height: h, pad };
+  // Lato tagliato che resterebbe in mezzo alla copertina: sfuma tutto (persona, contorno, ombra e
+  // bagliore) nell'ultimo 22% della larghezza, così non resta nessuna riga dura.
+  const { data: out } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
+  const span = Math.round(fw * 0.22);
+  for (let x = 0; x < w; x++) {
+    const d = fade === "left" ? x - pad : pad + fw - 1 - x;
+    const k = d <= 0 ? 0 : d >= span ? 1 : d / span;
+    if (k === 1) continue;
+    for (let y = 0; y < h; y++) out[(y * w + x) * 4 + 3] = Math.round(out[(y * w + x) * 4 + 3]! * k * k);
+  }
+  return { buffer: await sharp(out, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer(), width: w, height: h, pad };
 }
 
 /** sharp rifiuta sovrapposizioni che escono dal canvas: si ritaglia la parte fuori. */

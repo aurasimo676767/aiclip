@@ -7,7 +7,7 @@ import { cutoutPerson } from "../render/birefnet.js";
 import { detectFaces } from "../face-tracking/onnx-face-detector.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
-import { readFaceLibrary, writeFaceLibrary, faceLibraryRoot, isBustCutout, type LibraryFace } from "../lib/face-library.js";
+import { readFaceLibrary, writeFaceLibrary, faceLibraryRoot, isBustCutout, measureCutout, type LibraryFace } from "../lib/face-library.js";
 import { rateFaceImages } from "../providers/ai/rate-faces.js";
 import { env } from "../env.js";
 
@@ -93,6 +93,7 @@ for (const photo of photos) {
     label,
     status: "labeled",
     bust: await isBustCutout(cut),
+    bothSidesCut: await measureCutout(cut).then((s) => s.cuts.left && s.cuts.right),
     sourceFile: path.basename(photo),
   };
   library.faces.push(face);
