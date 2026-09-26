@@ -97,6 +97,8 @@ export async function processPublishJob(job: YoutubePublishJobRow): Promise<void
           videoId: result.videoId,
           imagePath: coverPath,
         });
+        // Il riquadro "Copertina" del sito legge questo campo: senza, restava "verrà messa appena lo pubblichi".
+        await supabase.from("thumbnail_jobs").update({ youtube_thumbnail_set: true }).eq("clip_id", clip.id).eq("apply_requested", true);
         logger.info("Copertina approvata impostata sul video pubblicato", { jobId: job.id, clipId: clip.id });
       } catch (err) {
         logger.warn("Copertina approvata non impostata su YouTube", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
