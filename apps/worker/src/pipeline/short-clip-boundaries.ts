@@ -231,3 +231,55 @@ export async function alignReactionStarts(
   }
   return out;
 }
+
+/**
+ * Respiro vero prima del gancio, cercato nell'AUDIO. Whisper spesso attacca le parole una
+ * all'altra (la parola prima finisce esattamente dove inizia la prima del gancio: misurato sui
+ * primi Shorts dopo la correzione, 2026-09-26), quindi dai soli tempi del transcript non resta
+ * margine e lo Short parte ancora a scatto. Qui si ascolta il mezzo secondo prima: si parte dal
+ * punto più silenzioso (pausa, respiro), o se il parlato è continuo 0,15 s prima.
+ */
+export async function addBreathBeforeHook(
+  clips: RankedClip[],
+  segments: TranscriptSegment[],
+  videoPath: string,
+  readPcm: (path: string, absStart: number, duration: number) => Promise<Buffer>,
+): Promise<RankedClip[]> {
+  const words = segments.flatMap((s) => s.words ?? []).sort((a, b) => a.start - b.start);
+  const out: RankedClip[] = [];
+  for (const clip of clips) {
+    const first = words.find((w) => w.start >= clip.start - 0.05);
+    if (!first || first.start - clip.start >= 0.15) {
+      out.push(clip);
+      continue;
+    }
+    const t = first.start;
+    const from = Math.max(0, t - 0.6);
+    let start = Math.max(0, t - 0.15);
+    try {
+      const pcm = await readPcm(videoPath, from, t + 0.05 - from);
+      const rate = 16000;
+      const frame = Math.round(rate * 0.02);
+      const levels: Array<{ at: number; rms: number }> = [];
+      for (let i = 0; i + frame <= pcm.length / 2; i += frame) {
+        let sum = 0;
+        for (let k = 0; k < frame; k++) {
+          const v = pcm.readInt16LE((i + k) * 2) / 32768;
+          sum += v * v;
+        }
+        levels.push({ at: from + i / rate, rms: Math.sqrt(sum / frame) });
+      }
+      const candidates = levels.filter((l) => l.at >= t - 0.5 && l.at <= t - 0.05);
+      const sorted = [...levels].map((l) => l.rms).sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+      const quietest = candidates.sort((a, b) => a.rms - b.rms)[0];
+      // Una pausa vera è almeno la metà del livello tipico della finestra (circa -6 dB).
+      if (quietest && quietest.rms < median * 0.5) start = quietest.at;
+    } catch {
+      // Audio non letto: resta il piccolo margine fisso.
+    }
+    start = Math.min(start, clip.start);
+    out.push({ ...clip, start, duration: clip.end - start });
+  }
+  return out;
+}

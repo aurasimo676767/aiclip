@@ -36,8 +36,9 @@ import { planLongformVideos, fmt } from "../providers/ai/longform-plan.js";
 import { refineVideoBoundaries } from "../providers/ai/longform-boundaries.js";
 import { describePlannedVideos } from "../providers/ai/longform-metadata.js";
 import { fetchTwitchChapters } from "../lib/twitch-chapters.js";
-import { sanitizeShortClips, alignReactionStarts } from "./short-clip-boundaries.js";
+import { sanitizeShortClips, alignReactionStarts, addBreathBeforeHook } from "./short-clip-boundaries.js";
 import { detectSceneCuts } from "../face-tracking/scene-detect.js";
+import { runFfmpegBinary } from "../lib/ffmpeg.js";
 import { detectLoudMoments } from "./vocal-energy.js";
 import { updateVideoStatus } from "../queue/video-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
@@ -432,7 +433,8 @@ async function buildShortClipsToInsert(
 
   // Correzione deterministica dei confini PRIMA di tagliare ai primi N: senza, le clip scartate
   // (troppo corte, sovrapposte) avrebbero comunque occupato uno slot dei suggerimenti.
-  const sanitized = await alignReactionStarts(sanitizeShortClips(rankedClips, segments, video.id), segments, localVideoPath, video.id, detectSceneCuts);
+  const withBreath = await addBreathBeforeHook(sanitizeShortClips(rankedClips, segments, video.id), segments, localVideoPath, readPcmWindow);
+  const sanitized = await alignReactionStarts(withBreath, segments, localVideoPath, video.id, detectSceneCuts);
   return sanitized
     .slice(0, MAX_SUGGESTED_CLIPS)
     .map((clip) => enforceHardDurationCap(clip, video.id))
@@ -631,4 +633,9 @@ function buildLongformInsertRow(video: VideoRow, clip: RankedLongformClip): Clip
     badges: clip.badges,
     format: "longform",
   });
+}
+
+/** Audio mono 16 kHz PCM di un tratto del video (per cercare il respiro prima del gancio). */
+function readPcmWindow(videoPath: string, absStart: number, duration: number): Promise<Buffer> {
+  return runFfmpegBinary(["-ss", absStart.toFixed(3), "-i", videoPath, "-t", duration.toFixed(3), "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1"]);
 }

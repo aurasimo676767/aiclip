@@ -88,7 +88,7 @@ while (Date.now() - started < MAX_RUN_MS) {
   if (clips && clips.length > 0 && !clipsAnnounced) {
     const list = clips
       .slice(0, 15)
-      .map((c, i) => `${i + 1}. ${c.title} (${Math.round(c.duration / 60)} min)`)
+      .map((c, i) => `${i + 1}. ${c.title} (${c.duration < 90 ? `${Math.round(c.duration)} s` : `${Math.round(c.duration / 60)} min`})`)
       .join("\n");
     await say(`Trovati ${clips.length} video:\n${list}${clips.length > 15 ? "\n…" : ""}`);
     clipsAnnounced = true;
