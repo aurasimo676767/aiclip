@@ -82,6 +82,8 @@ export interface CutoutShape {
   rightCover: number;
   /** Riga più bassa del riquadro stretto coperta dalla persona, frazione della larghezza. */
   baseCover: number;
+  /** Larghezza stimata della testa in pixel (vedi measureCutout): decide quanto ingrandire la persona. */
+  headWidth: number;
 }
 
 /**
@@ -123,6 +125,24 @@ export async function measureCutout(png: Buffer): Promise<CutoutShape> {
   const rightCover = band(colCover, [x1, x1 - 1, x1 - 2, x1 - 3].filter((x) => x >= x0));
   const topCover = band(rowCover, [y0, y0 + 1, y0 + 2, y0 + 3].filter((y) => y <= y1));
   const baseCover = rowCover(y1);
+  // Testa: scendendo dall'alto, la prima riga che sta a circa metà testa. Una testa è alta ~1,3
+  // volte la sua larghezza, quindi metà testa è a ~0,6 larghezze dalla cima; lì la sagoma è larga
+  // quanto la testa (cuffie comprese), prima che inizino le spalle.
+  let headWidth = cw;
+  for (let y = y0; y <= y1; y++) {
+    let l = -1;
+    let r = -1;
+    for (let x = x0; x <= x1; x++) {
+      if (data[y * w + x]! <= 128) continue;
+      if (l < 0) l = x;
+      r = x;
+    }
+    const rowWidth = l < 0 ? 0 : r - l + 1;
+    if (rowWidth > 0 && y - y0 >= rowWidth * 0.6) {
+      headWidth = rowWidth;
+      break;
+    }
+  }
   // 8% dell'altezza: una spalla o una felpa che finisce contro il bordo. La cima della testa dopo il
   // ritaglio stretto copre pochi pixel; una testa mozzata copre un quarto della larghezza e oltre.
   return {
@@ -131,5 +151,6 @@ export async function measureCutout(png: Buffer): Promise<CutoutShape> {
     leftCover,
     rightCover,
     baseCover,
+    headWidth,
   };
 }

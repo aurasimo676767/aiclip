@@ -15,22 +15,24 @@ import { measureCutout, type CutoutShape } from "../lib/face-library.js";
 const W = 1280;
 const H = 720;
 const FONTS_DIR = path.resolve(process.cwd(), "assets", "fonts");
-const TITLE_FONT = { file: "LuckiestGuy-Regular.ttf", family: "Luckiest Guy" };
+const TITLE_FONT = { file: "Anton-Regular.ttf", family: "Anton" };
 
 export interface CoverTheme {
   /** Sfumatura del riempimento della scritta, dall'alto in basso. */
   fillTop: string;
   fillBottom: string;
+  /** Colore della pennellata dietro l'ultima riga. */
+  brush: string;
 }
 
 export const COVER_THEMES: Record<string, CoverTheme> = {
-  giallo: { fillTop: "#fff27a", fillBottom: "#ffb800" },
-  bianco: { fillTop: "#ffffff", fillBottom: "#dfe6ee" },
-  rosso: { fillTop: "#ff6b5e", fillBottom: "#e0141f" },
-  verde: { fillTop: "#b6ff6b", fillBottom: "#2fc12f" },
-  azzurro: { fillTop: "#8ff3ff", fillBottom: "#1a9dff" },
-  rosa: { fillTop: "#ffb3e6", fillBottom: "#ff3fa4" },
-  arancio: { fillTop: "#ffd36b", fillBottom: "#ff6a00" },
+  giallo: { fillTop: "#fff200", fillBottom: "#ffae00", brush: "#e3141d" },
+  bianco: { fillTop: "#ffffff", fillBottom: "#dfe6ee", brush: "#e3141d" },
+  rosso: { fillTop: "#ff4b3e", fillBottom: "#d10f1a", brush: "#ffd400" },
+  verde: { fillTop: "#c8ff4a", fillBottom: "#35c21f", brush: "#161616" },
+  azzurro: { fillTop: "#7ff0ff", fillBottom: "#1a8dff", brush: "#e3141d" },
+  rosa: { fillTop: "#ffb3e6", fillBottom: "#ff2f9a", brush: "#161616" },
+  arancio: { fillTop: "#ffd000", fillBottom: "#ff6a00", brush: "#e3141d" },
 };
 
 export interface ComposeCoverParams {
@@ -58,14 +60,15 @@ export async function composeCover(params: ComposeCoverParams): Promise<void> {
   const placed = await placeFaces(params.kind, params.faces);
   // Chi sta dietro si disegna prima, così il protagonista resta davanti.
   for (const p of [...placed].sort((a, b) => a.slot.z - b.slot.z)) {
-    const face = await styledFace(p.cutout.png, Math.round(H * p.slot.height), Math.round(W * p.slot.maxWidth), p.mirror, p.fade, {
+    const size = faceSize(p.cutout.shape, p.slot);
+    const face = await styledFace(p.cutout.png, size.height, size.width + 1, p.mirror, p.fade, {
       bgTone,
       glow: params.theme.fillBottom,
     });
     // Il margine trasparente (contorno e bagliore) sta FUORI dal canvas: la persona tocca il bordo
-    // basso esattamente, e negli angoli tocca il bordo laterale col lato tagliato. "sink" la
-    // abbassa ancora: il fondo del busto esce dal canvas e la testa scende.
-    const top = H - face.height + face.pad + Math.round(H * (p.slot.sink ?? 0));
+    // basso (o ci passa sotto, se il busto è lungo), e negli angoli tocca il bordo laterale col
+    // lato tagliato.
+    const top = size.top - face.pad;
     const left =
       p.slot.anchor === "left" ? -face.pad : p.slot.anchor === "right" ? W - face.width + face.pad : Math.round(W * p.slot.centerX - face.width / 2);
     layers.push(...(await clampOverlay(face.buffer, face.width, face.height, left, top)));
@@ -77,11 +80,11 @@ export async function composeCover(params: ComposeCoverParams): Promise<void> {
     // angoli) sta al centro fra le due.
     const two = placed.length >= 2;
     if (!two) layers.push({ input: cornerShade(), left: 0, top: 0 });
-    const title = renderTitle(params.title.toUpperCase(), params.theme, two ? 640 : 700);
-    layers.push({ input: title.buffer, left: two ? Math.round((W - title.width) / 2) : 10, top: H - title.height - 4 });
+    const title = renderTitle(params.title.toUpperCase(), params.theme, two ? 900 : 700);
+    layers.push(...(await clampOverlay(title.buffer, title.width, title.height, two ? Math.round((W - title.width) / 2) : -30, H - title.height + 6)));
   } else {
-    const title = renderTitle(params.title.toUpperCase(), params.theme, 1120);
-    layers.push({ input: title.buffer, left: Math.round((W - title.width) / 2), top: H - title.height - 4 });
+    const title = renderTitle(params.title.toUpperCase(), params.theme, 1100);
+    layers.push(...(await clampOverlay(title.buffer, title.width, title.height, Math.round((W - title.width) / 2), H - title.height + 6)));
   }
 
   await sharp(background).composite(layers).jpeg({ quality: 92 }).toFile(params.outputPath);
@@ -91,13 +94,14 @@ interface FaceSlot {
   /** "left"/"right": angolo, la persona tocca quel bordo. "free": centrata su centerX. */
   anchor: "left" | "right" | "free";
   centerX: number;
-  /** Altezza e larghezza massime, frazioni del canvas (vince la più stretta). */
-  height: number;
+  /** Larghezza voluta della TESTA, frazione della larghezza del canvas: le facce devono essere enormi. */
+  head: number;
+  /** Dove sta la cima della testa, frazione dell'altezza (più alto = persona più in basso). */
+  headTop: number;
+  /** Larghezza massima della persona, frazione del canvas. */
   maxWidth: number;
   /** Ordine di disegno: più alto = più davanti. */
   z: number;
-  /** Quanto scende sotto il bordo basso, frazione dell'altezza del canvas. */
-  sink?: number;
 }
 
 /**
@@ -108,24 +112,37 @@ interface FaceSlot {
  * reagito).
  */
 function slotsFor(kind: "reaction" | "game", n: number): FaceSlot[] {
-  const left: FaceSlot = { anchor: "left", centerX: 0, height: 0.94, maxWidth: 0.46, z: 3 };
-  const right: FaceSlot = { anchor: "right", centerX: 1, height: 0.94, maxWidth: 0.46, z: 3 };
+  const left: FaceSlot = { anchor: "left", centerX: 0, head: 0.21, headTop: 0.05, maxWidth: 0.46, z: 3 };
+  const right: FaceSlot = { anchor: "right", centerX: 1, head: 0.21, headTop: 0.05, maxWidth: 0.46, z: 3 };
   if (kind === "reaction") {
-    if (n <= 1) return [{ ...right, height: 1, maxWidth: 0.5, sink: 0.08 }];
+    // Il protagonista davanti a destra e più in basso (simo: "blur andrebbe messo più in basso").
+    if (n <= 1) return [{ ...right, head: 0.24, headTop: 0.1, maxWidth: 0.5 }];
     return [
-      { ...right, height: 1, maxWidth: 0.46, sink: 0.1 },
-      { ...left, height: 0.92, maxWidth: 0.42, z: 2, sink: 0.03 },
+      { ...right, head: 0.22, headTop: 0.12 },
+      { ...left, head: 0.2, headTop: 0.06, maxWidth: 0.42, z: 2 },
     ];
   }
-  if (n <= 1) return [{ ...right, height: 0.97, maxWidth: 0.52 }];
+  if (n <= 1) return [{ ...right, head: 0.24, maxWidth: 0.52 }];
   if (n === 2) return [left, right];
-  if (n === 3) return [left, right, { anchor: "free", centerX: 0.5, height: 0.8, maxWidth: 0.34, z: 1 }];
-  return [
-    left,
-    right,
-    { anchor: "free", centerX: 0.38, height: 0.78, maxWidth: 0.28, z: 1 },
-    { anchor: "free", centerX: 0.62, height: 0.78, maxWidth: 0.28, z: 1 },
-  ];
+  const free = (centerX: number, maxWidth: number): FaceSlot => ({ anchor: "free", centerX, head: 0.15, headTop: 0.12, maxWidth, z: 1 });
+  if (n === 3) return [left, right, free(0.5, 0.34)];
+  return [left, right, free(0.38, 0.28), free(0.62, 0.28)];
+}
+
+/**
+ * Misura della persona in copertina: la testa larga quanto chiede il posto; se così il busto non
+ * arriva al bordo basso si ingrandisce finché ci arriva (i busti partono SEMPRE dal fondo); se
+ * diventa troppo larga si riduce e la testa scende. La cima della testa sta a headTop, a meno che
+ * il busto sia corto: allora appoggia sul fondo.
+ */
+function faceSize(shape: CutoutShape, slot: FaceSlot): { width: number; height: number; top: number } {
+  const { width: cw, height: ch } = shape.box;
+  let scale = (slot.head * W) / Math.max(1, shape.headWidth);
+  scale = Math.max(scale, (H * (1 - slot.headTop)) / ch);
+  scale = Math.min(scale, (slot.maxWidth * W) / cw);
+  const width = Math.round(cw * scale);
+  const height = Math.round(ch * scale);
+  return { width, height, top: Math.max(Math.round(H * slot.headTop), H - height) };
 }
 
 interface Cutout {
@@ -339,41 +356,117 @@ function splitLines(text: string): string[] {
   return best;
 }
 
+function resvgOptions() {
+  return { font: { fontFiles: [path.join(FONTS_DIR, TITLE_FONT.file)], loadSystemFonts: false, defaultFontFamily: TITLE_FONT.family } };
+}
+
 function renderSvg(svg: string): { buffer: Buffer; width: number; height: number } {
-  const resvg = new Resvg(svg, {
-    font: { fontFiles: [path.join(FONTS_DIR, TITLE_FONT.file)], loadSystemFonts: false, defaultFontFamily: TITLE_FONT.family },
-  });
+  const resvg = new Resvg(svg, resvgOptions());
   const img = resvg.render();
   return { buffer: img.asPng(), width: img.width, height: img.height };
 }
 
+/** Numeri pseudo-casuali ripetibili (stessa scritta = stessa pennellata). */
+function seeded(text: string): () => number {
+  let s = 2166136261;
+  for (const c of text) s = Math.imul(s ^ c.charCodeAt(0), 16777619);
+  return () => {
+    s = Math.imul(s ^ (s >>> 15), 2246822507);
+    s = Math.imul(s ^ (s >>> 13), 3266489909);
+    return ((s ^= s >>> 16) >>> 0) / 4294967296;
+  };
+}
+
 /**
- * Scritta del titolo: riempimento a sfumatura, bordo nero spesso, blocco "3D" scuro sotto (tante
- * copie scalate verso il basso), leggera rotazione. La misura si adatta alla riga più lunga.
+ * Pennellata dietro la scritta: una banda dai bordi sfrangiati, più lunga del testo, con qualche
+ * striscia sottile che scappa ai lati (come le copertine che simo ha mandato come modello).
+ */
+function brushPath(x0: number, x1: number, cy: number, h: number, rand: () => number): string {
+  const step = 18;
+  const top: string[] = [];
+  const bottom: string[] = [];
+  for (let x = x0; x <= x1; x += step) {
+    // Più stretta verso le punte, come un colpo di pennello.
+    const t = (x - x0) / (x1 - x0);
+    const taper = Math.min(1, Math.min(t, 1 - t) * 6);
+    const half = (h / 2) * (0.35 + 0.65 * taper);
+    top.push(`${x.toFixed(1)},${(cy - half + (rand() - 0.5) * h * 0.18).toFixed(1)}`);
+    bottom.unshift(`${x.toFixed(1)},${(cy + half + (rand() - 0.5) * h * 0.18).toFixed(1)}`);
+  }
+  let d = `M${top.join(" L")} L${bottom.join(" L")} Z`;
+  for (let i = 0; i < 5; i++) {
+    const y = cy + (rand() - 0.5) * h * 0.9;
+    const th = h * (0.04 + rand() * 0.06);
+    const left = rand() < 0.5;
+    const len = (x1 - x0) * (0.12 + rand() * 0.18);
+    const sx = left ? x0 - len * 0.35 : x1 + len * 0.35;
+    const ex = left ? sx + len : sx - len;
+    d += ` M${sx.toFixed(1)},${y.toFixed(1)} L${ex.toFixed(1)},${(y - th).toFixed(1)} L${ex.toFixed(1)},${(y + th).toFixed(1)} Z`;
+  }
+  return d;
+}
+
+/**
+ * Scritta del titolo, nello stile del modello di simo ("DOPPIAGGIO DROGHEGGIANTE"): Anton
+ * condensato e inclinato, prima riga bianca e l'ultima col colore del tema in sfumatura, contorno
+ * nero spesso, ombra piena in basso a destra e una pennellata dietro. Sta DAVANTI alle facce.
+ * La misura si adatta: si disegna, si misura l'ingombro vero e si riscala.
  */
 function renderTitle(text: string, theme: CoverTheme, maxWidth: number): { buffer: Buffer; width: number; height: number } {
   const lines = splitLines(text);
+  const draw = (fontSize: number, brushSpan: { x: number; width: number } | null) => {
+    const lineHeight = fontSize * 0.9;
+    const stroke = Math.round(fontSize * 0.1);
+    const shadow = Math.round(fontSize * 0.06);
+    const margin = Math.round(fontSize * 0.6);
+    const width = maxWidth + margin * 2;
+    const height = Math.round(lineHeight * lines.length + fontSize * 0.35 + margin);
+    const baseline = (i: number) => margin * 0.5 + fontSize * 0.92 + i * lineHeight;
+    const fillFor = (i: number) => (lines.length > 1 && i < lines.length - 1 ? "url(#w)" : "url(#g)");
+    const texts = (fill: (i: number) => string, dx: number, dy: number, strokeWidth: number) =>
+      lines
+        .map(
+          (l, i) =>
+            `<text x="${width / 2 + dx}" y="${baseline(i) + dy}" text-anchor="middle" font-family="${TITLE_FONT.family}" font-size="${fontSize}" fill="${fill(i)}" stroke="#000" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(l)}</text>`,
+        )
+        .join("");
+    const rand = seeded(text);
+    // Pennellata a cavallo fra le ultime due righe, poco più larga del testo.
+    const brushY = baseline(lines.length - 1) - fontSize * (lines.length > 1 ? 0.78 : 0.4);
+    const bx = brushSpan ? brushSpan.x - brushSpan.width * 0.13 : 0;
+    const bw = brushSpan ? brushSpan.width * 1.26 : 0;
+    const brush = brushPath(bx, bx + bw, brushY, fontSize * 0.9, rand);
+    const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="15%" stop-color="${theme.fillTop}"/><stop offset="100%" stop-color="${theme.fillBottom}"/></linearGradient>
+        <linearGradient id="w" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#e9e9ee"/></linearGradient>
+      </defs>
+      <g transform="rotate(-2 ${width / 2} ${height / 2})">
+        ${brushSpan ? `<path d="${brush}" fill="${theme.brush}"/>` : ""}
+        <g transform="translate(${width / 2} 0) skewX(-7) scale(1.1 1) translate(${-width / 2} 0)">
+          ${texts(() => "#000", shadow, shadow, stroke)}
+          ${texts(fillFor, 0, 0, stroke)}
+        </g>
+      </g>
+    </svg>`;
+    return svg;
+  };
+  // Prima stima (Anton: circa 0,44 em, 0,48 allargato per lettera maiuscola), poi si corregge sull'ingombro vero.
   const longest = Math.max(...lines.map((l) => l.length));
-  // Luckiest Guy: circa 0.62 em per carattere in maiuscolo.
-  const fontSize = Math.min(150, Math.floor(maxWidth / (longest * 0.62)), lines.length === 1 ? 170 : 130);
-  const lineHeight = fontSize * 0.98;
-  const depth = Math.round(fontSize * 0.07);
-  const stroke = Math.round(fontSize * 0.13);
-  const width = maxWidth + stroke * 2;
-  const height = Math.round(lineHeight * lines.length + depth + stroke * 2 + fontSize * 0.15);
-
-  const texts = (fill: string, dy: number, strokeColor: string, strokeWidth: number) =>
-    lines
-      .map(
-        (l, i) =>
-          `<text x="${width / 2}" y="${stroke + fontSize * 0.86 + i * lineHeight + dy}" text-anchor="middle" font-family="${TITLE_FONT.family}" font-size="${fontSize}" fill="${fill}" stroke="${strokeColor}" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(l)}</text>`,
-      )
-      .join("");
-
-  const extrude = Array.from({ length: depth }, (_, k) => texts("#000", depth - k, "#000", stroke)).join("");
-  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${theme.fillTop}"/><stop offset="100%" stop-color="${theme.fillBottom}"/></linearGradient></defs>
-    <g transform="rotate(-3 ${width / 2} ${height / 2})">${extrude}${texts("url(#g)", 0, "#000", stroke)}</g>
-  </svg>`;
-  return renderSvg(svg);
+  const cap = lines.length === 1 ? 180 : 150;
+  let fontSize = Math.min(cap, Math.floor(maxWidth / (longest * 0.48)));
+  let span = { x: 0, width: maxWidth };
+  for (let i = 0; i < 4; i++) {
+    // Si misura il solo testo: la pennellata sborda apposta.
+    const bbox = new Resvg(draw(fontSize, null), resvgOptions()).getBBox();
+    const textWidth = bbox ? bbox.width : maxWidth;
+    span = { x: bbox ? bbox.x : 0, width: textWidth };
+    if (Math.abs(textWidth - maxWidth) < maxWidth * 0.04) break;
+    const next = Math.min(cap, Math.floor((fontSize * maxWidth) / textWidth));
+    if (next === fontSize) break;
+    fontSize = next;
+  }
+  const bbox = new Resvg(draw(fontSize, null), resvgOptions()).getBBox();
+  if (bbox) span = { x: bbox.x, width: bbox.width };
+  return renderSvg(draw(fontSize, span));
 }
