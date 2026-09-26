@@ -20,6 +20,16 @@ const MAX_INTERNAL_GAP_SECONDS = 2.5;
 const MAX_OVERLAP_RATIO = 0.3;
 
 /**
+ * Respiro prima della prima parola del gancio. Misurato il 2026-09-26 sugli ultimi 30 Shorts: TUTTI
+ * partivano a 0,00 s dalla prima parola (inizio del segmento Whisper), e Whisper segna spesso la
+ * parola un filo in ritardo, quindi l'attacco si perdeva ("parte a scatto", simo). simo vuole
+ * "mezzo secondo MASSIMO prima" della frase che aggancia.
+ */
+const HOOK_LEAD_SECONDS = 0.4;
+
+const normWord = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+
+/**
  * Rete di sicurezza lato codice sui confini delle clip Shorts: il prompt di ranking.ts chiede già
  * all'AI di partire sul gancio e chiudere sul payoff, ma un prompt può essere disatteso e in
  * pratica lo è stato (clip che partono a metà frase, che contengono buchi di 5-8 secondi in cui
@@ -72,9 +82,29 @@ function fixBoundaries(clip: RankedClip, segments: TranscriptSegment[]): RankedC
   // all'inizio della prossima (niente tempo morto in apertura, che uccide la ritenzione).
   const startSegment = segments.find((s) => clip.start >= s.start && clip.start < s.end);
   const nextSegment = segments.find((s) => s.start >= clip.start);
-  const start = startSegment ? startSegment.start : nextSegment ? nextSegment.start : clip.start;
+  let start = startSegment ? startSegment.start : nextSegment ? nextSegment.start : clip.start;
 
-  const inside = segments.filter((s) => s.start >= start && s.start < clip.end);
+  // Precisione alla PAROLA: se le prime parole del gancio (campo hook, "le prime parole esatte con
+  // cui la clip si apre") si trovano vicino all'inizio scelto dall'AI, si parte da lì, anche a metà
+  // di un segmento Whisper: prima si tornava all'inizio del segmento, a volte secondi prima del
+  // gancio. Poi mezzo secondo scarso di respiro, senza prendere la coda della parola precedente.
+  const words = segments.flatMap((seg) => seg.words ?? []).sort((a, b) => a.start - b.start);
+  const hookWords = clip.hook.split(/\s+/).map(normWord).filter(Boolean).slice(0, 3);
+  let first = -1;
+  if (hookWords.length > 0) {
+    first = words.findIndex(
+      (w, i) => Math.abs(w.start - clip.start) <= 4 && hookWords.every((h, k) => normWord(words[i + k]?.word ?? "") === h),
+    );
+  }
+  if (first < 0) first = words.findIndex((w) => w.end > start + 0.05);
+  if (first >= 0) {
+    const previousEnd = first > 0 ? words[first - 1]!.end : 0;
+    start = Math.max(0, previousEnd + 0.02, words[first]!.start - HOOK_LEAD_SECONDS);
+    // Il respiro non deve superare il mezzo secondo né finire dentro la parola precedente.
+    start = Math.min(start, words[first]!.start);
+  }
+
+  const inside = segments.filter((s) => s.end > start + 0.05 && s.start < clip.end);
   if (inside.length === 0) return null;
 
   // Primo buco troppo lungo tra due frasi consecutive: la clip finisce lì, prima del tempo morto.
