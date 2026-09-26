@@ -17,6 +17,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  UserRound,
   type LucideIcon,
 } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -50,6 +51,7 @@ const NAV_GROUPS: Array<{ title?: string; items: NavItem[] }> = [
     title: "Strumenti",
     items: [
       { href: "/dashboard/whop", label: "Voice over", icon: Mic },
+      { href: "/dashboard/faces", label: "Facce", icon: UserRound },
       { href: "/dashboard/settings", label: "Opzioni", icon: Settings },
     ],
   },

@@ -48,3 +48,18 @@ export async function getPresignedDownloadUrl(storagePath: string, expiresInSeco
   const signingDate = new Date(Math.floor(Date.now() / windowMs) * windowMs);
   return getSignedUrl(client, command, { expiresIn: expiresInSeconds + SIGNING_WINDOW_SECONDS, signingDate });
 }
+
+/** Legge un file di testo da R2 (null se non esiste). Usato per piccoli indici JSON (libreria facce). */
+export async function readTextObject(storagePath: string): Promise<string | null> {
+  try {
+    const res = await getClient().send(new GetObjectCommand({ Bucket: getBucket(), Key: storagePath }));
+    return (await res.Body?.transformToString("utf-8")) ?? null;
+  } catch (error) {
+    if ((error as { name?: string }).name === "NoSuchKey") return null;
+    throw error;
+  }
+}
+
+export async function writeTextObject(storagePath: string, body: string, contentType = "application/json"): Promise<void> {
+  await getClient().send(new PutObjectCommand({ Bucket: getBucket(), Key: storagePath, Body: body, ContentType: contentType }));
+}

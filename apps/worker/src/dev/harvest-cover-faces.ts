@@ -9,11 +9,20 @@ import { detectFaces } from "../face-tracking/onnx-face-detector.js";
  * Raccoglie facce già scontornate dalle copertine dei canali YouTube (fatte da grafici: facce
  * nitide ed espressive), per la libreria delle copertine. NON decide chi è chi: il nome lo mette
  * simo dalla pagina "Facce" del sito. Gratis (nessuna AI a pagamento).
- * Uso: tsx src/dev/harvest-cover-faces.ts <cartella> <video per canale> <url canale> [url canale...]
+ * Uso: tsx src/dev/harvest-cover-faces.ts [--body] <cartella> <video per canale> <url canale> [url canale...]
+ *      tsx src/dev/harvest-cover-faces.ts [--body] --local <cartella da cui leggere le copertine> <cartella>
+ * --body: ritaglio "busto" (testa, spalle e un po' di petto) invece di "testa e collo": nelle
+ *         copertine i busti salgono dal fondo, e con la sola testa sembrano teste enormi.
+ * --local: rilavora le copertine già scaricate in <cartella da cui leggere>/covers, niente rete.
  */
-const [outDir, perChannelArg, ...channels] = process.argv.slice(2);
-if (!outDir || !perChannelArg || channels.length === 0) throw new Error("Uso: tsx src/dev/harvest-cover-faces.ts <cartella> <n> <canale>...");
-const perChannel = Number(perChannelArg);
+const args = process.argv.slice(2);
+const body = args.includes("--body");
+const localIdx = args.indexOf("--local");
+const localSource = localIdx >= 0 ? args[localIdx + 1] : undefined;
+const rest = args.filter((a, i) => a !== "--body" && a !== "--local" && (localIdx < 0 || i !== localIdx + 1));
+const [outDir, perChannelArg, ...channels] = rest;
+if (!outDir || (!localSource && (!perChannelArg || channels.length === 0))) throw new Error("Uso: vedi il commento in cima al file");
+const perChannel = Number(perChannelArg ?? "0");
 
 const DETECT_W = 320;
 const DETECT_H = 240;
@@ -24,15 +33,21 @@ await fsp.mkdir(path.join(outDir, "covers"), { recursive: true });
 await fsp.mkdir(path.join(outDir, "faces"), { recursive: true });
 const index: Array<{ file: string; videoId: string; channel: string; face: { x: number; y: number; width: number; height: number; score: number } }> = [];
 
-for (const channel of channels) {
-  const { stdout } = await runYtDlp(["--flat-playlist", "--playlist-end", String(perChannel), "--print", "%(id)s", channel]);
-  const ids = stdout.split("\n").map((l) => l.trim()).filter((l) => /^[\w-]{11}$/.test(l));
+const sources = localSource ? [localSource] : channels;
+for (const channel of sources) {
+  const ids = localSource
+    ? (await fsp.readdir(path.join(localSource, "covers"))).filter((f) => f.endsWith(".jpg")).map((f) => f.replace(/\.jpg$/, ""))
+    : (await runYtDlp(["--flat-playlist", "--playlist-end", String(perChannel), "--print", "%(id)s", channel])).stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => /^[\w-]{11}$/.test(l));
   console.log(`${channel}: ${ids.length} video`);
   for (const id of ids) {
-    const coverPath = path.join(outDir, "covers", `${id}.jpg`);
+    const coverPath = localSource ? path.join(localSource, "covers", `${id}.jpg`) : path.join(outDir, "covers", `${id}.jpg`);
     try {
       await fsp.access(coverPath);
     } catch {
+      if (localSource) continue;
       let res = await fetch(`https://i.ytimg.com/vi/${id}/maxresdefault.jpg`);
       if (!res.ok) res = await fetch(`https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
       if (!res.ok) continue;
@@ -51,11 +66,11 @@ for (const channel of channels) {
     const faces = (await detectFaces(bgr, 1280, 720)).filter((f) => f.height >= MIN_FACE_HEIGHT);
 
     for (const [n, f] of faces.entries()) {
-      // Testa e spalle (e le mani, se sono vicino alla faccia): nelle copertine è così che si ritagliano.
-      const left = Math.max(0, Math.round(f.x - f.width * 0.8));
-      const top = Math.max(0, Math.round(f.y - f.height * 0.6));
-      const right = Math.min(1280, Math.round(f.x + f.width * 1.8));
-      const bottom = Math.min(720, Math.round(f.y + f.height * 2.0));
+      // Sotto la faccia di solito c'è la scritta della copertina: si scende poco (collo e spalle).
+      const left = Math.max(0, Math.round(f.x - f.width * (body ? 1.0 : 0.7)));
+      const top = Math.max(0, Math.round(f.y - f.height * 0.55));
+      const right = Math.min(1280, Math.round(f.x + f.width * (body ? 2.0 : 1.7)));
+      const bottom = Math.min(720, Math.round(f.y + f.height * (body ? 2.6 : 1.45)));
       if (right - left < 60 || bottom - top < 60) continue;
       const cropBuf = await sharp(coverBuf).extract({ left, top, width: right - left, height: bottom - top }).png().toBuffer();
       try {

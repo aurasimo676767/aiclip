@@ -1,4 +1,5 @@
 import { requireUser } from "@/lib/auth";
+import { readFaceIndex } from "@/lib/face-library";
 import { PollingRefresher } from "@/components/polling-refresher";
 import { ThumbnailGeneratorForm } from "@/components/thumbnail-generator-form";
 import { ThumbnailJobCard, type ThumbnailJobViewModel } from "@/components/thumbnail-job-card";
@@ -20,7 +21,10 @@ function clipTitle(row: ThumbnailJobRow): string {
 }
 
 export default async function ThumbnailsPage() {
-  const { supabase } = await requireUser();
+  const { supabase, user } = await requireUser();
+  // Si possono scegliere solo le persone che hanno almeno una faccia col nome in libreria.
+  const faceIndex = await readFaceIndex(user.id).catch(() => ({ faces: [] }));
+  const people = [...new Set(faceIndex.faces.filter((f) => f.status === "labeled" && f.label).map((f) => f.label!))].sort();
 
   const { data: jobsRaw } = await supabase
     .from("thumbnail_jobs")
@@ -47,12 +51,13 @@ export default async function ThumbnailsPage() {
       <div>
         <h1 className="font-display text-2xl font-semibold tracking-tight text-ink sm:text-[28px]">Copertine</h1>
         <p className="mt-1 text-sm text-muted">
-          Incolla il link di un video long-form già pubblicato da ClipForge: viene generata una copertina automaticamente
-          (sfondo dal video, faccia ritagliata se c&apos;è la webcam, titolo ad effetto) e impostata subito su YouTube.
+          Incolla il link di un video long-form già pubblicato da ClipForge e scegli chi mettere in copertina: sfondo col
+          gioco vero (o la copertina originale per le reaction), le facce vere dalla pagina Facce, scritta ad effetto. Poi
+          viene impostata subito su YouTube.
         </p>
       </div>
 
-      <ThumbnailGeneratorForm />
+      <ThumbnailGeneratorForm people={people} />
 
       <section className="space-y-3">
         {viewModels.length === 0 ? (

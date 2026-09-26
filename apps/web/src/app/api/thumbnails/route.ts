@@ -8,6 +8,8 @@ const bodySchema = z.object({
   // il tentativo automatico (l'IA che legge titolo/canale dai fotogrammi + ricerca), che a volte
   // non trova nulla o trova il video sbagliato.
   reactedVideoUrl: z.string().trim().min(1).optional(),
+  /** Persone da mettere in copertina, nell'ordine (il primo è il protagonista). Vuoto = dal titolo. */
+  people: z.array(z.string().trim().min(1).max(40)).max(4).optional(),
 });
 
 /** Estrae l'id video da un URL YouTube in uno dei formati comuni (watch?v=, youtu.be/, shorts/). */
@@ -67,15 +69,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "La generazione copertine è disponibile solo per i video long-form" }, { status: 400 });
   }
 
-  const { data: inserted, error: insertError } = await supabase
+  const row = {
+    clip_id: publishJobTyped.clip_id,
+    youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
+    reacted_video_url: parsed.data.reactedVideoUrl ?? null,
+  };
+  const people = parsed.data.people?.map((p) => p.toUpperCase());
+  let { data: inserted, error: insertError } = await supabase
     .from("thumbnail_jobs")
-    .insert({
-      clip_id: publishJobTyped.clip_id,
-      youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
-      reacted_video_url: parsed.data.reactedVideoUrl ?? null,
-    })
+    .insert({ ...row, ...(people?.length ? { cover_people: people } : {}) })
     .select("id")
     .single();
+  // Prima della migrazione 0025 la colonna cover_people non c'è: la copertina parte lo stesso, con
+  // le persone prese dal titolo.
+  if (insertError?.message.includes("cover_people")) {
+    ({ data: inserted, error: insertError } = await supabase.from("thumbnail_jobs").insert(row).select("id").single());
+  }
   if (insertError || !inserted) {
     return NextResponse.json({ error: `Creazione job fallita: ${insertError?.message}` }, { status: 500 });
   }

@@ -661,6 +661,7 @@ export interface Database {
           clip_id: string;
           youtube_url: string;
           reacted_video_url: string | null;
+          cover_people: string[] | null;
           status: ThumbnailJobStatus;
           result_storage_path: string | null;
           youtube_thumbnail_set: boolean;
@@ -677,6 +678,7 @@ export interface Database {
           clip_id: string;
           youtube_url: string;
           reacted_video_url?: string | null;
+          cover_people?: string[] | null;
           status?: ThumbnailJobStatus;
           result_storage_path?: string | null;
           youtube_thumbnail_set?: boolean;
@@ -693,6 +695,7 @@ export interface Database {
           clip_id?: string;
           youtube_url?: string;
           reacted_video_url?: string | null;
+          cover_people?: string[] | null;
           status?: ThumbnailJobStatus;
           result_storage_path?: string | null;
           youtube_thumbnail_set?: boolean;

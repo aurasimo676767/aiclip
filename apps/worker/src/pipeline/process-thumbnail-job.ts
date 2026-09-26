@@ -9,8 +9,9 @@ import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
 import { runFfmpeg, probeVideo } from "../lib/ffmpeg.js";
 import { selectThumbnailAssets } from "../providers/ai/thumbnail-selection.js";
-import { resolveStreamerFace, listAvailableExpressions } from "../providers/ai/generate-face-portrait.js";
-import { composeThumbnail } from "../render/compose-thumbnail.js";
+import { composeCover, COVER_THEMES } from "../render/compose-cover.js";
+import { readFaceLibrary } from "../lib/face-library.js";
+import { participantsFromTitle, pickFaces, downloadFaces, findSteamHero } from "./cover-builder.js";
 import {
   setYoutubeThumbnail,
   findYoutubeThumbnailUrlBySearch,
@@ -99,11 +100,8 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     );
     const lowResBase64 = await Promise.all(lowResPaths.map(async (p) => (await fsp.readFile(p)).toString("base64")));
 
-    // Alias/espressioni disponibili PRIMA della selezione, così Claude può scegliere quella più
-    // adatta al tono del segmento invece di sceglierla a caso dopo.
     const { data: video } = await supabase.from("videos").select("streamer_name").eq("id", clip.video_id).maybeSingle();
-    const aliasLower = video?.streamer_name ? LONGFORM_STREAMER_ALIASES[video.streamer_name.toLowerCase()]?.toLowerCase() : undefined;
-    const availableExpressions = aliasLower ? await listAvailableExpressions(aliasLower) : [];
+    const streamerAlias = video?.streamer_name ? (LONGFORM_STREAMER_ALIASES[video.streamer_name.toLowerCase()] ?? null) : null;
 
     const selection = await selectThumbnailAssets({
       apiKey: env.ANTHROPIC_API_KEY,
@@ -112,7 +110,6 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       clipHook: clip.hook,
       clipCaption: clip.caption ?? "",
       frameJpegsBase64: lowResBase64,
-      availableExpressions,
     });
 
     // 3) Sfondo, in ordine di affidabilità:
@@ -120,7 +117,14 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     //       indovinello, presa diretta della copertina ufficiale alla massima risoluzione);
     //    b) titolo/canale letto dall'IA sui fotogrammi + ricerca YouTube (best-effort);
     //    c) fotogramma scelto dall'IA dal nostro stesso video, con eventuale ritaglio anti-interfaccia.
+    //    Per un GIOCO si prova prima la grafica ufficiale da Steam (il gioco vero, pulito, senza
+    //    webcam e chat); se il gioco non è su Steam si ripiega sul fotogramma (c).
     let backgroundFullPath: string | null = null;
+    const isReaction = selection.kind === "reaction" || Boolean(job.reacted_video_url);
+
+    if (!isReaction && selection.gameName) {
+      backgroundFullPath = await findSteamHero(selection.gameName, path.join(jobDir, "background-steam.jpg"));
+    }
 
     const manualVideoId = job.reacted_video_url ? extractYoutubeVideoId(job.reacted_video_url) : null;
     if (manualVideoId) {
@@ -136,7 +140,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       }
     }
 
-    if (!backgroundFullPath && selection.reactedVideoQuery && credentials) {
+    if (!backgroundFullPath && isReaction && selection.reactedVideoQuery && credentials) {
       try {
         const thumbUrl = await findYoutubeThumbnailUrlBySearch(credentials, selection.reactedVideoQuery);
         backgroundFullPath = await downloadImageIfOk(thumbUrl, path.join(jobDir, "background-real-thumb.jpg"));
@@ -171,37 +175,36 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       }
     }
 
-    // 4) Banner in stile alias ("BLUR REACTION" / "BLUR GIOCA A X") — riusa il titolo già
-    // generato dal ranking long-form, che segue già questa convenzione (vedi longform-ranking.ts).
-    const bannerText = extractBannerText(clip.title);
+    // 4) Facce: SOLO persone vere a cui simo ha dato un nome nella pagina Facce (mai generate, mai
+    //    indovinate), una sola volta ciascuna, col protagonista del VOD per primo. Se non c'è
+    //    nessuna faccia con un nome per le persone del video, la copertina esce senza facce.
+    const library = project ? await readFaceLibrary(project.user_id, jobDir) : { faces: [] };
+    // Persone scelte a mano dal sito (colonna cover_people, migrazione 0025): vincono sul titolo. Solo
+    // chi ha davvero facce col nome in libreria, nell'ordine scelto (il primo è il protagonista).
+    const chosenPeople = ((job as { cover_people?: string[] | null }).cover_people ?? [])
+      .map((p) => p.toUpperCase())
+      .filter((p) => library.faces.some((f) => f.status === "labeled" && f.label === p));
+    const people = chosenPeople.length > 0 ? chosenPeople : participantsFromTitle(clip.title, library, streamerAlias);
+    const chosenFaces = pickFaces(library, people, selection.desiredExpression, isReaction ? 2 : 4);
+    const facePaths = await downloadFaces(chosenFaces, jobDir).catch((err) => {
+      logger.warn("Download facce fallito, copertina senza facce", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
+      return [] as string[];
+    });
 
-    // 5) Faccia: preferisce un ritaglio fisso già pronto (foto vera, gratis, sempre identica alla
-    // persona reale), con l'espressione scelta sopra in base al tono del segmento se disponibile;
-    // se non c'è ancora nessun ritaglio per questo alias, prova a generarla con l'IA dalle foto
-    // di riferimento; se non c'è nessuna delle due, niente faccia in copertina.
-    let faceCutoutPath: string | null = null;
-    if (aliasLower) {
-      try {
-        const facePath = path.join(jobDir, "face-generated.png");
-        faceCutoutPath = await resolveStreamerFace({
-          apiKey: env.OPENAI_API_KEY,
-          aliasLower,
-          outputPath: facePath,
-          preferredExpression: selection.desiredExpression,
-        });
-      } catch (err) {
-        logger.warn("Risoluzione faccia fallita, copertina senza faccia", {
-          jobId: job.id,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    // 5) Scritta: "<PROTAGONISTA> REACTION" per le reaction (la copertina originale ha già il suo
+    //    testo), le 1-3 parole scelte dall'AI per i giochi.
+    const title = isReaction
+      ? `${people[0] ?? streamerAlias ?? "BLUR"} REACTION`
+      : (selection.coverWords ?? extractBannerText(clip.title));
+    logger.info("Copertina", { jobId: job.id, tipo: isReaction ? "reaction" : "gioco", gioco: selection.gameName, persone: people, facce: chosenFaces.map((f) => `${f.label}:${f.expression}`), scritta: title });
 
     const composedPath = path.join(jobDir, "thumbnail.jpg");
-    await composeThumbnail({
-      backgroundFramePath: backgroundFullPath,
-      faceCutoutPngPath: faceCutoutPath,
-      bannerText,
+    await composeCover({
+      backgroundPath: backgroundFullPath,
+      kind: isReaction ? "reaction" : "game",
+      faces: facePaths,
+      title,
+      theme: COVER_THEMES[selection.coverColor] ?? COVER_THEMES.giallo!,
       outputPath: composedPath,
     });
 
