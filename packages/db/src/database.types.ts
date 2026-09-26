@@ -239,6 +239,7 @@ export interface Database {
           caption: string;
           publish_description: string | null;
           longform_edit: boolean;
+          cover_path: string | null;
           badges: unknown;
           format: ClipFormat;
           status: ClipStatus;
@@ -266,6 +267,7 @@ export interface Database {
           caption?: string;
           publish_description?: string | null;
           longform_edit?: boolean;
+          cover_path?: string | null;
           badges?: unknown;
           format?: ClipFormat;
           status?: ClipStatus;
@@ -293,6 +295,7 @@ export interface Database {
           caption?: string;
           publish_description?: string | null;
           longform_edit?: boolean;
+          cover_path?: string | null;
           badges?: unknown;
           format?: ClipFormat;
           status?: ClipStatus;
@@ -659,8 +662,9 @@ export interface Database {
         Row: {
           id: string;
           clip_id: string;
-          youtube_url: string;
+          youtube_url: string | null;
           reacted_video_url: string | null;
+          apply_requested: boolean;
           cover_people: string[] | null;
           status: ThumbnailJobStatus;
           result_storage_path: string | null;
@@ -676,8 +680,9 @@ export interface Database {
         Insert: {
           id?: string;
           clip_id: string;
-          youtube_url: string;
+          youtube_url?: string | null;
           reacted_video_url?: string | null;
+          apply_requested?: boolean;
           cover_people?: string[] | null;
           status?: ThumbnailJobStatus;
           result_storage_path?: string | null;
@@ -693,8 +698,9 @@ export interface Database {
         Update: {
           id?: string;
           clip_id?: string;
-          youtube_url?: string;
+          youtube_url?: string | null;
           reacted_video_url?: string | null;
+          apply_requested?: boolean;
           cover_people?: string[] | null;
           status?: ThumbnailJobStatus;
           result_storage_path?: string | null;

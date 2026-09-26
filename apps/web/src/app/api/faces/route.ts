@@ -37,3 +37,15 @@ export async function POST(request: Request) {
   await writeFaceIndex(user.id, index);
   return NextResponse.json({ ok: true, face });
 }
+
+/** Persone con almeno una faccia col nome in libreria: sono quelle che si possono mettere in copertina. */
+export async function GET() {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const index = await readFaceIndex(user.id).catch(() => ({ faces: [] as Array<{ status: string; label: string | null }> }));
+  const people = [...new Set(index.faces.filter((f) => f.status === "labeled" && f.label).map((f) => f.label!))].sort();
+  return NextResponse.json({ people });
+}

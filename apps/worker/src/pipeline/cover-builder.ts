@@ -55,7 +55,7 @@ export function pickFaces(
   const wanted = expression ? [expression, ...(EXPRESSION_FALLBACK[expression] ?? [])] : [];
   for (const person of people) {
     if (picked.length >= max) break;
-    const faces = library.faces.filter((f) => f.status === "labeled" && f.label === person);
+    const faces = library.faces.filter((f) => f.status === "labeled" && f.label === person && !f.tags?.includes("meme"));
     if (faces.length === 0) continue;
     const score = (f: LibraryFace) => {
       const rank = wanted.indexOf(f.expression);
@@ -74,15 +74,32 @@ export function pickFaces(
 }
 
 /**
+ * Come vuole simo che appaiano certe persone nelle copertine GPT, oltre alla faccia. tag = foto della
+ * libreria (etichetta `tags`) da passare per forza come riferimento, così il modello vede davvero
+ * cappello e cuffie.
+ */
+export const PERSON_STYLE: Record<string, { note: string; tag?: string }> = {
+  // simo, 2026-09-26: "blur, facciamolo SEMPRE con cuffie della redbull, o cappello della redbull".
+  BLUR: { note: "always wearing his Red Bull cap or his Red Bull gaming headphones, exactly as in his reference photos that show them", tag: "redbull" },
+};
+
+/**
  * Foto di riferimento di una persona per GPT Image: quella scelta più altre buone (busti, meglio se
  * non tagliati ai due lati), diverse a ogni copertina. Più foto = faccia più fedele e pose varie.
+ * Se la persona ha uno stile fisso (PERSON_STYLE), almeno due foto sono quelle con quello stile.
  */
 export function referenceFaces(library: FaceLibraryIndex, chosen: LibraryFace, n: number): LibraryFace[] {
   // Pescate a caso fra le buone: con sempre le stesse foto GPT rifaceva sempre la stessa posa e gli
   // stessi vestiti (Blur con la sciarpa blu in ogni copertina, bocciato da simo).
-  const good = library.faces.filter((f) => f.status === "labeled" && f.label === chosen.label && f.id !== chosen.id && f.bust !== false);
-  const score = (f: LibraryFace) => (f.bothSidesCut ? 0 : 5) + f.intensity + Math.random() * 8;
-  return [chosen, ...good.sort((a, b) => score(b) - score(a)).slice(0, n - 1)];
+  const good = library.faces.filter(
+    (f) => f.status === "labeled" && f.label === chosen.label && f.id !== chosen.id && f.bust !== false && !f.tags?.includes("meme"),
+  );
+  const tag = chosen.label ? PERSON_STYLE[chosen.label]?.tag : undefined;
+  const score = (f: LibraryFace) => (tag && f.tags?.includes(tag) ? 20 : 0) + (f.bothSidesCut ? 0 : 5) + f.intensity + Math.random() * 8;
+  const ranked = good.sort((a, b) => score(b) - score(a));
+  // Con uno stile fisso la foto scelta per la bozza può non averlo: la si mette dopo quelle giuste.
+  if (tag && !chosen.tags?.includes(tag)) return [...ranked.slice(0, 2), chosen].slice(0, n);
+  return [chosen, ...ranked.slice(0, n - 1)];
 }
 
 /** Scarica i PNG delle facce scelte nella cartella del job. */

@@ -16,16 +16,19 @@ export interface AiCoverPerson {
   name: string;
   /** PNG scontornati della libreria, il primo è quello scelto per la copertina. */
   photos: string[];
+  /** Come deve apparire sempre (es. Blur col cappello Red Bull), vedi PERSON_STYLE. */
+  styleNote?: string;
 }
 
 export interface AiCoverParams {
   apiKey: string;
   model: string;
   quality: string;
-  kind: "reaction" | "game";
-  /** Copertina già montata (compose-cover): impaginazione da tenere. */
-  draftPath: string;
-  /** Sfondo vero: copertina originale del video reagito o immagine del gioco. */
+  /** "short" = copertina verticale 9:16 di uno Short; le altre sono 16:9. */
+  kind: "reaction" | "game" | "short";
+  /** Copertina già montata (compose-cover): impaginazione da tenere. Gli Short non ce l'hanno. */
+  draftPath: string | null;
+  /** Sfondo vero: copertina originale del video reagito, immagine del gioco o fotogramma dello Short. */
   backgroundPath: string;
   /** Nell'ordine della bozza: il primo è il protagonista. */
   people: AiCoverPerson[];
@@ -39,43 +42,70 @@ export interface AiCoverParams {
   outputPath: string;
 }
 
-const OUT_W = 1280;
-const OUT_H = 720;
-
 export async function generateAiCover(params: AiCoverParams): Promise<void> {
-  const images: Array<{ label: string; path: string; textBandOnly?: boolean }> = [
-    { label: "the layout draft", path: params.draftPath },
-    { label: "the real background", path: params.backgroundPath },
-  ];
-  const personLines: string[] = [];
+  const vertical = params.kind === "short";
+  const images: Array<{ path: string; textBandOnly?: boolean }> = [];
+  const add = (imagePath: string, textBandOnly = false) => {
+    images.push({ path: imagePath, textBandOnly });
+    return images.length;
+  };
+  const inputLines: string[] = [];
+  if (params.draftPath) {
+    const n = add(params.draftPath);
+    inputLines.push(
+      `- image ${n}: rough layout draft. Use it ONLY for the composition: who is where, their size, the text position. Do NOT copy the people's poses, hands, clothes or expressions from it.`,
+    );
+  }
+  const bgIndex = add(params.backgroundPath);
+  const background =
+    params.kind === "reaction"
+      ? "the thumbnail of the video the streamers are reacting to: keep its scene and people recognizable, but REMOVE its original text and logos"
+      : params.kind === "game"
+        ? `a real screenshot/artwork of the game${params.gameName ? ` "${params.gameName}"` : ""}: keep it recognizable as that real game, do not invent a different scene`
+        : "a frame of the Short clip itself (the key moment): use what happens in it as the scene behind the streamer (for a reaction to a TikTok or video, show that video behind; for a game, the game)";
+  inputLines.push(`- image ${bgIndex}: the background, ${background}.`);
   for (const person of params.people) {
     const first = images.length + 1;
-    for (const p of person.photos) images.push({ label: person.name, path: p });
+    for (const p of person.photos) add(p);
     const last = images.length;
-    personLines.push(
-      first === last
+    inputLines.push(
+      (first === last
         ? `- image ${first}: reference photo of the real streamer nicknamed "${person.name}"`
-        : `- images ${first}-${last}: ${last - first + 1} different photos of the SAME single streamer, nicknamed "${person.name}" (draw them only once)`,
+        : `- images ${first}-${last}: ${last - first + 1} different photos of the SAME single streamer, nicknamed "${person.name}" (draw them only once)`) +
+        (person.styleNote ? `. In the thumbnail "${person.name}" is ${person.styleNote}.` : ""),
     );
   }
   // Solo la striscia bassa con la scritta: dall'esempio intero GPT copiava anche le persone (Marza
   // spuntava in una copertina dove doveva esserci solo Blur).
-  if (params.styleExamplePath) images.push({ label: "style example", path: params.styleExamplePath, textBandOnly: true });
+  if (params.styleExamplePath) {
+    const n = add(params.styleExamplePath, true);
+    inputLines.push(`- image ${n}: style reference for the TEXT ONLY (font, colors, outline, brush stroke). Do not copy its words or anything else from it.`);
+  }
 
-  const [line1, line2] = splitTitle(params.title);
+  const [line1, line2] = splitTitle(params.title, vertical ? 9 : 12);
   const protagonist = params.people[0]?.name;
-  const background =
-    params.kind === "reaction"
-      ? "the thumbnail of the video the streamers are reacting to: keep its scene and people recognizable, but REMOVE its original text and logos"
-      : `a real screenshot/artwork of the game${params.gameName ? ` "${params.gameName}"` : ""}: keep it recognizable as that real game, do not invent a different scene`;
+  const textPlace = vertical
+    ? "very big, over the streamer's chest in the lower-middle part of the frame, in front of him, never covering the face; keep it inside the central area (the Shorts shelf crops the edges)"
+    : "very big, bottom center, in front of the people, covering their chests but never their faces";
+  // Modello di simo per gli Short (2026-09-26): la persona in primo piano grande, dietro quello a cui
+  // reagisce o il momento della clip, scritta enorme che dice di cosa si tratta.
+  const layout = vertical
+    ? "Vertical 9:16 layout like the big Italian Shorts channels: the streamer very big in the foreground, from the chest up, face in the upper-middle of the frame looking at the camera or at what happens; behind him what the clip is about (the reacted TikTok/video, the funny moment, the game), or a simple bright background if the clip is just him talking. Keep face and text inside the central 3:4 area: the Shorts shelf crops the top and bottom."
+    : "Make the people huge: head and shoulders rising from the bottom edge, faces big and sharp.";
+  const mood =
+    params.mood ??
+    (params.kind === "reaction"
+      ? "watching and reacting to the video: curious, amused or surprised, relaxed natural pose"
+      : params.kind === "game"
+        ? "playing the game with friends: hyped, shocked or laughing, strong exaggerated expressions"
+        : "reacting to the key moment of the clip (laughing, shocked, disgusted...): a strong, readable expression that matches it");
   const prompt = [
-    "Create a YouTube thumbnail (16:9) for an Italian Twitch clip channel, in the style of the biggest Italian clip channels.",
+    vertical
+      ? "Create a vertical 9:16 YouTube Shorts cover for an Italian Twitch clip channel, in the style of the biggest Italian clip channels."
+      : "Create a YouTube thumbnail (16:9) for an Italian Twitch clip channel, in the style of the biggest Italian clip channels.",
     "",
     "Input images:",
-    "- image 1: rough layout draft. Use it ONLY for the composition: who is where, their size, the text position. Do NOT copy the people's poses, hands, clothes or expressions from it.",
-    `- image 2: the background, ${background}.`,
-    ...personLines,
-    ...(params.styleExamplePath ? [`- image ${images.length}: style reference for the TEXT ONLY (font, colors, outline, brush stroke). Do not copy its words or anything else from it.`] : []),
+    ...inputLines,
     "",
     // "Blur" preso alla lettera: la faccia di Blur usciva sfocata.
     `Names like "Blur" are only nicknames: never blur, soften or hide anyone; every face must be perfectly sharp and in focus.`,
@@ -83,26 +113,26 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     // simo (2026-09-26): Blur usciva sempre con la stessa foto e la sciarpa blu, che nel tour della
     // casa di Murri "non ha senso". Le foto servono solo per il volto: posa, vestiti ed espressione
     // li decide il modello in base al video.
-    "Use the reference photos ONLY to know what each face looks like. Do NOT copy a single photo: create a NEW natural pose and expression for each person, and do not reuse clothes or accessories (scarves, jerseys, props) that don't fit this video; plain streamer clothes (t-shirt or hoodie, gaming headphones) are fine. Hands and arms must be anatomically realistic, or keep them out of the frame.",
-    // La bozza può averne scartato qualcuno (ritaglio tagliato male per il posto libero): GPT li
-    // rimette, sennò nella copertina di GTA con Blur, Manuxo e Pesh mancava Pesh.
+    "Use the reference photos ONLY to know what each face looks like (plus any fixed style written above). Do NOT copy a single photo: create a NEW natural pose and expression for each person, and do not reuse clothes or accessories (scarves, jerseys, props) that don't fit this video; plain streamer clothes (t-shirt or hoodie, gaming headphones) are fine. Hands and arms must be anatomically realistic, or keep them out of the frame.",
     // Con 3 foto della stessa persona GPT disegnava tre ragazzi diversi (copertina di Murri, 2026-09-26).
-    `Exactly ${params.people.length} streamer${params.people.length === 1 ? "" : "s"} in the foreground, each drawn ONCE: ${params.people.map((p) => `"${p.name}"`).join(", ")}. Never duplicate a person and never add other streamers. If someone is missing from the draft, add them next to the others, same size and style.`,
+    params.people.length > 0
+      ? `Exactly ${params.people.length} streamer${params.people.length === 1 ? "" : "s"} in the foreground, each drawn ONCE: ${params.people.map((p) => `"${p.name}"`).join(", ")}. Never duplicate a person and never add other streamers.${params.draftPath ? " If someone is missing from the draft, add them next to the others, same size and style." : ""}`
+      : `No reference photos: the streamer in the foreground is the person already visible in image ${bgIndex}, redrawn big and sharp with the SAME face; never invent a different person.`,
     ...(params.kind === "reaction"
-      ? ["Keep the main person or subject of the original thumbnail (image 2) clearly visible in the background: it is what the streamers are reacting to."]
+      ? [`Keep the main person or subject of the original thumbnail (image ${bgIndex}) clearly visible in the background: it is what the streamers are reacting to.`]
       : []),
-    `Make the people huge: head and shoulders rising from the bottom edge, faces big and sharp${protagonist ? `; ${protagonist} is the main character` : ""}. Mood: ${params.mood ?? (params.kind === "reaction" ? "watching and reacting to the video: curious, amused or surprised, relaxed natural pose" : "playing the game with friends: hyped, shocked or laughing, strong exaggerated expressions")}. Clean cutout edges with a subtle white outline, lit to match the background.`,
+    `${layout}${protagonist ? ` "${protagonist}" is the main character.` : ""} Mood: ${mood}. Clean cutout edges with a subtle white outline, lit to match the background.`,
     "",
     line2
-      ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Heavy condensed italic sans-serif (like Anton), very big, bottom center, in front of the people, covering their chests but never their faces. First line white, second line yellow-to-orange gradient, thick black outline, solid drop shadow, a red paint brush stroke behind the second line.`
-      : `Text: exactly "${line1}", spelled exactly, one line. Heavy condensed italic sans-serif (like Anton), very big, bottom center, in front of the people, covering their chests but never their faces. Yellow-to-orange gradient, thick black outline, solid drop shadow, a red paint brush stroke behind it.`,
+      ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Heavy condensed italic sans-serif (like Anton), ${textPlace}. First line white, second line ${vertical ? "bright red or yellow-to-orange, whichever reads best on the background" : "yellow-to-orange gradient"}, thick black outline, solid drop shadow${vertical ? "" : ", a red paint brush stroke behind the second line"}.`
+      : `Text: exactly "${line1}", spelled exactly, one line. Heavy condensed italic sans-serif (like Anton), ${textPlace}. Yellow-to-orange gradient, thick black outline, solid drop shadow, a red paint brush stroke behind it.`,
     "No other text, no logos, no watermarks, no borders. Vivid colors, high contrast, very sharp.",
   ].join("\n");
 
   const form = new FormData();
   form.append("model", params.model);
   form.append("prompt", prompt);
-  form.append("size", "1536x864");
+  form.append("size", vertical ? "864x1536" : "1536x864");
   form.append("quality", params.quality);
   form.append("output_format", "png");
   form.append("n", "1");
@@ -133,7 +163,7 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     throw new Error(`GPT Image ${res.status}: ${body.error?.message ?? "nessuna immagine"}`);
   }
   await sharp(Buffer.from(body.data[0].b64_json, "base64"))
-    .resize(OUT_W, OUT_H, { fit: "cover" })
+    .resize(vertical ? 1080 : 1280, vertical ? 1920 : 720, { fit: "cover" })
     .jpeg({ quality: 92 })
     .toFile(params.outputPath);
   logger.info("Copertina rifinita con GPT Image", {
@@ -145,10 +175,10 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
   });
 }
 
-/** Le stesse due righe della bozza (compose-cover divide allo stesso modo). */
-function splitTitle(text: string): [string, string | undefined] {
+/** Le stesse due righe della bozza (compose-cover divide allo stesso modo); in verticale si va a capo prima. */
+function splitTitle(text: string, oneLineMax: number): [string, string | undefined] {
   const words = text.trim().split(/\s+/);
-  if (words.length <= 1 || text.length <= 12) return [text, undefined];
+  if (words.length <= 1 || text.length <= oneLineMax) return [text, undefined];
   let best: [string, string] = [words[0]!, words.slice(1).join(" ")];
   let bestDiff = Infinity;
   for (let i = 1; i < words.length; i++) {

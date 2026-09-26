@@ -5,7 +5,7 @@ import { env } from "../env.js";
 import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
-import { uploadVideoToYoutube } from "../providers/youtube/youtube-publisher.js";
+import { uploadVideoToYoutube, setYoutubeThumbnail } from "../providers/youtube/youtube-publisher.js";
 import { updatePublishJobStatus } from "../queue/publish-queue.js";
 
 export async function processPublishJob(job: YoutubePublishJobRow): Promise<void> {
@@ -75,6 +75,31 @@ export async function processPublishJob(job: YoutubePublishJobRow): Promise<void
         .eq("id", connection.id);
       if (refreshUpdateError) {
         logger.warn("Aggiornamento token YouTube rinnovato fallito", { error: refreshUpdateError.message });
+      }
+    }
+
+    // Copertina approvata col pulsante "Genera copertina" prima della pubblicazione: la si imposta
+    // adesso. Se fallisce il video resta pubblicato (la copertina si può ricaricare dal sito).
+    // Query a parte: prima della migrazione 0026 la colonna non c'è e la pubblicazione non deve fallire.
+    const { data: cover } = await supabase.from("clips").select("cover_path").eq("id", clip.id).maybeSingle();
+    if (cover?.cover_path) {
+      try {
+        const coverPath = path.join(jobDir, "cover.jpg");
+        await storageProvider.downloadToFile(cover.cover_path, coverPath);
+        await setYoutubeThumbnail({
+          credentials: {
+            clientId: env.GOOGLE_CLIENT_ID,
+            clientSecret: env.GOOGLE_CLIENT_SECRET,
+            accessToken: result.refreshedAccessToken ?? connection.access_token,
+            refreshToken: connection.refresh_token,
+            expiryDate: result.refreshedExpiresAt ? new Date(result.refreshedExpiresAt).getTime() : new Date(connection.expires_at).getTime(),
+          },
+          videoId: result.videoId,
+          imagePath: coverPath,
+        });
+        logger.info("Copertina approvata impostata sul video pubblicato", { jobId: job.id, clipId: clip.id });
+      } catch (err) {
+        logger.warn("Copertina approvata non impostata su YouTube", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
       }
     }
 

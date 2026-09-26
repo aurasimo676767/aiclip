@@ -27,6 +27,12 @@ export interface LibraryFace {
   bothSidesCut?: boolean;
   /** Quanta larghezza del ritaglio occupa la riga più bassa (0-1): sotto 0,5 il busto non "parte dalla base", lascia vuoti. */
   baseCover?: number;
+  /**
+   * Cosa si vede nella foto (mai chi è): "redbull" = cappello o cuffie Red Bull (per Blur vanno
+   * sempre, chiesto da simo), "meme" = foto ritoccata per scherzo (es. corpo da culturista), da non
+   * usare in copertina.
+   */
+  tags?: string[];
 }
 
 export interface FaceLibraryIndex {

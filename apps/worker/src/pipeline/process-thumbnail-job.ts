@@ -11,7 +11,7 @@ import { runFfmpeg, probeVideo } from "../lib/ffmpeg.js";
 import { selectThumbnailAssets } from "../providers/ai/thumbnail-selection.js";
 import { composeCover, COVER_THEMES } from "../render/compose-cover.js";
 import { readFaceLibrary } from "../lib/face-library.js";
-import { participantsFromTitle, pickFaces, downloadFaces, findSteamHero, referenceFaces } from "./cover-builder.js";
+import { participantsFromTitle, pickFaces, downloadFaces, findSteamHero, referenceFaces, PERSON_STYLE } from "./cover-builder.js";
 import { generateAiCover } from "../providers/ai/cover-image-ai.js";
 import {
   setYoutubeThumbnail,
@@ -51,23 +51,27 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     if (clipError || !clip) {
       throw new Error(`Clip ${job.clip_id} non trovata: ${clipError?.message ?? "nessun dato"}`);
     }
-    if (clip.format !== "longform") {
-      throw new Error("La generazione copertine è disponibile solo per i video long-form");
-    }
     if (!clip.output_video_path) {
       throw new Error("La clip non ha ancora un video renderizzato da cui generare la copertina");
     }
+    const isShort = clip.format !== "longform";
 
-    const { data: publishJob, error: publishJobError } = await supabase
-      .from("youtube_publish_jobs")
-      .select("youtube_video_id")
-      .eq("clip_id", clip.id)
-      .eq("youtube_url", job.youtube_url)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (publishJobError || !publishJob?.youtube_video_id) {
-      throw new Error("Impossibile risalire all'id video YouTube per impostare la copertina");
+    // Job col link YouTube (vecchia pagina Copertine): si imposta subito sul video indicato. Job
+    // del pulsante "Genera copertina": solo anteprima, si carica quando simo preme "Carica".
+    let publishJob: { youtube_video_id: string | null } | null = null;
+    if (job.youtube_url) {
+      const { data, error: publishJobError } = await supabase
+        .from("youtube_publish_jobs")
+        .select("youtube_video_id")
+        .eq("clip_id", clip.id)
+        .eq("youtube_url", job.youtube_url)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (publishJobError || !data?.youtube_video_id) {
+        throw new Error("Impossibile risalire all'id video YouTube per impostare la copertina");
+      }
+      publishJob = data;
     }
 
     // Credenziali YouTube: servono sia per cercare la copertina reale del video reagito sia,
@@ -86,13 +90,47 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
         }
       : null;
 
+    // "Carica" premuto sull'anteprima: la copertina c'è già, si approva e si imposta su YouTube.
+    if (job.apply_requested) {
+      if (!job.result_storage_path) throw new Error("Nessuna copertina generata da caricare");
+      const coverPath = path.join(jobDir, "cover.jpg");
+      await storageProvider.downloadToFile(job.result_storage_path, coverPath);
+      await supabase.from("clips").update({ cover_path: job.result_storage_path, thumbnail_path: job.result_storage_path }).eq("id", clip.id);
+      // Già pubblicato: si imposta adesso. Non ancora: la usa la pubblicazione (process-publish-job).
+      const { data: published } = await supabase
+        .from("youtube_publish_jobs")
+        .select("youtube_video_id")
+        .eq("clip_id", clip.id)
+        .eq("status", "COMPLETED")
+        .not("youtube_video_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      let set = false;
+      if (published?.youtube_video_id && credentials && connectionRow) {
+        const result = await setYoutubeThumbnail({ credentials, videoId: published.youtube_video_id, imagePath: coverPath });
+        if (result.refreshedAccessToken) {
+          await supabase
+            .from("youtube_connections")
+            .update({ access_token: result.refreshedAccessToken, expires_at: result.refreshedExpiresAt ?? connectionRow.expires_at })
+            .eq("id", connectionRow.id);
+        }
+        set = true;
+      }
+      await updateThumbnailJobStatus(job.id, "COMPLETED", { youtube_thumbnail_set: set, completed_at: new Date().toISOString() });
+      logger.info("Copertina approvata", { jobId: job.id, clipId: clip.id, suYoutube: set });
+      return;
+    }
+
     // 1) Scarica il render già pronto (non il sorgente da 20+GB, quello serve solo per il render vero).
     const localVideoPath = path.join(jobDir, "clip.mp4");
     await storageProvider.downloadToFile(clip.output_video_path, localVideoPath);
 
     const probe = await probeVideo(localVideoPath);
-    const innerStart = CREDITS_CARD_MARGIN_SECONDS;
-    const innerEnd = Math.max(innerStart + 1, probe.durationSeconds - CREDITS_CARD_MARGIN_SECONDS);
+    // Gli Short non hanno le card dei crediti: basta evitare il primissimo e l'ultimissimo istante.
+    const margin = isShort ? 0.5 : CREDITS_CARD_MARGIN_SECONDS;
+    const innerStart = margin;
+    const innerEnd = Math.max(innerStart + 1, probe.durationSeconds - margin);
     const timestamps = sampleTimestamps(innerStart, innerEnd, CANDIDATE_FRAME_COUNT);
 
     // 2) Fotogrammi candidati a bassa risoluzione, solo per farli "vedere" a Claude (pochi token).
@@ -121,13 +159,13 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     //    Per un GIOCO si prova prima la grafica ufficiale da Steam (il gioco vero, pulito, senza
     //    webcam e chat); se il gioco non è su Steam si ripiega sul fotogramma (c).
     let backgroundFullPath: string | null = null;
-    const isReaction = selection.kind === "reaction" || Boolean(job.reacted_video_url);
+    const isReaction = !isShort && (selection.kind === "reaction" || Boolean(job.reacted_video_url));
 
-    if (!isReaction && selection.gameName) {
+    if (!isShort && !isReaction && selection.gameName) {
       backgroundFullPath = await findSteamHero(selection.gameName, path.join(jobDir, "background-steam.jpg"));
     }
 
-    const manualVideoId = job.reacted_video_url ? extractYoutubeVideoId(job.reacted_video_url) : null;
+    const manualVideoId = !isShort && job.reacted_video_url ? extractYoutubeVideoId(job.reacted_video_url) : null;
     if (manualVideoId) {
       try {
         const thumbUrl = await fetchBestYoutubeThumbnailUrl(manualVideoId);
@@ -159,7 +197,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       await grabFrame(localVideoPath, timestamps[selection.backgroundFrameIndex] ?? timestamps[0]!, backgroundRawPath);
 
       backgroundFullPath = backgroundRawPath;
-      if (selection.contentCropBox) {
+      if (selection.contentCropBox && !isShort) {
         const meta = await sharp(backgroundRawPath).metadata();
         const w = meta.width ?? 0;
         const h = meta.height ?? 0;
@@ -186,7 +224,8 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       .map((p) => p.toUpperCase())
       .filter((p) => library.faces.some((f) => f.status === "labeled" && f.label === p));
     const people = chosenPeople.length > 0 ? chosenPeople : participantsFromTitle(clip.title, library, streamerAlias);
-    const chosenFaces = pickFaces(library, people, selection.desiredExpression, isReaction ? 2 : 4, isReaction ? "reaction" : "game");
+    const maxFaces = isShort ? Math.max(1, Math.min(2, chosenPeople.length)) : isReaction ? 2 : 4;
+    const chosenFaces = pickFaces(library, people, selection.desiredExpression, maxFaces, isReaction ? "reaction" : "game");
     const facePaths = await downloadFaces(chosenFaces, jobDir).catch((err) => {
       logger.warn("Download facce fallito, copertina senza facce", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
       return [] as string[];
@@ -194,13 +233,14 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
 
     // 5) Scritta: "<PROTAGONISTA> REACTION" per le reaction (la copertina originale ha già il suo
     //    testo), le 1-3 parole scelte dall'AI per i giochi.
-    const title = isReaction
-      ? `${people[0] ?? streamerAlias ?? "BLUR"} REACTION`
-      : (selection.coverWords ?? extractBannerText(clip.title));
-    logger.info("Copertina", { jobId: job.id, tipo: isReaction ? "reaction" : "gioco", gioco: selection.gameName, persone: people, facce: chosenFaces.map((f) => `${f.label}:${f.expression}`), scritta: title });
+    const title =
+      isReaction
+        ? `${people[0] ?? streamerAlias ?? "BLUR"} REACTION`
+        : (selection.coverWords ?? extractBannerText(clip.title));
+    logger.info("Copertina", { jobId: job.id, tipo: isShort ? "short" : isReaction ? "reaction" : "gioco", gioco: selection.gameName, persone: people, facce: chosenFaces.map((f) => `${f.label}:${f.expression}`), scritta: title });
 
-    const draftPath = path.join(jobDir, "thumbnail-draft.jpg");
-    await composeCover({
+    const draftPath = isShort ? null : path.join(jobDir, "thumbnail-draft.jpg");
+    if (draftPath) await composeCover({
       backgroundPath: backgroundFullPath,
       kind: isReaction ? "reaction" : "game",
       faces: facePaths,
@@ -212,12 +252,12 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     // Rifinitura con GPT Image (COVER_AI_MODEL): la bozza montata diventa una copertina da grafico.
     // Se fallisce resta la bozza, che è già una copertina completa.
     let composedPath = draftPath;
-    if (env.COVER_AI_MODEL !== "off" && chosenFaces.length > 0 && facePaths.length === chosenFaces.length) {
+    if (env.COVER_AI_MODEL !== "off" && (isShort || (chosenFaces.length > 0 && facePaths.length === chosenFaces.length))) {
       try {
         const aiPeople = [];
         for (const face of chosenFaces) {
           const refs = referenceFaces(library, face, 3);
-          aiPeople.push({ name: face.label ?? "", photos: await downloadFaces(refs, jobDir) });
+          aiPeople.push({ name: face.label ?? "", photos: await downloadFaces(refs, jobDir), styleNote: face.label ? PERSON_STYLE[face.label]?.note : undefined });
         }
         const stylePath = path.resolve("assets", "cover-style", "modello-scritta.jpg");
         const aiPath = path.join(jobDir, "thumbnail-ai.jpg");
@@ -225,7 +265,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           apiKey: env.OPENAI_API_KEY,
           model: env.COVER_AI_MODEL,
           quality: env.COVER_AI_QUALITY,
-          kind: isReaction ? "reaction" : "game",
+          kind: isShort ? "short" : isReaction ? "reaction" : "game",
           draftPath,
           backgroundPath: backgroundFullPath,
           people: aiPeople,
@@ -237,18 +277,21 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
         composedPath = aiPath;
       } catch (err) {
         logger.warn("Rifinitura GPT Image fallita, resta la copertina montata", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
+        if (isShort) throw err;
       }
     }
+    // Gli Short non hanno una copertina montata di ripiego: senza GPT non si fanno.
+    if (!composedPath) throw new Error("Le copertine degli Short si fanno solo con GPT Image (COVER_AI_MODEL è spento)");
 
     // 5) Carica la copertina generata su R2 e la imposta come thumbnail_path della clip (upgrade
     // rispetto al frame grezzo estratto al render).
-    const resultStoragePath = `thumbnails/${clip.project_id}/${clip.id}-generated.jpg`;
+    const resultStoragePath = `thumbnails/${clip.project_id}/${clip.id}-${job.id}.jpg`;
     await storageProvider.uploadFile(composedPath, resultStoragePath, "image/jpeg");
-    await supabase.from("clips").update({ thumbnail_path: resultStoragePath }).eq("id", clip.id);
+    if (publishJob) await supabase.from("clips").update({ thumbnail_path: resultStoragePath }).eq("id", clip.id);
 
     // 6) La imposta direttamente sul video YouTube già pubblicato.
     let youtubeThumbnailSet = false;
-    if (credentials) {
+    if (credentials && publishJob?.youtube_video_id) {
       try {
         const result = await setYoutubeThumbnail({ credentials, videoId: publishJob.youtube_video_id, imagePath: composedPath });
         if (result.refreshedAccessToken && connectionRow) {

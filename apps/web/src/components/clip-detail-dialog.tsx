@@ -12,6 +12,7 @@ import { useConfirm } from "./ui-kit/confirm";
 import { StatusBadge } from "./status-badge";
 import { TrimPanel } from "./trim-clip-button";
 import { PublishPanel, PublishStatus } from "./publish-youtube-button";
+import { CoverGenerator } from "./cover-generator";
 import { ScoreRing, formatDuration, scoreTone } from "./ui";
 
 const BADGE_LABELS: Record<ClipBadge, string> = {
@@ -228,6 +229,8 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
           youtubeCancelledAt={clip.youtubeCancelledAt}
         />
         {!youtubeConnected && clip.status === "COMPLETED" && <p className="text-xs text-faint">Collega YouTube dalle Opzioni per pubblicare da qui.</p>}
+
+        {clip.status === "COMPLETED" && <CoverGenerator clipId={clip.id} isShort={isShort} />}
 
         <div className="border-t border-line pt-5">
           {panel === "info" && <ClipInfo clip={clip} />}

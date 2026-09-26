@@ -37,8 +37,9 @@ const envSchema = z.object({
   // Rifinitura delle copertine con GPT Image (providers/ai/cover-image-ai.ts): la copertina montata
   // coi ritagli fa da bozza e il modello la ridisegna come un grafico. ~5-10 centesimi a copertina a
   // qualità "medium". "off" = resta la copertina montata, nessuna chiamata. Modello provato:
-  // gpt-image-2.5-sunburst (lo stesso di ChatGPT a settembre 2026).
-  COVER_AI_MODEL: z.string().default("off"),
+  // gpt-image-2.5-sunburst (lo stesso di ChatGPT a settembre 2026). Acceso: le copertine partono solo
+  // dal pulsante "Genera copertina" del sito, quindi si spende solo quando lo preme simo.
+  COVER_AI_MODEL: z.string().default("gpt-image-2.5-sunburst"),
   COVER_AI_QUALITY: z.enum(["low", "medium", "high"]).default("medium"),
   TRANSCRIPTION_PROVIDER: z.enum(["openai", "local"]).default("openai"),
   // Lingua passata a Whisper. Senza, la deduce dai primi 30 secondi di ogni blocco da ~20 minuti:
