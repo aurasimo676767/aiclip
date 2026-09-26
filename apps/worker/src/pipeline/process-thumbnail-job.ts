@@ -238,7 +238,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       ? manualText
       : isReaction
         ? `${people[0] ?? streamerAlias ?? "BLUR"} REACTION`
-        : (selection.coverWords ?? extractBannerText(clip.title));
+        : (selection.coverWords ?? (isShort ? shortCoverWords(clip.title) : extractBannerText(clip.title)));
     logger.info("Copertina", { jobId: job.id, tipo: isShort ? "short" : isReaction ? "reaction" : "gioco", gioco: selection.gameName, persone: people, facce: chosenFaces.map((f) => `${f.label}:${f.expression}`), scritta: title });
 
     const draftPath = isShort ? null : path.join(jobDir, "thumbnail-draft.jpg");
@@ -369,4 +369,18 @@ function extractBannerText(title: string): string {
   const colonIndex = title.indexOf(":");
   const banner = colonIndex > 0 && colonIndex < 40 ? title.slice(0, colonIndex) : title;
   return banner.toUpperCase();
+}
+
+/**
+ * Ripiego per gli Short se l'AI non ha dato la scritta: le prime parole del titolo, senza emoji e
+ * senza puntini. Il titolo intero in copertina era illeggibile ("10.000 PERSONE NON HANNO CAPITO
+ * CHE ERA UN'IA..?! 💀🤯").
+ */
+function shortCoverWords(title: string): string {
+  const clean = title
+    .replace(/[\p{Extended_Pictographic}\u{FE0F}]/gu, "")
+    .replace(/\.{2,}/g, " ")
+    .trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+  return words.slice(0, 4).join(" ").toUpperCase();
 }

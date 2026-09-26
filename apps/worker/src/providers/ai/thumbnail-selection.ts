@@ -47,7 +47,7 @@ const TOOL_SCHEMA = {
       },
       coverWords: {
         type: "string",
-        description: "Solo per game: la SCRITTA della copertina, 1-3 parole (massimo 4 corte), vedi le regole nel prompt.",
+        description: "SEMPRE: la SCRITTA della copertina, 1-3 parole (massimo 4 corte), vedi le regole nel prompt.",
       },
       coverColor: {
         type: "string",
@@ -65,9 +65,9 @@ const SYSTEM_PROMPT = `Sei un editor esperto di copertine YouTube per video reac
 2. Se riesci a leggere con sicurezza il titolo o il canale del video/contenuto che si sta reagendo in uno dei fotogrammi, scrivilo in reactedVideoQuery.
 3. Scegli l'espressione delle facce più adatta al tono (desiredExpression).
 4. Dì se è una reaction o un gioco (kind); per un gioco scrivi il nome esatto del gioco (gameName).
-5. Per un gioco scrivi la SCRITTA della copertina (coverWords) e il colore (coverColor).
+5. Scrivi SEMPRE la SCRITTA della copertina (coverWords) e il colore (coverColor): per un gioco cosa succede nella partita, per una reaction o uno Short la battuta o la cosa assurda di cui si parla.
 
-Regole della SCRITTA: 1-3 parole in italiano, come le scrivono i canali di clip italiani su Blur, Marza e Pesh. Esempi VERI che funzionano: "MEGA JEOPARDY", "GIOCHI BRUTTI", "SIAMO DOPPIATORI", "TELEFONATAAA", "DISTRUTTI A GOLF", "LA RUN PERFETTA?", "COME HA FATTO??", "MEGA POKERATA", "JEOPARDY CHEATER?!", "TORNEO TUTTI CONTRO TUTTI", "DIVENTIAMO MURATORI".
+Regole della SCRITTA: 1-3 parole in italiano, come le scrivono i canali di clip italiani su Blur, Marza e Pesh. Esempi VERI che funzionano: "MEGA JEOPARDY", "GIOCHI BRUTTI", "SIAMO DOPPIATORI", "TELEFONATAAA", "DISTRUTTI A GOLF", "LA RUN PERFETTA?", "COME HA FATTO??", "MEGA POKERATA", "JEOPARDY CHEATER?!", "TORNEO TUTTI CONTRO TUTTI", "DIVENTIAMO MURATORI", "SONO GAY?", "ERA UN'IA?!", "BARBA INCOLLATA".
 - Dice cosa succede o la battuta del video, con parole da ragazzi: niente "INCREDIBILE", "EPICO", "PAZZESCO", "SFIDA ESTREMA", "IMPERDIBILE", niente frasi da pubblicità o da giornale.
 - Si può usare il nome del gioco se è corto e riconoscibile (MEGA JEOPARDY), punti di domanda o esclamativi alla fine, lettere allungate (TELEFONATAAA).
 - Niente emoji, niente nomi degli streamer (le loro facce sono già in copertina).
