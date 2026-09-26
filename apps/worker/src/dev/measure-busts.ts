@@ -19,6 +19,7 @@ for (const f of library.faces) {
   f.bust = await isBustCutout(png);
   const shape = await measureCutout(png);
   f.bothSidesCut = shape.cuts.left && shape.cuts.right;
+  f.baseCover = Number(shape.baseCover.toFixed(2));
   await fsp.rm(local, { force: true });
   n++;
 }

@@ -93,7 +93,7 @@ for (const photo of photos) {
     label,
     status: "labeled",
     bust: await isBustCutout(cut),
-    bothSidesCut: await measureCutout(cut).then((s) => s.cuts.left && s.cuts.right),
+    ...(await measureCutout(cut).then((s) => ({ bothSidesCut: s.cuts.left && s.cuts.right, baseCover: Number(s.baseCover.toFixed(2)) }))),
     sourceFile: path.basename(photo),
   };
   library.faces.push(face);

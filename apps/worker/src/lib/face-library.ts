@@ -25,6 +25,8 @@ export interface LibraryFace {
   bust?: boolean;
   /** Tagliata su entrambi i lati (tipico delle schermate della webcam): vedi measureCutout. */
   bothSidesCut?: boolean;
+  /** Quanta larghezza del ritaglio occupa la riga più bassa (0-1): sotto 0,5 il busto non "parte dalla base", lascia vuoti. */
+  baseCover?: number;
 }
 
 export interface FaceLibraryIndex {
@@ -78,6 +80,8 @@ export interface CutoutShape {
   /** Lunghezza del taglio sui lati, frazione dell'altezza: il più lungo va contro il bordo della copertina. */
   leftCover: number;
   rightCover: number;
+  /** Riga più bassa del riquadro stretto coperta dalla persona, frazione della larghezza. */
+  baseCover: number;
 }
 
 /**
@@ -118,6 +122,7 @@ export async function measureCutout(png: Buffer): Promise<CutoutShape> {
   const leftCover = band(colCover, [x0, x0 + 1, x0 + 2, x0 + 3].filter((x) => x <= x1));
   const rightCover = band(colCover, [x1, x1 - 1, x1 - 2, x1 - 3].filter((x) => x >= x0));
   const topCover = band(rowCover, [y0, y0 + 1, y0 + 2, y0 + 3].filter((y) => y <= y1));
+  const baseCover = rowCover(y1);
   // 8% dell'altezza: una spalla o una felpa che finisce contro il bordo. La cima della testa dopo il
   // ritaglio stretto copre pochi pixel; una testa mozzata copre un quarto della larghezza e oltre.
   return {
@@ -125,5 +130,6 @@ export async function measureCutout(png: Buffer): Promise<CutoutShape> {
     cuts: { left: leftCover > 0.08, right: rightCover > 0.08, top: topCover > 0.25 },
     leftCover,
     rightCover,
+    baseCover,
   };
 }

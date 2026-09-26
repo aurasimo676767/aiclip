@@ -44,7 +44,13 @@ const EXPRESSION_FALLBACK: Record<string, string[]> = {
  * prima l'espressione giusta, poi quelle vicine, poi la più esagerata. Fra facce equivalenti si
  * pesca a caso, così due copertine dello stesso streamer non escono identiche.
  */
-export function pickFaces(library: FaceLibraryIndex, people: string[], expression: string | null, max: number): LibraryFace[] {
+export function pickFaces(
+  library: FaceLibraryIndex,
+  people: string[],
+  expression: string | null,
+  max: number,
+  kind: "reaction" | "game" = "game",
+): LibraryFace[] {
   const picked: LibraryFace[] = [];
   const wanted = expression ? [expression, ...(EXPRESSION_FALLBACK[expression] ?? [])] : [];
   for (const person of people) {
@@ -56,7 +62,11 @@ export function pickFaces(library: FaceLibraryIndex, people: string[], expressio
       // Il busto conta più dell'espressione: una testa che galleggia rovina la copertina.
       // Tagliata su entrambi i lati: un taglio resterebbe in mezzo alla copertina (va sfumato), meglio evitarla.
       const cut = f.bothSidesCut ? -25 : 0;
-      return (f.bust === false ? -100 : f.bust ? 30 : 0) + cut + (rank >= 0 ? (wanted.length - rank) * 10 : 0) + f.intensity * 2 + Math.random() * 3;
+      // Busto che non riempie il fondo (buchi, microfono tagliato via): lascia vuoti sul bordo basso.
+      const base = f.baseCover !== undefined && f.baseCover < 0.5 ? -35 : 0;
+      // In una reaction chi guarda un video non urla né si arrabbia: simo le ha bocciate ("non ha senso con una reaction").
+      const mood = kind === "reaction" && (f.expression === "urlo" || f.expression === "rabbia") ? -40 : 0;
+      return (f.bust === false ? -100 : f.bust ? 30 : 0) + cut + base + mood + (rank >= 0 ? (wanted.length - rank) * 10 : 0) + f.intensity * 2 + Math.random() * 3;
     };
     picked.push(faces.sort((a, b) => score(b) - score(a))[0]!);
   }

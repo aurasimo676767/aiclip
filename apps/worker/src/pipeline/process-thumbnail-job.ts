@@ -185,7 +185,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       .map((p) => p.toUpperCase())
       .filter((p) => library.faces.some((f) => f.status === "labeled" && f.label === p));
     const people = chosenPeople.length > 0 ? chosenPeople : participantsFromTitle(clip.title, library, streamerAlias);
-    const chosenFaces = pickFaces(library, people, selection.desiredExpression, isReaction ? 2 : 4);
+    const chosenFaces = pickFaces(library, people, selection.desiredExpression, isReaction ? 2 : 4, isReaction ? "reaction" : "game");
     const facePaths = await downloadFaces(chosenFaces, jobDir).catch((err) => {
       logger.warn("Download facce fallito, copertina senza facce", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
       return [] as string[];

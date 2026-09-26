@@ -18,7 +18,7 @@ await fsp.mkdir(work, { recursive: true });
 const { data: profile } = await supabase.from("profiles").select("id").limit(1).single();
 const library = await readFaceLibrary(profile!.id, work);
 const forced = process.env.FACE_IDS?.split(",");
-const faces = forced ? forced.map((id) => library.faces.find((f) => f.id.startsWith(id))!) : pickFaces(library, people.map((p) => p.toUpperCase()), expression ?? null, kind === "reaction" ? 2 : 4);
+const faces = forced ? forced.map((id) => library.faces.find((f) => f.id.startsWith(id))!) : pickFaces(library, people.map((p) => p.toUpperCase()), expression ?? null, kind === "reaction" ? 2 : 4, kind as "reaction" | "game");
 const facePaths = await downloadFaces(faces, work);
 const background = bgArg!.startsWith("steam:") ? await findSteamHero(bgArg!.slice(6), path.join(work, "steam.jpg")) : bgArg!;
 if (!background) throw new Error("Sfondo non trovato");
