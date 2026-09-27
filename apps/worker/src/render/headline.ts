@@ -141,41 +141,33 @@ export async function renderHeadlinePng(text: string, outputPath: string): Promi
   }
 }
 
-const SFX_PATH = path.resolve(process.cwd(), "assets", "sfx", "headline-whoosh.wav");
+const SFX_PATH = path.resolve(process.cwd(), "assets", "sfx", "headline-whoosh-mixkit1491.wav");
+/** Il whoosh scelto da simo fra 6 di Mixkit (licenza Mixkit: uso gratuito anche su YouTube). */
+const SFX_URL = "https://assets.mixkit.co/active_storage/sfx/1491/1491-preview.mp3";
 
 /**
- * Suono d'entrata del titolo (chiesto da simo): un "whoosh" corto con un piccolo "pop" quando il
- * titolo arriva alla misura piena (0,2 s). Generato con ffmpeg (rumore filtrato + un tono breve),
- * quindi nessun problema di diritti. Creato una volta sola e tenuto in assets/sfx.
+ * Suono d'entrata del titolo: il whoosh di Mixkit scelto da simo il 2026-09-27 (il mio sintetizzato
+ * "faceva schifo"). Scaricato una volta e tenuto in cache in assets/sfx, fuori da git. Tolti i
+ * 0,1 s di silenzio iniziale così il whoosh coincide con l'entrata del titolo; volume pieno
+ * ("non metterlo pianissimo").
  */
 export async function ensureHeadlineSfx(run: (args: string[]) => Promise<unknown>): Promise<string | null> {
   try {
     await fsp.access(SFX_PATH);
     return SFX_PATH;
   } catch {
-    // da generare
+    // da preparare
   }
   try {
     await fsp.mkdir(path.dirname(SFX_PATH), { recursive: true });
-    await run([
-      "-y",
-      "-f",
-      "lavfi",
-      "-i",
-      "anoisesrc=d=0.5:c=pink:a=0.7",
-      "-f",
-      "lavfi",
-      "-i",
-      "sine=f=1400:d=0.07",
-      "-filter_complex",
-      "[0]highpass=f=500,lowpass=f=4500,afade=t=in:d=0.15,afade=t=out:st=0.18:d=0.3,volume=0.5[w];[1]afade=t=out:st=0.01:d=0.06,volume=0.35,adelay=190|190[p];[w][p]amix=inputs=2:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[out]",
-      "-map",
-      "[out]",
-      SFX_PATH,
-    ]);
+    const res = await fetch(SFX_URL);
+    if (!res.ok) throw new Error(`download ${res.status}`);
+    const mp3 = SFX_PATH.replace(/.wav$/, ".mp3");
+    await fsp.writeFile(mp3, Buffer.from(await res.arrayBuffer()));
+    await run(["-y", "-i", mp3, "-af", "atrim=start=0.1:duration=0.9,asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo", SFX_PATH]);
     return SFX_PATH;
   } catch (err) {
-    logger.warn("Suono del titolo non generato", { error: err instanceof Error ? err.message : String(err) });
+    logger.warn("Suono del titolo non preparato", { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }

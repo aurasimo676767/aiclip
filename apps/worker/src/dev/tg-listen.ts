@@ -16,7 +16,7 @@ await fsp.mkdir(inbox, { recursive: true });
 const api = (method: string) => `https://api.telegram.org/bot${token}/${method}`;
 
 type Photo = { file_id: string; width: number; height: number };
-type Update = { update_id: number; message?: { chat: { id: number }; text?: string; caption?: string; photo?: Photo[]; document?: { file_id: string; mime_type?: string } } };
+type Update = { update_id: number; message?: { chat: { id: number }; text?: string; caption?: string; photo?: Photo[]; document?: { file_id: string; mime_type?: string }; reply_to_message?: { text?: string; caption?: string; audio?: { title?: string }; video?: unknown; photo?: unknown } } };
 
 async function saveFile(fileId: string, name: string): Promise<string> {
   const info = (await (await fetch(`${api("getFile")}?file_id=${fileId}`)).json()) as { result?: { file_path?: string } };
@@ -50,7 +50,10 @@ while (true) {
         saved = await saveFile(m.document.file_id, `${u.update_id}${caption ? "-" + caption : ""}`);
       }
       const text = (m.text ?? m.caption ?? "").replace(/\s+/g, " ");
-      console.log(`TELEGRAM da simo: ${text}${saved ? ` [immagine salvata: ${saved}]` : ""}`);
+      // Se risponde a un messaggio del bot (es. "questo" su uno dei suoni), si dice a quale.
+      const r = m.reply_to_message;
+      const replyTo = r ? (r.audio?.title ?? r.caption ?? r.text ?? (r.video ? "un video" : r.photo ? "una foto" : "un messaggio")).replace(/s+/g, " ").slice(0, 80) : null;
+      console.log(`TELEGRAM da simo: ${text}${replyTo ? ` [in risposta a: ${replyTo}]` : ""}${saved ? ` [immagine salvata: ${saved}]` : ""}`);
     }
   } catch (error) {
     console.error(`tg-listen: ${error instanceof Error ? error.message : error}`);
