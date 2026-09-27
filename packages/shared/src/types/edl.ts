@@ -34,4 +34,10 @@ export type EDLEvent = ZoomEvent | PunchInEvent | HighlightWordEvent | SpeakerSw
 export interface EditDecisionList {
   template: TemplateName;
   events: EDLEvent[];
+  /**
+   * Titolo fisso in alto negli Shorts (3-6 parole, il gancio scritto): chi scorre capisce subito di
+   * cosa si parla (simo, 2026-09-27: metà del pubblico scorreva via al primo secondo). Salvato
+   * dentro l'EDL, che il render legge così com'è: nessuna migrazione.
+   */
+  headline?: string;
 }

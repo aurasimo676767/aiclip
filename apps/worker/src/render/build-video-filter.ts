@@ -13,6 +13,26 @@ export interface VideoFilterParams {
   punchZoom?: number;
   /** Tratti in cui il pannello del gioco NON è riempito al centro (vedi ContentView). */
   contentViews?: ContentView[];
+  /** Titolo fisso in alto (PNG di headline.ts, input ffmpeg già in loop per tutta la clip). */
+  headline?: { input: string; width: number; height: number };
+}
+
+/**
+ * Centro verticale del titolo fisso: sotto la fascia dell'interfaccia di YouTube Shorts in alto
+ * (ricerca, fotocamera) e ben sopra i sottotitoli, che nel layout diviso stanno a metà.
+ */
+const HEADLINE_CENTER_Y = 250;
+
+/**
+ * Entrata "pop" del titolo: parte al 60%, supera un po' la misura finale e ci torna (0,35 s), con
+ * una dissolvenza veloce. Solo espressioni di t nello scale con eval=frame e overlay centrato.
+ */
+function headlineSteps(inputLabel: string, headline: NonNullable<VideoFilterParams["headline"]>, base: string, out: string): string[] {
+  const s = "if(lt(t,0.2),0.6+2.75*t,if(lt(t,0.35),1.15-(t-0.2),1))";
+  return [
+    `[${headline.input}]format=rgba,fade=t=in:st=0:d=0.12:alpha=1,scale=w='max(2,trunc(${headline.width}*${s}/2)*2)':h=-2:eval=frame[hl]`,
+    `[${base}][hl]overlay=x='(W-w)/2':y='${HEADLINE_CENTER_Y}-h/2':eval=frame:shortest=1[${out}]`,
+  ];
 }
 
 /**
@@ -59,7 +79,9 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
 
   const lastLabel = "subbed";
   // I sottotitoli vanno DOPO il primo piano: devono restare della stessa misura mentre il video zooma.
-  steps.push(`[${composed}]${subtitlesFilter(assSubtitlesPath)}[${lastLabel}]`);
+  const subbed = params.headline ? "subbednohl" : lastLabel;
+  steps.push(`[${composed}]${subtitlesFilter(assSubtitlesPath)}[${subbed}]`);
+  if (params.headline) steps.push(...headlineSteps(params.headline.input, params.headline, subbed, lastLabel));
 
   if (showProgressBar) {
     const safeDuration = Math.max(clipDurationSeconds, 0.1);

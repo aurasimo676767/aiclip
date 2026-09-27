@@ -69,6 +69,8 @@ export interface RankedClip {
   whyStop?: string;
   /** false = nello Short si sente quasi solo il video reagito, lo streamer non reagisce: si scarta. */
   streamerReacts?: boolean;
+  /** Titolo fisso in alto nello Short (3-6 parole): finisce in edl.headline. */
+  headline?: string;
 }
 
 /** Media (0-100) dei sei punteggi, usata come "score" complessivo mostrato in dashboard. */

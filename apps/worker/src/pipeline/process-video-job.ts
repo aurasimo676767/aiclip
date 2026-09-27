@@ -455,7 +455,7 @@ async function buildShortClipsToInsert(
         scores: clip.scores,
         editingStyle: clip.editing_style,
         template: clip.edl.template,
-        edl: clip.edl,
+        edl: clip.headline ? { ...clip.edl, headline: clip.headline } : clip.edl,
         hashtags: clip.hashtags,
         caption: clip.caption,
         badges: clip.badges,

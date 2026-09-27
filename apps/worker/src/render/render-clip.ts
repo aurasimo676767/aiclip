@@ -1,10 +1,12 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { env } from "../env.js";
 import type { RankedClip, TranscriptSegment, TemplateConfig } from "@clipforge/shared";
 import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import type { FaceTracker, Layout, TimedCrop } from "../face-tracking/face-tracker.js";
 import { buildAssSubtitles, screamWindows } from "./captions.js";
+import { renderHeadlinePng } from "./headline.js";
 import { buildVideoFilterComplex, type ContentView } from "./build-video-filter.js";
 import { detectSilences, detectQuietSpeechGaps, mergeIntervals, computeKeepSegments, buildTimeRemap, type TimeSegment } from "./silence.js";
 import { trimToKeepSegments } from "./trim-concat.js";
@@ -98,6 +100,10 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
   // Il layout serve QUI (position "smart" segue il confine webcam/contenuto quando presente),
   // per questo viene calcolato prima delle caption invece che dopo come in origine.
   const assContent = buildAssSubtitles(clipRelativeSegments, template.captionStyle, { highlightWords, layout });
+  // Titolo fisso in alto (immagine con emoji, entra con un'animazione): vedi headline.ts.
+  const headlineText = env.SHORTS_HEADLINE === "off" ? undefined : (clip.edl.headline ?? headlineFromTitle(clip.title));
+  const headlinePath = path.join(workDir, "headline.png");
+  const headlineSize = headlineText ? await renderHeadlinePng(headlineText, headlinePath) : null;
   const assPath = path.join(workDir, "captions.ass");
   await fsp.writeFile(assPath, assContent, "utf-8");
 
@@ -117,9 +123,19 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
     // Primo piano netto sugli urli, con l'intensità di zoom del template (0 = mai).
     punchIns: template.zoomIntensity > 0 ? screamWindows(clipRelativeSegments) : [],
     punchZoom: 1 + PUNCH_ZOOM_PER_INTENSITY * template.zoomIntensity,
+    headline: headlineSize ? { input: "1:v", ...headlineSize } : undefined,
   });
 
-  const args = ["-y", "-i", workingClipPath, "-filter_complex", filterComplex, "-map", "[vout]"];
+  const args = [
+    "-y",
+    "-i",
+    workingClipPath,
+    ...(headlineSize ? ["-loop", "1", "-t", finalDuration.toFixed(3), "-i", headlinePath] : []),
+    "-filter_complex",
+    filterComplex,
+    "-map",
+    "[vout]",
+  ];
 
   if (sourceProbe.hasAudio) {
     args.push("-map", "0:a:0", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k");
@@ -220,4 +236,14 @@ function sliceAndRemapSegments(
         })),
     }))
     .filter((seg) => seg.words.length > 0 || !seg.text);
+}
+
+/** Ripiego per le clip create prima del campo headline: le prime 5 parole del titolo, senza emoji né puntini. */
+function headlineFromTitle(title: string): string | undefined {
+  const words = title
+    .replace(/[\p{Extended_Pictographic}\u{FE0F}]/gu, "")
+    .replace(/\.{2,}/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  return words.length ? words.slice(0, 5).join(" ") : undefined;
 }

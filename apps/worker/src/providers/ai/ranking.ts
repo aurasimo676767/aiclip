@@ -86,6 +86,11 @@ const RANKING_TOOL_SCHEMA = {
               description:
                 "In UNA frase concreta: perché uno sconosciuto che scorre gli Shorts si ferma e magari commenta (cosa esattamente lo fa ridere, stupire, arrabbiare o discutere). Se non riesci a scriverlo in modo concreto, NON restituire questa clip.",
             },
+            headline: {
+              type: "string",
+              description:
+                "Titolo fisso che sta in alto sullo Short per tutta la durata. CORTO: 2-5 parole, massimo 25 caratteri, scritto come lo scriverebbe un ragazzo che gestisce un canale di clip, NON come un titolo da AI o da giornale. Dice subito di cosa si parla. Può finire con UNA emoji che c'entra (😭 💀 🤬 😱 🤣 🔥). Esempi veri: \"CUCINA UN POKEMON?! 💀\", \"CI HANNO DERUBATO 🤬\", \"SONO GAY?\", \"HA MANGIATO I RAGNI 🤢\", \"NON SA IL TESTO 😭\". Vietato: INCREDIBILE, PAZZESCO, EPICO, ASSURDO come parola da sola, frasi lunghe, nomi degli streamer.",
+            },
             streamerReacts: {
               type: "boolean",
               description:

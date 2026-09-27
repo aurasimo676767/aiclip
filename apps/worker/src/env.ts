@@ -41,6 +41,8 @@ const envSchema = z.object({
   // dal pulsante "Genera copertina" del sito, quindi si spende solo quando lo preme simo.
   COVER_AI_MODEL: z.string().default("gpt-image-2.5-sunburst"),
   COVER_AI_QUALITY: z.enum(["low", "medium", "high"]).default("medium"),
+  // Titolo fisso in alto negli Shorts (edl.headline). "off" = niente titolo.
+  SHORTS_HEADLINE: z.string().default("on"),
   TRANSCRIPTION_PROVIDER: z.enum(["openai", "local"]).default("openai"),
   // Lingua passata a Whisper. Senza, la deduce dai primi 30 secondi di ogni blocco da ~20 minuti:
   // un VOD che si apriva con un audio in inglese è stato trascritto (e tradotto) in inglese per

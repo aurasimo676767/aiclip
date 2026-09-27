@@ -34,6 +34,7 @@ export const rankedClipSchema = z.object({
   reactedContentStart: z.number().nonnegative().nullable().optional(),
   whyStop: z.string().max(400).optional(),
   streamerReacts: z.boolean().optional(),
+  headline: z.string().max(80).optional(),
 });
 
 export const rankedClipsResponseSchema = z.object({
