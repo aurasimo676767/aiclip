@@ -28,6 +28,15 @@ interface PublishJobRow {
   comment_count: number | null;
   stats_updated_at: string | null;
   cancelled_at: string | null;
+  // Statistiche complete da YouTube Analytics (migrazione 0028; assenti prima).
+  analytics_views?: number | null;
+  engaged_views?: number | null;
+  avg_view_duration?: number | null;
+  avg_view_percentage?: number | null;
+  share_count?: number | null;
+  subscribers_gained?: number | null;
+  analytics_updated_at?: string | null;
+  analytics_error?: string | null;
   clips: ClipInfo | ClipInfo[] | null;
 }
 
@@ -42,7 +51,7 @@ export default async function PublishedPage() {
   const { data: jobsRaw } = await supabase
     .from("youtube_publish_jobs")
     .select(
-      "id, clip_id, status, youtube_url, publish_at, completed_at, view_count, like_count, comment_count, stats_updated_at, cancelled_at, clips(title, duration, format, thumbnail_path)",
+      "*, clips(title, duration, format, thumbnail_path)",
     )
     .order("created_at", { ascending: false });
 
@@ -146,6 +155,7 @@ export default async function PublishedPage() {
                         {job.completed_at ? ` · ${new Date(job.completed_at).toLocaleDateString("it-IT", { day: "numeric", month: "short" })}` : ""}
                       </span>
                     </div>
+                    <AnalyticsRow job={job} />
                     <div className="h-1 max-w-xs overflow-hidden rounded-full bg-overlay">
                       <div className="h-full rounded-full bg-brand-gradient" style={{ width: `${((job.view_count ?? 0) / maxViews) * 100}%` }} />
                     </div>
@@ -157,6 +167,36 @@ export default async function PublishedPage() {
           </ul>
         )}
       </section>
+    </div>
+  );
+}
+
+/**
+ * Statistiche complete di YouTube Analytics per un video: quanti restano invece di scorrere via
+ * (engaged/views, la "percentuale di chi ha continuato a guardare" di Studio), quanto lo guardano
+ * in media, condivisioni e iscritti. YouTube le calcola con 1-2 giorni di ritardo.
+ */
+function AnalyticsRow({ job }: { job: PublishJobRow }) {
+  if (job.analytics_error && !job.analytics_updated_at) {
+    return <p className="text-xs text-amber-300">{job.analytics_error}</p>;
+  }
+  if (!job.analytics_updated_at) return null;
+  const stayed = job.analytics_views ? Math.round(((job.engaged_views ?? 0) / job.analytics_views) * 100) : null;
+  // Soglie indicative per gli Shorts: sotto il 50% YouTube non lo spinge oltre il primo pubblico.
+  const tone = stayed === null ? "text-muted" : stayed >= 65 ? "text-emerald-300" : stayed >= 50 ? "text-amber-300" : "text-red-300";
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+      <span title="Quanti hanno continuato a guardare invece di scorrere via (engaged / visualizzazioni)">
+        Restano <span className={`font-semibold ${tone}`}>{stayed === null ? "—" : `${stayed}%`}</span>
+      </span>
+      <span title="Durata media di visualizzazione e percentuale del video guardata">
+        Guardato <span className="font-medium text-ink">{Math.round(job.avg_view_duration ?? 0)}s</span> ({Math.round(job.avg_view_percentage ?? 0)}%)
+      </span>
+      <span>Condivisioni <span className="font-medium text-ink">{formatCount(job.share_count ?? null)}</span></span>
+      <span>Iscritti <span className="font-medium text-ink">+{job.subscribers_gained ?? 0}</span></span>
+      <span className="text-faint" title="YouTube aggiorna questi numeri con 1-2 giorni di ritardo">
+        agg. {new Date(job.analytics_updated_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}
+      </span>
     </div>
   );
 }

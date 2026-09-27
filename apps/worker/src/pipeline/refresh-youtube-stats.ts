@@ -1,7 +1,7 @@
 import { env } from "../env.js";
 import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
-import { fetchYoutubeVideoStats } from "../providers/youtube/youtube-stats.js";
+import { fetchYoutubeVideoStats, fetchYoutubeVideoAnalytics } from "../providers/youtube/youtube-stats.js";
 
 /**
  * Aggiorna periodicamente views/like/commenti dei video già pubblicati su YouTube, salvandoli
@@ -98,6 +98,47 @@ export async function refreshYoutubeStats(): Promise<void> {
             stats_updated_at: now,
           })
           .in("id", jobIds);
+      }
+
+      // Statistiche complete (tenuta, engaged, condivisioni, iscritti) da YouTube Analytics. Senza
+      // il permesso yt-analytics.readonly (connessioni fatte prima del 2026-09-27) si segna di
+      // ricollegare YouTube, senza bloccare le statistiche base qui sopra.
+      try {
+        const analytics = await fetchYoutubeVideoAnalytics(
+          {
+            clientId: env.GOOGLE_CLIENT_ID,
+            clientSecret: env.GOOGLE_CLIENT_SECRET,
+            accessToken: refreshedAccessToken ?? connection.access_token,
+            refreshToken: connection.refresh_token,
+            expiryDate: refreshedExpiresAt ? new Date(refreshedExpiresAt).getTime() : new Date(connection.expires_at).getTime(),
+          },
+          [...videoIdToJobIds.keys()],
+        );
+        for (const a of analytics) {
+          const jobIds = videoIdToJobIds.get(a.videoId) ?? [];
+          if (jobIds.length === 0) continue;
+          await supabase
+            .from("youtube_publish_jobs")
+            .update({
+              analytics_views: a.views,
+              engaged_views: a.engagedViews,
+              avg_view_duration: a.averageViewDuration,
+              avg_view_percentage: a.averageViewPercentage,
+              share_count: a.shares,
+              subscribers_gained: a.subscribersGained,
+              analytics_updated_at: now,
+              analytics_error: null,
+            })
+            .in("id", jobIds);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const missingScope = /insufficient|scope|forbidden|403/i.test(message);
+        await supabase
+          .from("youtube_publish_jobs")
+          .update({ analytics_error: missingScope ? "Ricollega YouTube dalle Opzioni per vedere le statistiche complete" : message.slice(0, 300) })
+          .in("id", userJobs.map((j) => j.id));
+        logger.warn("Statistiche complete YouTube non lette", { userId, error: message });
       }
 
       logger.info("Statistiche YouTube aggiornate", { userId, videos: stats.length });

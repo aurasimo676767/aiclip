@@ -5,7 +5,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 // di un video già caricato — videos.update con part=status richiede lo scope pieno "youtube"
 // (osservato in pratica: "Request had insufficient authentication scopes" sull'annullamento
 // programmazione, che chiama esattamente questo endpoint).
-const SCOPES = ["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.readonly"];
+// yt-analytics.readonly (2026-09-27): statistiche complete (tenuta, engaged, iscritti) per ogni video.
+const SCOPES = ["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly"];
 
 /** Avvia il flusso OAuth Google: reindirizza l'utente alla schermata di consenso. */
 export async function GET(request: Request) {

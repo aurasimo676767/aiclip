@@ -507,6 +507,14 @@ export interface Database {
           like_count: number | null;
           comment_count: number | null;
           stats_updated_at: string | null;
+          engaged_views: number | null;
+          avg_view_duration: number | null;
+          avg_view_percentage: number | null;
+          share_count: number | null;
+          subscribers_gained: number | null;
+          analytics_views: number | null;
+          analytics_updated_at: string | null;
+          analytics_error: string | null;
           cancelled_at: string | null;
         };
         Insert: {
@@ -531,6 +539,14 @@ export interface Database {
           like_count?: number | null;
           comment_count?: number | null;
           stats_updated_at?: string | null;
+          engaged_views?: number | null;
+          avg_view_duration?: number | null;
+          avg_view_percentage?: number | null;
+          share_count?: number | null;
+          subscribers_gained?: number | null;
+          analytics_views?: number | null;
+          analytics_updated_at?: string | null;
+          analytics_error?: string | null;
           cancelled_at?: string | null;
         };
         Update: {
@@ -555,6 +571,14 @@ export interface Database {
           like_count?: number | null;
           comment_count?: number | null;
           stats_updated_at?: string | null;
+          engaged_views?: number | null;
+          avg_view_duration?: number | null;
+          avg_view_percentage?: number | null;
+          share_count?: number | null;
+          subscribers_gained?: number | null;
+          analytics_views?: number | null;
+          analytics_updated_at?: string | null;
+          analytics_error?: string | null;
           cancelled_at?: string | null;
         };
         Relationships: [];

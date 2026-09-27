@@ -127,7 +127,9 @@ async function thumbnailQueueLoop(): Promise<void> {
   }
 }
 
-const STATS_REFRESH_INTERVAL_MS = 20 * 60 * 1000; // ogni 20 minuti: sweep periodico, non una coda — non serve più frequente
+// Ogni 10 minuti (simo vuole le statistiche aggiornate sul sito): views/like/commenti cambiano di
+// continuo; la tenuta di YouTube Analytics arriva comunque con 1-2 giorni di ritardo.
+const STATS_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 /** Sweep periodico (non una coda): aggiorna views/like/commenti dei video già pubblicati. */
 async function statsRefreshLoop(): Promise<void> {
