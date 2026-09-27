@@ -6,7 +6,7 @@ import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import type { FaceTracker, Layout, TimedCrop } from "../face-tracking/face-tracker.js";
 import { buildAssSubtitles, screamWindows } from "./captions.js";
-import { renderHeadlinePng } from "./headline.js";
+import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
 import { buildVideoFilterComplex, type ContentView } from "./build-video-filter.js";
 import { detectSilences, detectQuietSpeechGaps, mergeIntervals, computeKeepSegments, buildTimeRemap, type TimeSegment } from "./silence.js";
 import { trimToKeepSegments } from "./trim-concat.js";
@@ -126,18 +126,28 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
     headline: headlineSize ? { input: "1:v", ...headlineSize } : undefined,
   });
 
+  // Suono d'entrata del titolo, mescolato all'audio prima della normalizzazione.
+  const sfxPath = headlineSize && sourceProbe.hasAudio ? await ensureHeadlineSfx((a) => runFfmpeg(a)) : null;
+  const sfxInput = headlineSize ? 2 : 1;
+  const fullFilter = sfxPath
+    ? `${filterComplex};
+[0:a][${sfxInput}:a]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11[aout]`
+    : filterComplex;
   const args = [
     "-y",
     "-i",
     workingClipPath,
     ...(headlineSize ? ["-loop", "1", "-t", finalDuration.toFixed(3), "-i", headlinePath] : []),
+    ...(sfxPath ? ["-i", sfxPath] : []),
     "-filter_complex",
-    filterComplex,
+    fullFilter,
     "-map",
     "[vout]",
   ];
 
-  if (sourceProbe.hasAudio) {
+  if (sfxPath) {
+    args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
+  } else if (sourceProbe.hasAudio) {
     args.push("-map", "0:a:0", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k");
   } else {
     args.push("-an");

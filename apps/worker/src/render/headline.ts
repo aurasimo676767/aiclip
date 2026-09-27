@@ -14,12 +14,14 @@ import { logger } from "../lib/logger.js";
  */
 
 const FONTS_DIR = path.resolve(process.cwd(), "assets", "fonts");
-const FONT = { file: "Anton-Regular.ttf", family: "Anton" };
-const EMOJI_CACHE = path.resolve(process.cwd(), "assets", "emoji-cache");
-const MAX_WIDTH = 960;
-const BASE_SIZE = 118;
-const LINE_HEIGHT = 1.02;
-const STROKE = 14;
+// Montserrat Black Italic (OFL): simo trovava l'Anton "troppo alto, troppo stretto".
+const FONT = { file: "Montserrat-BlackItalic.ttf", family: "Montserrat" };
+// Emoji Microsoft Fluent 3D (licenza MIT): le Twemoji a simo sembravano "quelle di Windows".
+const EMOJI_CACHE = path.resolve(process.cwd(), "assets", "emoji-cache", "fluent3d");
+const MAX_WIDTH = 980;
+const BASE_SIZE = 86;
+const LINE_HEIGHT = 1.12;
+const STROKE = 12;
 
 const EMOJI_RE = /\p{Extended_Pictographic}(?:\u{FE0F}|\u{200D}\p{Extended_Pictographic}|\p{Emoji_Modifier})*/gu;
 
@@ -31,7 +33,7 @@ function escapeXml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** Emoji Twemoji a colori (PNG 72x72) in cache locale; null se non si trova. */
+/** Emoji Fluent 3D (PNG) in cache locale; null se non si trova. */
 async function emojiPng(emoji: string): Promise<Buffer | null> {
   const codes = [...emoji].map((c) => c.codePointAt(0)!.toString(16)).filter((c) => c !== "fe0f");
   const name = codes.join("-");
@@ -42,7 +44,7 @@ async function emojiPng(emoji: string): Promise<Buffer | null> {
     // non in cache
   }
   try {
-    const res = await fetch(`https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72/${name}.png`);
+    const res = await fetch(`https://cdn.jsdelivr.net/gh/shuding/fluentui-emoji-unicode/assets/${name}_3d.png`);
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     await fsp.mkdir(EMOJI_CACHE, { recursive: true });
@@ -56,7 +58,7 @@ async function emojiPng(emoji: string): Promise<Buffer | null> {
 /** Divide in al massimo due righe equilibrate; le emoji vanno in fondo alla riga in cui stavano. */
 function splitLines(words: string[]): string[][] {
   const len = (ws: string[]) => ws.join(" ").length;
-  if (words.length <= 1 || len(words) <= 14) return [words];
+  if (words.length <= 1 || len(words) <= 16) return [words];
   let best = { diff: Infinity, i: 1 };
   for (let i = 1; i < words.length; i++) {
     const diff = Math.abs(len(words.slice(0, i)) - len(words.slice(i)));
@@ -88,7 +90,7 @@ export async function renderHeadlinePng(text: string, outputPath: string): Promi
   const lines = splitLines(words).map((ws) => ws.join(" "));
 
   let size = BASE_SIZE;
-  const emojiSlot = (s: number) => (emojis.length > 0 ? emojis.length * s * 0.95 + s * 0.15 : 0);
+  const emojiSlot = (s: number) => (emojis.length > 0 ? emojis.length * s * 1.1 + s * 0.15 : 0);
   // Si rimpicciolisce finché la riga più lunga (con le emoji in fondo all'ultima) sta nella larghezza.
   for (let i = 0; i < 6; i++) {
     const widest = Math.max(...lines.map((l, k) => textWidth(l, size) + (k === lines.length - 1 ? emojiSlot(size) : 0)));
@@ -110,14 +112,14 @@ export async function renderHeadlinePng(text: string, outputPath: string): Promi
     const x0 = (width - lineWidth) / 2;
     const fill = lines.length > 1 && k === 0 ? "url(#w)" : "url(#y)";
     const text = `<text x="${x0}" y="${baseline}" font-family="${FONT.family}" font-size="${size}" fill="${fill}" stroke="#000" stroke-width="${STROKE}" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(line)}</text>`;
-    const shadow = `<text x="${x0 + 6}" y="${baseline + 8}" font-family="${FONT.family}" font-size="${size}" fill="#000" stroke="#000" stroke-width="${STROKE}" stroke-linejoin="round" opacity="0.55">${escapeXml(line)}</text>`;
+    const shadow = `<text x="${x0 + 5}" y="${baseline + 7}" font-family="${FONT.family}" font-size="${size}" fill="#000" stroke="#000" stroke-width="${STROKE}" stroke-linejoin="round" opacity="0.6">${escapeXml(line)}</text>`;
     parts.push(shadow, text);
     if (k === lines.length - 1) {
       let ex = x0 + textWidth(line, size) + size * 0.15;
       emojiImages.forEach((img) => {
         if (!img) return;
-        parts.push(`<image x="${ex}" y="${baseline - size * 0.82}" width="${size * 0.9}" height="${size * 0.9}" href="data:image/png;base64,${img.toString("base64")}"/>`);
-        ex += size * 0.95;
+        parts.push(`<image x="${ex}" y="${baseline - size * 0.9}" width="${size * 1.05}" height="${size * 1.05}" href="data:image/png;base64,${img.toString("base64")}"/>`);
+        ex += size * 1.1;
       });
     }
   });
@@ -127,7 +129,7 @@ export async function renderHeadlinePng(text: string, outputPath: string): Promi
       <linearGradient id="w" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#e6e6ec"/></linearGradient>
       <linearGradient id="y" x1="0" y1="0" x2="0" y2="1"><stop offset="10%" stop-color="#fff200"/><stop offset="100%" stop-color="#ffae00"/></linearGradient>
     </defs>
-    <g transform="translate(${width / 2} 0) skewX(-6) translate(${-width / 2} 0)">${parts.join("")}</g>
+    <g>${parts.join("")}</g>
   </svg>`;
   try {
     const png = new Resvg(svg, resvgOptions()).render().asPng();
@@ -135,6 +137,45 @@ export async function renderHeadlinePng(text: string, outputPath: string): Promi
     return { width, height };
   } catch (err) {
     logger.warn("Titolo fisso non creato", { error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+const SFX_PATH = path.resolve(process.cwd(), "assets", "sfx", "headline-whoosh.wav");
+
+/**
+ * Suono d'entrata del titolo (chiesto da simo): un "whoosh" corto con un piccolo "pop" quando il
+ * titolo arriva alla misura piena (0,2 s). Generato con ffmpeg (rumore filtrato + un tono breve),
+ * quindi nessun problema di diritti. Creato una volta sola e tenuto in assets/sfx.
+ */
+export async function ensureHeadlineSfx(run: (args: string[]) => Promise<unknown>): Promise<string | null> {
+  try {
+    await fsp.access(SFX_PATH);
+    return SFX_PATH;
+  } catch {
+    // da generare
+  }
+  try {
+    await fsp.mkdir(path.dirname(SFX_PATH), { recursive: true });
+    await run([
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "anoisesrc=d=0.5:c=pink:a=0.7",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=f=1400:d=0.07",
+      "-filter_complex",
+      "[0]highpass=f=500,lowpass=f=4500,afade=t=in:d=0.15,afade=t=out:st=0.18:d=0.3,volume=0.5[w];[1]afade=t=out:st=0.01:d=0.06,volume=0.35,adelay=190|190[p];[w][p]amix=inputs=2:normalize=0,aformat=sample_rates=48000:channel_layouts=stereo[out]",
+      "-map",
+      "[out]",
+      SFX_PATH,
+    ]);
+    return SFX_PATH;
+  } catch (err) {
+    logger.warn("Suono del titolo non generato", { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }

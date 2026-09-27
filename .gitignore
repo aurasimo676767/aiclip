@@ -51,3 +51,4 @@ apps/worker/models/BiRefNet*.onnx
 # Copertine d'esempio mandate da simo (di altri canali): solo riferimento di stile in locale.
 apps/worker/assets/cover-style/
 apps/worker/assets/emoji-cache/
+apps/worker/assets/sfx/

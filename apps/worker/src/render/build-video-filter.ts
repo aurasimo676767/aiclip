@@ -21,7 +21,8 @@ export interface VideoFilterParams {
  * Centro verticale del titolo fisso: sotto la fascia dell'interfaccia di YouTube Shorts in alto
  * (ricerca, fotocamera) e ben sopra i sottotitoli, che nel layout diviso stanno a metà.
  */
-const HEADLINE_CENTER_Y = 250;
+// Alzato da 250 (2026-09-27): stava sulla testa dello streamer.
+const HEADLINE_CENTER_Y = 175;
 
 /**
  * Entrata "pop" del titolo: parte al 60%, supera un po' la misura finale e ci torna (0,35 s), con
