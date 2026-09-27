@@ -65,6 +65,10 @@ export interface RankedClip {
    * parte il contenuto reagito. Lo Short deve partire da lì, non a metà (richiesta di simo).
    */
   reactedContentStart?: number | null;
+  /** Perché uno sconosciuto che scorre si ferma (una frase concreta): se non c'è, lo Short è inutile. */
+  whyStop?: string;
+  /** false = nello Short si sente quasi solo il video reagito, lo streamer non reagisce: si scarta. */
+  streamerReacts?: boolean;
 }
 
 /** Media (0-100) dei sei punteggi, usata come "score" complessivo mostrato in dashboard. */

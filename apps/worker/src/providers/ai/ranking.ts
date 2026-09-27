@@ -81,6 +81,16 @@ const RANKING_TOOL_SCHEMA = {
                 "Titolo REALE di pubblicazione su YouTube Shorts, max ~80 caratteri — segui alla lettera la sezione 'Stile titoli' del prompt di sistema (maiuscolo su hook, punteggiatura doppia, vocali accentate con apostrofo, emoji coerenti, tono esagerato), non un titolo 'corretto'.",
             },
             reason: { type: "string", description: "Perché questa clip funziona, in 1-2 frasi." },
+            whyStop: {
+              type: "string",
+              description:
+                "In UNA frase concreta: perché uno sconosciuto che scorre gli Shorts si ferma e magari commenta (cosa esattamente lo fa ridere, stupire, arrabbiare o discutere). Se non riesci a scriverlo in modo concreto, NON restituire questa clip.",
+            },
+            streamerReacts: {
+              type: "boolean",
+              description:
+                "true se lo streamer parla o reagisce in modo sentito per buona parte della clip (commenta, ride, si arrabbia, risponde). false se si sente quasi solo il video/TikTok reagito e lo streamer sta zitto o dice due parole.",
+            },
             scores: {
               type: "object",
               properties: {
@@ -138,6 +148,8 @@ const RANKING_TOOL_SCHEMA = {
             "edl",
             "hashtags",
             "caption",
+            "whyStop",
+            "streamerReacts",
             "badges",
           ],
         },
@@ -152,6 +164,10 @@ const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il pri
 1. Scartare senza pietà i candidati deboli: poco hook, poco comprensibili da soli, ripetitivi, o semplicemente "rumorosi" (esclamazioni/parolacce) senza una battuta, una svolta o un fatto concreto dietro. Presta attenzione in particolare al "botta e risposta circolare": due persone che si scambiano domande/reazioni confuse ("che significa?" "boh" "cioè?" "dio") SENZA che nessuna delle due arrivi mai a una risposta, un fatto o una svolta concreta — non è "clarity" solo perché le battute si capiscono singolarmente, è un giro a vuoto e va scartato o comunque penalizzato pesantemente su payoff e clarity, anche se l'energia/reazione fisica è alta (quella al massimo giustifica "high_energy" come badge, non un punteggio alto). Un vero botta e risposta forte HA una progressione (qualcuno spiega, sbaglia, viene corretto, arriva a una battuta) — se rileggendo il transcript la conversazione potrebbe continuare all'infinito senza cambiare nulla, è debole. Meglio restituire 2 clip forti che 6 mediocri — non riempire la lista per riempirla.
 2. Rifinire start/end di ogni candidato superstite PRIMA di assegnare i punteggi: il passaggio precedente (economico) individua la finestra giusta ma può sbagliare il punto esatto. Usa il transcript con contesto (hai ~20s in più prima e dopo il candidato) per verificare che "start" cada ESATTAMENTE sulla prima parola della frase-gancio, non su un preambolo/setup che la precede ("allora ragazzi", "quindi vi dicevo", introduzioni, pause morte) — sposta start in avanti se serve, anche se il candidato originale iniziava prima. Le prime parole della clip risultante devono già essere il contenuto forte: un'affermazione controintuitiva, un fatto/numero sorprendente, o l'attacco di una reazione emotiva forte.
    ATTENZIONE su "end" (errore osservato in produzione: molte clip finivano subito dopo il gancio, 10-15s totali, senza spazio per lo sviluppo — risultato piatto, non divertente): "end" NON deve fermarsi appena finisce la frase-gancio. Deve includere il payoff che segue — la reazione, la battuta, l'escalation, la spiegazione assurda — e chiudersi quando la storia è finita, non al primo punto utile. LA DURATA LA DECIDE LA STORIA: una battuta secca sta in 20-30 s, una storia o una reaction con setup, sviluppo e finale può arrivare a ${CLIP_DURATION_TARGET.max} s (massimo assoluto ${CLIP_DURATION_TARGET.hardMax}). Non allungare MAI con chiacchiere, rilanci o tempi morti per arrivare a una durata: uno Short da 25 s tutto pieno batte uno da 55 s con 20 s di vuoto. Poi imponi il tetto di durata: end - start non deve MAI superare ${CLIP_DURATION_TARGET.hardMax} secondi — se il payoff naturale è più lungo, accorcia il finale o taglia rilanci/ripetizioni invece di sforare, ma preferisci sempre tenere il payoff piuttosto che tagliarlo per stare più corti del necessario: il tetto è un MASSIMO, non un obiettivo da raggiungere il prima possibile.
+2-quinquies. SOLO SHORTS CHE VALE LA PENA PUBBLICARE (simo, 2026-09-27: "fa short anche inutili, di roba che non fa divertire né nulla"). Uno Short deve far ridere, stupire, arrabbiare o far discutere chi non conosce lo streamer: se il momento è solo "interessante", informativo senza una reazione forte, o una chiacchierata tranquilla, SCARTALO anche se il resto è ben fatto.
+   LO STREAMER DEVE REAGIRE: il valore di un canale di clip è la reazione dello streamer. Uno Short in cui si sente quasi solo il video/TikTok reagito e lo streamer non parla o dice due parole è contenuto di altri ripubblicato: va scartato (streamerReacts=false), anche se il video reagito è forte. YouTube inoltre limita la diffusione dei contenuti riusati senza commento.
+   Esempi VERI di Shorts inutili usciti prima, da non rifare: "STA FOTO E' DI UNA BARA PROFANATA VERA..?!" (curiosità raccontata, nessuna reazione forte), "LOLLO SBOTTA CONTRO CHI LO SEGUE..?!" (lamentela senza battuta né finale), "HA FUMATO PER 20 ANNI OGNI GIORNO.. ECCO PERCHE' CORRE ORA" (lo streamer non parla per tutto lo Short, si sente solo il video).
+   Meglio 2 Shorts da pubblicare subito che 8 mediocri.
 2-quater. CONTESTO SUBITO DOPO IL GANCIO (simo, 2026-09-27: "ci deve essere sempre un hook forte, e sopratutto contesto"): prima la frase forte, poi nelle frasi immediatamente successive chi guarda deve capire di cosa si parla (chi, cosa, perché è assurdo). Se il contesto utile viene PRIMA del gancio e senza non si capisce niente, tienilo solo se è anch'esso un gancio (una domanda, un'affermazione forte); altrimenti scegli un altro candidato. Uno Short che dopo 5 secondi non si capisce ancora di cosa parla va scartato.
 2-ter. I PRIMI 2 SECONDI (regola di chi pubblica gli Shorts): chi scorre decide in 2 secondi se restare. La prima frase della clip, quella da cui parte "start", deve dare un MOTIVO per restare e magari commentare: una domanda (anche stupida), un'affermazione forte o assurda, un'esclamazione, un insulto, un'informazione che incuriosisce. Il codice poi mette da solo mezzo secondo di respiro prima della prima parola: tu metti "start" esattamente sulla prima parola di quella frase e scrivi in "hook" le sue prime parole ESATTE come nel transcript.
    Aperture da NON usare (prese da Shorts veri che partivano male): balbettii e parole ripetute ("Io Io te lo giuro", "tu tu sei innamorato no no però", "Ma Ma scusami"), frasi che senza il contesto prima non si capiscono ("se non è che è Dunkirk che prendi il cancro", "E c'era statizia"), riempitivi ("allora", "comunque", "e niente", "eh ragazzi"). Se la frase forte arriva dopo 2-3 secondi di chiacchiere, parti dalla frase forte; se il balbettio è dentro la frase forte, parti dalla parola dopo il balbettio.

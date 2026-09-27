@@ -433,7 +433,12 @@ async function buildShortClipsToInsert(
 
   // Correzione deterministica dei confini PRIMA di tagliare ai primi N: senza, le clip scartate
   // (troppo corte, sovrapposte) avrebbero comunque occupato uno slot dei suggerimenti.
-  const withBreath = await addBreathBeforeHook(sanitizeShortClips(rankedClips, segments, video.id), segments, localVideoPath, readPcmWindow);
+  const worthIt = rankedClips.filter((clip) => {
+    const keep = isWorthPublishing(clip);
+    if (!keep) logger.info("Short scartato: non vale la pena pubblicarlo", { videoId: video.id, title: clip.title, whyStop: clip.whyStop, streamerReacts: clip.streamerReacts, scores: clip.scores });
+    return keep;
+  });
+  const withBreath = await addBreathBeforeHook(sanitizeShortClips(worthIt, segments, video.id), segments, localVideoPath, readPcmWindow);
   const sanitized = await alignReactionStarts(withBreath, segments, localVideoPath, video.id, detectSceneCuts);
   return sanitized
     .slice(0, MAX_SUGGESTED_CLIPS)
@@ -638,4 +643,15 @@ function buildLongformInsertRow(video: VideoRow, clip: RankedLongformClip): Clip
 /** Audio mono 16 kHz PCM di un tratto del video (per cercare il respiro prima del gancio). */
 function readPcmWindow(videoPath: string, absStart: number, duration: number): Promise<Buffer> {
   return runFfmpegBinary(["-ss", absStart.toFixed(3), "-i", videoPath, "-t", duration.toFixed(3), "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1"]);
+}
+
+/**
+ * Filtro sugli Shorts (simo, 2026-09-27: "fa short anche inutili"). I punteggi dell'AI stavano tutti
+ * fra 64 e 85 e nessuno veniva scartato. Esce solo chi supera la soglia ED è una reazione vera dello
+ * streamer. Sugli ultimi 40 Shorts la soglia scartava proprio quelli che simo ha indicato come inutili.
+ */
+function isWorthPublishing(clip: RankedClip): boolean {
+  if (clip.streamerReacts === false) return false;
+  if (clip.whyStop !== undefined && clip.whyStop.trim().length < 10) return false;
+  return overallScore(clip.scores) >= 70 && clip.scores.payoff >= 68;
 }
