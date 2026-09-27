@@ -248,12 +248,17 @@ function sliceAndRemapSegments(
     .filter((seg) => seg.words.length > 0 || !seg.text);
 }
 
-/** Ripiego per le clip create prima del campo headline: le prime 5 parole del titolo, senza emoji né puntini. */
+/**
+ * Ripiego per le clip senza headline: la PRIMA frase del titolo (fino a ".." o "?!"), solo se è
+ * corta (al massimo 5 parole). Prima si prendevano le prime 5 parole e basta, e uscivano titoli
+ * tronchi tipo "MONOLOCALE A MILANO DOVE DEVI" (simo, 2026-09-27): meglio nessun titolo.
+ */
 function headlineFromTitle(title: string): string | undefined {
-  const words = title
-    .replace(/[\p{Extended_Pictographic}\u{FE0F}]/gu, "")
-    .replace(/\.{2,}/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-  return words.length ? words.slice(0, 5).join(" ") : undefined;
+  const clean = title.replace(/[p{Extended_Pictographic}️]/gu, "").trim();
+  const match = clean.match(/^(.+?)(.{2,}|[?!:]+|$)/u);
+  const clause = match?.[1]?.trim() ?? "";
+  const words = clause.split(/s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 5) return undefined;
+  const punct = /[?!]/.test(match?.[2] ?? "") ? "?!" : "";
+  return words.join(" ") + punct;
 }

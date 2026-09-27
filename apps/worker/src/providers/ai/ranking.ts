@@ -155,6 +155,7 @@ const RANKING_TOOL_SCHEMA = {
             "caption",
             "whyStop",
             "streamerReacts",
+            "headline",
             "badges",
           ],
         },

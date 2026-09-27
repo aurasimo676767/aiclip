@@ -29,9 +29,10 @@ const HEADLINE_CENTER_Y = 175;
  * una dissolvenza veloce. Solo espressioni di t nello scale con eval=frame e overlay centrato.
  */
 function headlineSteps(inputLabel: string, headline: NonNullable<VideoFilterParams["headline"]>, base: string, out: string): string[] {
-  const s = "if(lt(t,0.2),0.6+2.75*t,if(lt(t,0.35),1.15-(t-0.2),1))";
+  // Visibile già al primo fotogramma (quello che decide se si scorre via): parte al 90%, 112% a 0,12 s, 100% a 0,25 s.
+  const s = "if(lt(t,0.12),0.9+1.83*t,if(lt(t,0.25),1.12-0.92*(t-0.12),1))";
   return [
-    `[${headline.input}]format=rgba,fade=t=in:st=0:d=0.12:alpha=1,scale=w='max(2,trunc(${headline.width}*${s}/2)*2)':h=-2:eval=frame[hl]`,
+    `[${headline.input}]format=rgba,scale=w='max(2,trunc(${headline.width}*${s}/2)*2)':h=-2:eval=frame[hl]`,
     `[${base}][hl]overlay=x='(W-w)/2':y='${HEADLINE_CENTER_Y}-h/2':eval=frame:shortest=1[${out}]`,
   ];
 }
