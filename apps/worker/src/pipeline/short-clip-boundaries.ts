@@ -131,6 +131,10 @@ function fixBoundaries(clip: RankedClip, segments: TranscriptSegment[]): RankedC
     end = lastFitting ? lastFitting.end : limit;
   }
 
+  // Fine secca per il loop: al massimo 0,2 s dopo l'ultima parola detta (niente silenzio in coda).
+  const lastWord = words.filter((w) => w.end <= end + 0.05 && w.start >= start).pop();
+  if (lastWord) end = Math.min(end, lastWord.end + 0.2);
+
   const duration = end - start;
   if (duration < CLIP_DURATION_TARGET.hardMin) return null;
 

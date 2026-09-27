@@ -15,7 +15,9 @@
  * perdevano il contesto o il finale. La durata la decide la storia (battuta secca ~20-30 s, storia
  * o reaction con setup e finale fino a ~60 s), mai allungata con chiacchiere: i prompt lo dicono.
  */
-export const CLIP_DURATION_TARGET = { min: 20, max: 60, hardMin: 12, hardMax: 70 } as const;
+// max 60→45 lo stesso giorno: dalle statistiche di Studio la tenuta conta più della durata (uno
+// Short da 25 s visto al 90% batte uno da 55 visto al 50%). Il tetto 70 resta per le storie forti.
+export const CLIP_DURATION_TARGET = { min: 20, max: 45, hardMin: 12, hardMax: 70 } as const;
 
 /** Numero massimo di candidati che passano dal filtro economico (Haiku) al ranking forte (Sonnet). */
 export const MAX_CANDIDATES_FOR_RANKING = 25;
