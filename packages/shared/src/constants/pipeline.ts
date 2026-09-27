@@ -10,8 +10,12 @@
  * pietà" spingeva quasi tutte le clip reali verso 10-20s: il gancio c'era ma finiva subito dopo,
  * senza spazio per lo sviluppo/la reazione — risultato percepito come poco divertente/piatto.
  * Il gancio da solo non basta, serve anche il payoff dopo (vedi SYSTEM_PROMPT in ranking.ts).
+ *
+ * max/hardMax alzati (30→60/70) il 2026-09-27 su richiesta di simo: a 30 s netti molte clip
+ * perdevano il contesto o il finale. La durata la decide la storia (battuta secca ~20-30 s, storia
+ * o reaction con setup e finale fino a ~60 s), mai allungata con chiacchiere: i prompt lo dicono.
  */
-export const CLIP_DURATION_TARGET = { min: 20, max: 30, hardMin: 12, hardMax: 30 } as const;
+export const CLIP_DURATION_TARGET = { min: 20, max: 60, hardMin: 12, hardMax: 70 } as const;
 
 /** Numero massimo di candidati che passano dal filtro economico (Haiku) al ranking forte (Sonnet). */
 export const MAX_CANDIDATES_FOR_RANKING = 25;
