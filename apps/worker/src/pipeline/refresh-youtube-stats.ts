@@ -133,10 +133,16 @@ export async function refreshYoutubeStats(): Promise<void> {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const missingScope = /insufficient|scope|forbidden|403/i.test(message);
+        const apiDisabled = /has not been used|is disabled|accessNotConfigured/i.test(message);
+        const missingScope = !apiDisabled && /insufficient|scope|forbidden|403/i.test(message);
+        const readable = apiDisabled
+          ? "Attiva \"YouTube Analytics API\" nel progetto Google Cloud del sito (console.developers.google.com)"
+          : missingScope
+            ? "Ricollega YouTube dalle Opzioni per vedere le statistiche complete"
+            : message.slice(0, 300);
         await supabase
           .from("youtube_publish_jobs")
-          .update({ analytics_error: missingScope ? "Ricollega YouTube dalle Opzioni per vedere le statistiche complete" : message.slice(0, 300) })
+          .update({ analytics_error: readable })
           .in("id", userJobs.map((j) => j.id));
         logger.warn("Statistiche complete YouTube non lette", { userId, error: message });
       }
