@@ -95,6 +95,9 @@ const MERGE_GAP_SECONDS = 4;
 /** Intro: ogni momento fra 1,5 e 5 s, al massimo 3 momenti e circa 10 s in tutto (simo: "anche 10 secondi"). */
 const INTRO_MIN_SECONDS = 1.5;
 const INTRO_MAX_SECONDS = 5;
+/** Reaction: la frase del video più la loro reazione, quindi momenti un po' più lunghi. */
+const REACTION_INTRO_MAX_SECONDS = 6;
+const REACTION_INTRO_MAX_TOTAL_SECONDS = 12;
 const INTRO_MAX_TOTAL_SECONDS = 10.5;
 
 export async function planLongformEdit(params: {
@@ -142,6 +145,18 @@ export async function planLongformEdit(params: {
       .filter((seg) => !byScreen || byScreen.some((r) => seg.end > r.start && seg.start < r.end));
     const loudMoments = runsWhere(bins, (db) => db >= baseline + SCREAM_ABOVE_DB, MIN_SCREAM_SECONDS, 1).map((r) => r.start);
     const hl = params.highlights;
+    // Reaction (dal titolo, o nessun gioco a schermo): l'intro mostra i momenti del VIDEO a cui
+    // reagiscono, con la loro reazione (simo, 2026-09-28: "è una reaction, avrebbe gasato come clip
+    // iniziale le clip del video a cui stanno reagendo").
+    const isReaction = /reaction|reagisc|reazion/i.test(hl.title) || (!!games && !games.timeline.some((g) => g.kind === "gioco"));
+    const notes = [
+      byScreen
+        ? `Le parti in cui fanno altro (altri giochi, chiacchiere) sono già state tolte guardando lo schermo: dove i tempi saltano c'era altro. Resta solo: ${games!.keep.join(", ")}. Non servono cambi di argomento (topicChanges vuoto).`
+        : null,
+      isReaction
+        ? "È una REACTION: guardano un video e ci reagiscono. Per l'INTRO scegli i momenti più forti DEL VIDEO a cui reagiscono (la frase o la scena più assurda detta nel video), con la loro reazione subito dopo: in una reaction è questo che fa venire voglia di guardare. In \"quote\" metti le parole esatte dette NEL VIDEO. Qui la regola \"SOLO URLA\" dell'intro non vale."
+        : null,
+    ].filter(Boolean);
     const askPlan = () =>
       planHighlights(
         {
@@ -149,9 +164,7 @@ export async function planLongformEdit(params: {
           durationSeconds: duration,
           segments,
           loudMoments,
-          note: byScreen
-            ? `Le parti in cui fanno altro (altri giochi, chiacchiere) sono già state tolte guardando lo schermo: dove i tempi saltano c'era altro. Resta solo: ${games!.keep.join(", ")}. Non servono cambi di argomento (topicChanges vuoto).`
-            : undefined,
+          note: notes.length > 0 ? notes.join("\n\n") : undefined,
         },
         { apiKey: hl.apiKey, model: hl.model },
       );
@@ -204,9 +217,14 @@ export async function planLongformEdit(params: {
             const f = await locator.locate(c);
             if (!f) continue;
             const start = Math.max(0, f.start - 0.5);
-            located.push({ ...f, start, end: Math.min(duration, Math.max(start + 2, Math.min(f.end + 1.2, start + 5))) });
+            // Reaction: dopo la frase del video servono un paio di secondi della loro reazione.
+            const tail = isReaction ? 2.5 : 1.2;
+            const max = isReaction ? REACTION_INTRO_MAX_SECONDS : INTRO_MAX_SECONDS;
+            located.push({ ...f, start, end: Math.min(duration, Math.max(start + 2, Math.min(f.end + tail, start + max))) });
           }
-          intro = pickIntro(located, chosen);
+          intro = isReaction
+            ? pickIntro(located, chosen, REACTION_INTRO_MAX_SECONDS, REACTION_INTRO_MAX_TOTAL_SECONDS)
+            : pickIntro(located, chosen);
           aiCloseups = await locateCloseups(aiPlan.closeups, locator, keep, duration);
           // L'intro c'è SEMPRE (simo): se nessuna frase dell'intro si trova nell'audio, si usano i
           // primi piani già collocati sulle parole (sclero e frasi forti), i due più corti.
@@ -320,15 +338,20 @@ function intersectRanges(a: TimeRange[], b: TimeRange[]): TimeRange[] {
  * dall'altro, al massimo ~10 s in tutto, mostrati in ordine di tempo. Prima quelli dentro i pezzi
  * tenuti (si rivedono nel video), poi, se mancano, anche gli altri.
  */
-function pickIntro(located: LocatedPhrase[], chosen: TimeRange[]): TimeRange[] {
+function pickIntro(
+  located: LocatedPhrase[],
+  chosen: TimeRange[],
+  maxLen = INTRO_MAX_SECONDS,
+  maxTotal = INTRO_MAX_TOTAL_SECONDS,
+): TimeRange[] {
   const inside = (m: TimeRange) => chosen.some((c) => m.start >= c.start - 1 && m.start < c.end);
   const ranked = [...located].sort((a, b) => Number(inside(b)) - Number(inside(a)) || b.loudness - a.loudness);
   const out: TimeRange[] = [];
   let total = 0;
   for (const m of ranked) {
     if (out.length >= 2) break;
-    const len = Math.min(m.end - m.start, INTRO_MAX_SECONDS);
-    if (len < INTRO_MIN_SECONDS || total + len > INTRO_MAX_TOTAL_SECONDS) continue;
+    const len = Math.min(m.end - m.start, maxLen);
+    if (len < INTRO_MIN_SECONDS || total + len > maxTotal) continue;
     if (out.some((o) => m.start < o.end + 20 && m.start + len > o.start - 20)) continue;
     out.push({ start: m.start, end: m.start + len });
     total += len;
