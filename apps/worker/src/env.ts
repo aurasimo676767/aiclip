@@ -35,6 +35,9 @@ const envSchema = z.object({
   // Giochi di una clip long-form riconosciuti dai fotogrammi (providers/ai/game-timeline.ts): un
   // fotogramma ogni 30 s + rifinitura dei cambi, ~6 centesimi per un'ora (misurato). "off" = mai.
   ANTHROPIC_MODEL_GAME_DETECT: z.string().default("claude-sonnet-5"),
+  // Tutte le clip trovate vanno subito in render, per ogni video/VOD (simo, 2026-09-28: "metta a fare
+  // TUTTE le clip che ha trovato, direttamente"). "off" = solo i progetti con "Genera più video".
+  AUTO_GENERATE_ALL_CLIPS: z.enum(["on", "off"]).default("on"),
   // Regia del pannello del gioco negli Shorts (providers/ai/content-focus.ts): quando mostrare il
   // gioco intero o zoomare su quello che indica lo streamer. Una chiamata con ~30 fotogrammi per
   // ogni render. "off" = gioco sempre riempito al centro, nessuna chiamata.

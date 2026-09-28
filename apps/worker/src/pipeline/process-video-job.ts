@@ -269,9 +269,12 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       throw new Error(`Inserimento clip fallito: ${insertError.message}`);
     }
 
-    // "Genera più video": nessuna selezione manuale, si mette subito in render tutto ciò che
-    // l'AI ha suggerito (vedi il flag impostato in /api/projects/youtube/bulk).
-    if (project.auto_generate_clips && insertedClips && insertedClips.length > 0) {
+    // Nessuna selezione manuale: si mette subito in render tutto ciò che l'AI ha trovato. Vale per
+    // ogni progetto (AUTO_GENERATE_ALL_CLIPS) o solo per quelli di "Genera più video" (il flag
+    // impostato in /api/projects/youtube/bulk). I long-form partono come semplice taglio: per il
+    // montato si accende "Montato" e si rigenera.
+    const autoGenerate = project.auto_generate_clips || env.AUTO_GENERATE_ALL_CLIPS === "on";
+    if (autoGenerate && insertedClips && insertedClips.length > 0) {
       const newClipIds = insertedClips.map((c) => c.id);
       const { error: renderJobsError } = await withNetworkRetry(
         () => supabase.from("render_jobs").insert(newClipIds.map((clip_id) => ({ clip_id }))),
