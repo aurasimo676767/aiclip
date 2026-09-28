@@ -15,7 +15,7 @@ import { logger } from "../../lib/logger.js";
  *
  * 1. Un fotogramma ogni SAMPLE_SECONDS: l'AI dice cosa c'è a schermo e raggruppa in tratti.
  * 2. Su ogni cambio, fotogrammi ogni REFINE_SECONDS fra i due campioni: l'AI dice dove cambia.
- * Circa 2-3 centesimi per un'ora con Sonnet 5.
+ * Costo misurato su un'ora di COD (2026-09-28): 0,063 $ con Sonnet 5 (3 chiamate, ~27k token di immagini).
  */
 
 export type GameSegmentKind = "gioco" | "ruota" | "altro";
