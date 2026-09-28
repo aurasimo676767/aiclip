@@ -43,6 +43,7 @@ import { detectLoudMoments } from "./vocal-energy.js";
 import { updateVideoStatus } from "../queue/video-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
 import { isVideoCancelled } from "../lib/cancellation.js";
+import { ensureLongformGames } from "./longform-games.js";
 
 // Tentativi automatici prima di arrendersi e marcare FAILED (serve poi il pulsante "Riprova"
 // manuale): stesso numero di default usato da claim_next_video per lo stale-reclaim, così i due
@@ -261,7 +262,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     }
 
     const { data: insertedClips, error: insertError } = await withNetworkRetry(
-      () => supabase.from("clips").insert(clipsToInsert).select("id"),
+      () => supabase.from("clips").insert(clipsToInsert).select("id,format,start_time,end_time"),
       "Inserimento clip",
     );
     if (insertError) {
@@ -286,6 +287,18 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
         if (statusError) {
           logger.warn("Auto-generate: aggiornamento status clip fallito", { videoId: video.id, error: statusError.message });
         }
+      }
+    }
+
+    // Giochi di ogni video long-form, riconosciuti dallo schermo ora che il VOD è sul PC: così sul
+    // sito simo sceglie quale gioco tenere prima di far montare (vedi longform-games.ts). Se non
+    // riesce, si rifà al render del video montato.
+    if (isLongform && localVideoPath && insertedClips) {
+      for (const c of insertedClips.filter((x) => x.format === "longform")) {
+        if (await cancelled()) return;
+        await ensureLongformGames(c, localVideoPath).catch((error) =>
+          logger.warn("Riconoscimento giochi fallito", { clipId: c.id, error: error instanceof Error ? error.message : String(error) }),
+        );
       }
     }
 

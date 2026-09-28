@@ -160,7 +160,7 @@ const responseSchema = z.object({
  * null se l'AI non risponde in modo usabile: il chiamante ripiega sul montaggio solo-silenzi.
  */
 export async function planHighlights(
-  input: { title: string; durationSeconds: number; segments: TranscriptSegment[]; loudMoments: number[] },
+  input: { title: string; durationSeconds: number; segments: TranscriptSegment[]; loudMoments: number[]; note?: string },
   options: { apiKey: string; model: string },
 ): Promise<HighlightsPlan | null> {
   const lines = input.segments
@@ -169,7 +169,7 @@ export async function planHighlights(
     .join("\n");
   if (!lines) return null;
   const loud = input.loudMoments.length ? input.loudMoments.map((t) => t.toFixed(0)).join(", ") : "nessuno misurato";
-  const text = `Titolo del video: ${input.title}\nDurata del pezzo: ${Math.round(input.durationSeconds)} secondi\nMomenti in cui qualcuno alza molto la voce (secondi): ${loud}\n\nTrascrizione:\n${lines}`;
+  const text = `Titolo del video: ${input.title}\nDurata del pezzo: ${Math.round(input.durationSeconds)} secondi\nMomenti in cui qualcuno alza molto la voce (secondi): ${loud}${input.note ? `\n\n${input.note}` : ""}\n\nTrascrizione:\n${lines}`;
 
   const usage: ModelTokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 };
   try {

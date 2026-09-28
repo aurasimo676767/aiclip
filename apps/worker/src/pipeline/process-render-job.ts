@@ -15,6 +15,7 @@ import { runFfmpeg } from "../lib/ffmpeg.js";
 import { updateRenderJobStatus } from "../queue/render-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
 import { isRenderJobCancelled } from "../lib/cancellation.js";
+import { ensureLongformGames, gamesToKeep } from "./longform-games.js";
 
 export async function processRenderJob(job: RenderJobRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `render-${job.id}`);
@@ -81,6 +82,13 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
       // Colonna aggiunta dalla migrazione 0024: prima della migrazione non c'è e vale "spento".
       const edited = (clipRow as { longform_edit?: boolean }).longform_edit === true;
       const segments = edited ? ((await fetchTranscript(clipRow.video_id)).segments as TranscriptSegment[]) : [];
+      // Giochi riconosciuti dallo schermo (colonne della migrazione 0029): se mancano si riconoscono ora.
+      const gameRow = clipRow as { longform_games?: unknown; longform_keep_games?: unknown };
+      const timeline = edited
+        ? await ensureLongformGames({ id: clipRow.id, start_time: clipRow.start_time, end_time: clipRow.end_time, longform_games: gameRow.longform_games }, localSourcePath)
+        : null;
+      const games = timeline ? { timeline, keep: gamesToKeep(timeline, gameRow.longform_keep_games) } : undefined;
+      if (games) logger.info("Montaggio: giochi tenuti", { clipId: clipRow.id, keep: games.keep });
       await renderLongformClip({
         sourceVideoPath: localSourcePath,
         start: clipRow.start_time,
@@ -90,7 +98,14 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
         autoEdit: edited
           ? {
               faceTracker,
-              highlights: { title: clipRow.title, segments, apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_LONGFORM_EDIT, openaiApiKey: env.OPENAI_API_KEY },
+              highlights: {
+                title: clipRow.title,
+                segments,
+                apiKey: env.ANTHROPIC_API_KEY,
+                model: env.ANTHROPIC_MODEL_LONGFORM_EDIT,
+                openaiApiKey: env.OPENAI_API_KEY,
+                games,
+              },
             }
           : undefined,
       });

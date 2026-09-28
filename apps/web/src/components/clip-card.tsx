@@ -7,6 +7,7 @@ import { overallScore } from "@clipforge/shared";
 import type { ClipViewModel } from "./clip-list";
 import { StatusBadge } from "./status-badge";
 import { ScoreRing, formatDuration } from "./ui";
+import { GamePicker } from "./game-picker";
 
 interface ClipCardProps {
   clip: ClipViewModel;
@@ -111,6 +112,7 @@ export function ClipCard({ clip, rank, selectable, selected, selectionActive, on
         <h3 className="line-clamp-2 text-sm font-medium leading-snug text-ink transition group-hover:text-white">{clip.title}</h3>
       </button>
       {!isShort && <EditToggle clipId={clip.id} enabled={clip.longformEdit} />}
+      {!isShort && clip.longformEdit && <GamePicker clipId={clip.id} games={clip.longformGames} keep={clip.longformKeepGames} compact />}
     </div>
   );
 }

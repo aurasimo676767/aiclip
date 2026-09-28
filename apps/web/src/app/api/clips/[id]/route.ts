@@ -28,6 +28,8 @@ const bodySchema = z.object({
   publishDescription: z.string().max(5000).optional(),
   hashtags: z.array(z.string().trim().min(1).max(60)).max(30).optional(),
   longformEdit: z.boolean().optional(),
+  // Giochi da tenere nel montato (vedi clips.longform_keep_games); lista vuota = il gioco principale.
+  longformKeepGames: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
 });
 
 /**
@@ -53,14 +55,21 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Payload non valido" }, { status: 400 });
   }
-  const { title, publishDescription, hashtags, longformEdit } = parsed.data;
-  if (title === undefined && publishDescription === undefined && hashtags === undefined && longformEdit === undefined) {
+  const { title, publishDescription, hashtags, longformEdit, longformKeepGames } = parsed.data;
+  if (title === undefined && publishDescription === undefined && hashtags === undefined && longformEdit === undefined && longformKeepGames === undefined) {
     return NextResponse.json({ error: "Niente da aggiornare" }, { status: 400 });
   }
 
-  const clipUpdate: { title?: string; hashtags?: string[]; publish_description?: string | null; longform_edit?: boolean } = {};
+  const clipUpdate: {
+    title?: string;
+    hashtags?: string[];
+    publish_description?: string | null;
+    longform_edit?: boolean;
+    longform_keep_games?: string[] | null;
+  } = {};
   if (title !== undefined) clipUpdate.title = title;
   if (longformEdit !== undefined) clipUpdate.longform_edit = longformEdit;
+  if (longformKeepGames !== undefined) clipUpdate.longform_keep_games = longformKeepGames.length > 0 ? longformKeepGames : null;
   if (hashtags !== undefined) clipUpdate.hashtags = hashtags;
   if (publishDescription !== undefined) {
     const trimmed = publishDescription.trim();
@@ -78,6 +87,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   if (updateError) {
     if (updateError.message.includes("longform_edit")) {
       return NextResponse.json({ error: "Manca la colonna longform_edit: lancia la migrazione 0024 su Supabase." }, { status: 500 });
+    }
+    if (updateError.message.includes("longform_keep_games")) {
+      return NextResponse.json({ error: "Manca la colonna longform_keep_games: lancia la migrazione 0029 su Supabase." }, { status: 500 });
     }
     return NextResponse.json({ error: `Salvataggio fallito: ${updateError.message}` }, { status: 500 });
   }

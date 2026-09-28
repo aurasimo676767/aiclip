@@ -7,6 +7,7 @@ import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
 import type { TranscriptSegment } from "@clipforge/shared";
 import { planHighlights, tightenHighlights } from "../providers/ai/longform-highlights.js";
 import { PhraseLocator, type LocatedPhrase } from "./intro-moments.js";
+import { allowedRanges, type GameSegment } from "../providers/ai/game-timeline.js";
 import type { HighlightsPlan } from "../providers/ai/longform-highlights.js";
 import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
 
@@ -75,6 +76,8 @@ export interface HighlightsInput {
   model: string;
   /** Per ritrascrivere con Whisper i pochi secondi dei momenti dell'intro (vedi intro-moments.ts). */
   openaiApiKey: string;
+  /** Giochi riconosciuti dallo schermo e quali tenere (vedi game-timeline.ts): tagli precisi al fotogramma. */
+  games?: { timeline: GameSegment[]; keep: string[] };
 }
 
 /** Oltre questa quota del video tenuta, secondo giro dell'AI per accorciare fino a TIGHTEN_TARGET. */
@@ -127,16 +130,32 @@ export async function planLongformEdit(params: {
   // Primi piani scelti dall'AI sulle parole (null = nessun piano AI: stacchi sulle urla come prima).
   let aiCloseups: TimeRange[] | null = null;
   if (params.highlights) {
+    // Con i giochi riconosciuti dallo schermo si tengono solo le parti dei giochi scelti da simo:
+    // all'AI arriva solo la loro trascrizione, e i tagli sui cambi di gioco sono quelli dei fotogrammi.
+    const games = params.highlights.games;
+    const allowed = games ? allowedRanges(games.timeline, games.keep) : null;
+    const byScreen = allowed && allowed.reduce((sum, r) => sum + (r.end - r.start), 0) >= 60 ? allowed : null;
+    if (games && !byScreen) logger.warn("Giochi scelti troppo corti o assenti nella mappa: montaggio senza filtro per gioco", { keep: games.keep });
     const segments = params.highlights.segments
       .map((seg) => ({ ...seg, start: seg.start - params.start, end: seg.end - params.start }))
-      .filter((seg) => seg.end > 0 && seg.start < duration);
+      .filter((seg) => seg.end > 0 && seg.start < duration)
+      .filter((seg) => !byScreen || byScreen.some((r) => seg.end > r.start && seg.start < r.end));
     const loudMoments = runsWhere(bins, (db) => db >= baseline + SCREAM_ABOVE_DB, MIN_SCREAM_SECONDS, 1).map((r) => r.start);
     const aiPlan = await planHighlights(
-      { title: params.highlights.title, durationSeconds: duration, segments, loudMoments },
+      {
+        title: params.highlights.title,
+        durationSeconds: duration,
+        segments,
+        loudMoments,
+        note: byScreen
+          ? `Le parti in cui fanno altro (altri giochi, chiacchiere) sono già state tolte guardando lo schermo: dove i tempi saltano c'era altro. Resta solo: ${games!.keep.join(", ")}. Non servono cambi di argomento (topicChanges vuoto).`
+          : undefined,
+      },
       { apiKey: params.highlights.apiKey, model: params.highlights.model },
     );
     if (aiPlan) {
       let chosen = cleanRanges(aiPlan.keep, duration, segments);
+      if (byScreen) chosen = intersectRanges(chosen, byScreen).filter((r) => r.end - r.start >= 1);
       const seconds = (rs: TimeRange[]) => rs.reduce((sum, r) => sum + (r.end - r.start), 0);
       // Un piano che tiene meno di un minuto è quasi certamente sbagliato: meglio il video intero.
       if (seconds(chosen) >= 60) {
@@ -148,10 +167,14 @@ export async function planLongformEdit(params: {
           openaiApiKey: params.highlights.openaiApiKey,
         });
         try {
-          const topic = await applyTopicChanges(chosen, aiPlan.topicChanges, locator, duration);
-          chosen = topic.ranges;
-          // La quota si misura sulla parte in tema: tolto un altro gioco, il resto non va accorciato per compensare.
-          const onTopic = duration - topic.removedSeconds;
+          // Dallo schermo i cambi di gioco sono già esatti; senza, si cercano le parole del cambio.
+          let onTopic = byScreen ? byScreen.reduce((sum, r) => sum + (r.end - r.start), 0) : duration;
+          if (!byScreen) {
+            const topic = await applyTopicChanges(chosen, aiPlan.topicChanges, locator, duration);
+            chosen = topic.ranges;
+            // La quota si misura sulla parte in tema: tolto un altro gioco, il resto non va accorciato per compensare.
+            onTopic = duration - topic.removedSeconds;
+          }
           if (seconds(chosen) > onTopic * TIGHTEN_ABOVE && chosen.length > 2) {
             const pieces = chosen.map((r) => ({
               ...r,

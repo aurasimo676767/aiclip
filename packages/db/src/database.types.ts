@@ -239,6 +239,8 @@ export interface Database {
           caption: string;
           publish_description: string | null;
           longform_edit: boolean;
+          longform_games: unknown;
+          longform_keep_games: string[] | null;
           cover_path: string | null;
           badges: unknown;
           format: ClipFormat;
@@ -267,6 +269,8 @@ export interface Database {
           caption?: string;
           publish_description?: string | null;
           longform_edit?: boolean;
+          longform_games?: unknown;
+          longform_keep_games?: string[] | null;
           cover_path?: string | null;
           badges?: unknown;
           format?: ClipFormat;
@@ -295,6 +299,8 @@ export interface Database {
           caption?: string;
           publish_description?: string | null;
           longform_edit?: boolean;
+          longform_games?: unknown;
+          longform_keep_games?: string[] | null;
           cover_path?: string | null;
           badges?: unknown;
           format?: ClipFormat;

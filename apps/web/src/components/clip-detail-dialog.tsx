@@ -14,6 +14,7 @@ import { TrimPanel } from "./trim-clip-button";
 import { PublishPanel, PublishStatus } from "./publish-youtube-button";
 import { CoverGenerator } from "./cover-generator";
 import { ScoreRing, formatDuration, scoreTone } from "./ui";
+import { GamePicker } from "./game-picker";
 
 const BADGE_LABELS: Record<ClipBadge, string> = {
   gotcha: "🎯 Gotcha",
@@ -149,6 +150,7 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
             }
           />
         )}
+        {!isShort && clip.longformEdit && <GamePicker clipId={clip.id} games={clip.longformGames} keep={clip.longformKeepGames} />}
 
         {/* Azioni principali */}
         <div className="flex flex-wrap items-center gap-2">
