@@ -5,7 +5,8 @@ import { logger } from "../lib/logger.js";
 import type { CropWindow, FaceTracker } from "../face-tracking/face-tracker.js";
 import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
 import type { TranscriptSegment } from "@clipforge/shared";
-import { planHighlights } from "../providers/ai/longform-highlights.js";
+import { planHighlights, tightenHighlights } from "../providers/ai/longform-highlights.js";
+import { locateIntroMoments, type LocatedIntroMoment } from "./intro-moments.js";
 import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
 
 /**
@@ -71,7 +72,13 @@ export interface HighlightsInput {
   segments: TranscriptSegment[];
   apiKey: string;
   model: string;
+  /** Per ritrascrivere con Whisper i pochi secondi dei momenti dell'intro (vedi intro-moments.ts). */
+  openaiApiKey: string;
 }
+
+/** Oltre questa quota del video tenuta, secondo giro dell'AI per accorciare fino a TIGHTEN_TARGET. */
+const TIGHTEN_ABOVE = 0.45;
+const TIGHTEN_TARGET = 0.4;
 
 /** Tratto minimo tenuto e distanza sotto cui due tratti si uniscono (secondi). */
 const MIN_KEEP_SECONDS = 5;
@@ -121,15 +128,34 @@ export async function planLongformEdit(params: {
       { apiKey: params.highlights.apiKey, model: params.highlights.model },
     );
     if (aiPlan) {
-      const chosen = cleanRanges(aiPlan.keep, duration, segments);
-      const chosenSeconds = chosen.reduce((sum, r) => sum + (r.end - r.start), 0);
+      let chosen = cleanRanges(aiPlan.keep, duration, segments);
+      const seconds = (rs: TimeRange[]) => rs.reduce((sum, r) => sum + (r.end - r.start), 0);
       // Un piano che tiene meno di un minuto è quasi certamente sbagliato: meglio il video intero.
-      if (chosenSeconds >= 60) {
+      if (seconds(chosen) >= 60) {
+        if (seconds(chosen) > duration * TIGHTEN_ABOVE && chosen.length > 2) {
+          const pieces = chosen.map((r) => ({
+            ...r,
+            text: segments.filter((seg) => seg.end > r.start && seg.start < r.end).map((seg) => seg.text).join(" "),
+          }));
+          const tightened = await tightenHighlights(
+            { title: params.highlights.title, pieces, targetSeconds: duration * TIGHTEN_TARGET },
+            { apiKey: params.highlights.apiKey, model: params.highlights.model },
+          );
+          if (tightened && seconds(tightened) >= 60) chosen = tightened;
+        }
         const merged = intersectRanges(keep, chosen).filter((r) => r.end - r.start >= 1);
         keep.splice(0, keep.length, ...merged);
-        intro = cleanIntro(aiPlan.intro, keep, bins, baseline);
+        const located = await locateIntroMoments({
+          candidates: aiPlan.intro,
+          segments,
+          sourceVideoPath: params.sourceVideoPath,
+          clipStart: params.start,
+          clipDuration: duration,
+          openaiApiKey: params.highlights.openaiApiKey,
+        });
+        intro = pickIntro(located, chosen);
       } else {
-        logger.warn("Montaggio da YouTuber: piano troppo corto, resto al montaggio solo-silenzi", { tenutiSecondi: Math.round(chosenSeconds) });
+        logger.warn("Montaggio da YouTuber: piano troppo corto, resto al montaggio solo-silenzi", { tenutiSecondi: Math.round(seconds(chosen)) });
       }
     }
   }
@@ -223,42 +249,22 @@ function intersectRanges(a: TimeRange[], b: TimeRange[]): TimeRange[] {
 }
 
 /**
- * Momenti dell'intro: corti, dentro i tratti tenuti, al massimo ~10 s in tutto, e con la VOCE ALTA
- * misurata sull'audio vero. simo (2026-09-28), sul primo test: un momento in cui "lo killano" ma
- * restano zitti non funziona, "ci deve essere movimento, urla/insulti". Un momento dell'AI senza un
- * urlo dentro si scarta; se ne restano meno di 2 si aggiungono gli urli più forti del video.
+ * I 2 momenti dell'intro fra quelli collocati sulle parole: i più forti, a più di 20 s l'uno
+ * dall'altro, al massimo ~10 s in tutto, mostrati in ordine di tempo. Prima quelli dentro i pezzi
+ * tenuti (si rivedono nel video), poi, se mancano, anche gli altri.
  */
-function cleanIntro(ranges: TimeRange[], keep: TimeRange[], bins: number[], baseline: number): TimeRange[] {
-  const loud = baseline + SCREAM_ABOVE_DB;
-  const peak = (r: TimeRange) => Math.max(-99, ...bins.slice(Math.floor(r.start / BIN_SECONDS), Math.ceil(r.end / BIN_SECONDS)));
+function pickIntro(located: LocatedIntroMoment[], chosen: TimeRange[]): TimeRange[] {
+  const inside = (m: TimeRange) => chosen.some((c) => m.start >= c.start - 1 && m.start < c.end);
+  const ranked = [...located].sort((a, b) => Number(inside(b)) - Number(inside(a)) || b.loudness - a.loudness);
   const out: TimeRange[] = [];
   let total = 0;
-  const tryAdd = (rawStart: number, rawEnd: number): boolean => {
-    const start = Math.min(rawStart, rawEnd);
-    let end = Math.min(Math.max(rawStart, rawEnd), start + INTRO_MAX_SECONDS);
-    const inside = keep.find((k) => start >= k.start - 0.5 && start < k.end);
-    if (!inside) return false;
-    end = Math.min(end, inside.end);
-    const range = { start, end };
-    if (end - start < INTRO_MIN_SECONDS || total + (end - start) > INTRO_MAX_TOTAL_SECONDS) return false;
-    if (peak(range) < loud) return false;
-    if (out.some((o) => start < o.end + 20 && end > o.start - 20)) return false;
-    out.push(range);
-    total += end - start;
-    return true;
-  };
-  for (const r of ranges.slice(0, 3)) {
-    if (!tryAdd(r.start, r.end)) logger.info("Intro: momento dell'AI scartato (niente urla)", { da: r.start.toFixed(1), a: r.end.toFixed(1) });
-  }
-  if (out.length < 2) {
-    // Ripiego: gli urli più forti dentro i tratti tenuti, 1 s prima dell'urlo e ~4 s in tutto.
-    const screams = runsWhere(bins, (db) => db >= loud, MIN_SCREAM_SECONDS, 1)
-      .map((r) => ({ ...r, strength: peak(r) }))
-      .sort((a, b) => b.strength - a.strength);
-    for (const s of screams) {
-      if (out.length >= 2) break;
-      tryAdd(Math.max(0, s.start - 1), s.start + 3.5);
-    }
+  for (const m of ranked) {
+    if (out.length >= 2) break;
+    const len = Math.min(m.end - m.start, INTRO_MAX_SECONDS);
+    if (len < INTRO_MIN_SECONDS || total + len > INTRO_MAX_TOTAL_SECONDS) continue;
+    if (out.some((o) => m.start < o.end + 20 && m.start + len > o.start - 20)) continue;
+    out.push({ start: m.start, end: m.start + len });
+    total += len;
   }
   return out.sort((a, b) => a.start - b.start);
 }

@@ -90,7 +90,7 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
         autoEdit: edited
           ? {
               faceTracker,
-              highlights: { title: clipRow.title, segments, apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_LONGFORM_EDIT },
+              highlights: { title: clipRow.title, segments, apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_LONGFORM_EDIT, openaiApiKey: env.OPENAI_API_KEY },
             }
           : undefined,
       });

@@ -24,7 +24,7 @@ const aiVideo = opt("ai");
 if (aiVideo) {
   const { data } = await supabase.from("transcripts").select("segments").eq("video_id", aiVideo).single();
   const title = opt("title") ?? "video";
-  highlights = { title, segments: data!.segments as TranscriptSegment[], apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_LONGFORM_EDIT };
+  highlights = { title, segments: data!.segments as TranscriptSegment[], apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_LONGFORM_EDIT, openaiApiKey: env.OPENAI_API_KEY };
 }
 const probe = await probeVideo(source);
 const t0 = Date.now();
