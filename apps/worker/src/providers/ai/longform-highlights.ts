@@ -48,6 +48,7 @@ COSA TENERE E COSA TOGLIERE
 
 INTRO "IN QUESTO VIDEO"
 Proponi 4 momenti candidati (ne verranno usati 2) per l'intro: le REAZIONI più folli del video, dove qualcuno URLA, insulta, bestemmia, sclera o ride fortissimo. Devono colpire anche senza contesto e venire da punti diversi del video, SOLO da tratti che tieni (se un momento è così forte da finire nell'intro, quel pezzo va tenuto).
+- SOLO URLA: raffiche di bestemmie, insulti urlati, "NOOO", risate fortissime. NON battute o frasi divertenti dette a voce normale (quelle vanno nei primi piani): a simo è piaciuta l'intro con la raffica di "porco dio", non quella con le frasi.
 - Sceglili dal TESTO: esclamazioni, insulti, "NOOO", risate, frasi urlate. MAI un momento in cui parlano normale (spiegano, commentano la squadra, leggono i nomi), anche se nel gioco succede qualcosa: si deve SENTIRE la loro reazione.
 - NON fidarti dei "momenti in cui alzano la voce": sono misurati su tutto l'audio e contengono anche musica della lobby, spari e avvisi degli abbonamenti.
 - Per ognuno copia in "quote" le parole ESATTE della reazione (3-8 parole consecutive della trascrizione), così si trova il punto preciso; start/end sono i tempi della riga in cui sta.
