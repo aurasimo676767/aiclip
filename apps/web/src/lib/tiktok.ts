@@ -8,7 +8,8 @@ import type { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
-export const TIKTOK_SCOPES = ["user.info.basic", "video.upload", "video.publish"];
+// Solo quelli usati davvero (TikTok in revisione chiede di togliere gli altri): profilo + Direct Post.
+export const TIKTOK_SCOPES = ["user.info.basic", "video.publish"];
 export const TIKTOK_API = "https://open.tiktokapis.com/v2";
 
 export function tiktokCredentials(): { clientKey: string; clientSecret: string } | null {
