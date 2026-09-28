@@ -15,7 +15,8 @@ import { logger } from "../../lib/logger.js";
  *
  * 1. Un fotogramma ogni SAMPLE_SECONDS: l'AI dice cosa c'è a schermo e raggruppa in tratti.
  * 2. Su ogni cambio, fotogrammi ogni REFINE_SECONDS fra i due campioni: l'AI dice dove cambia.
- * Costo misurato su un'ora di COD (2026-09-28): 0,063 $ con Sonnet 5 (3 chiamate, ~27k token di immagini).
+ * Costo misurato su un'ora di COD (2026-09-28): 0,063 $ con Sonnet 5 a 30 s e 400 px. simo: "meglio dimezzarlo",
+ * quindi 45 s, rifinitura ogni 4 s e fotogrammi da 320 px (~0,4 dei token: ~2-3 centesimi l'ora).
  */
 
 export type GameSegmentKind = "gioco" | "ruota" | "altro";
@@ -31,11 +32,11 @@ export interface GameSegment {
   what?: string;
 }
 
-const SAMPLE_SECONDS = 30;
-const REFINE_SECONDS = 3;
+const SAMPLE_SECONDS = 45;
+const REFINE_SECONDS = 4;
 /** L'API accetta al massimo 100 immagini per richiesta. */
 const MAX_FRAMES_PER_CALL = 80;
-const FRAME_WIDTH = 400;
+const FRAME_WIDTH = 320;
 
 const TOOL_NAME = "mappa_giochi";
 const REFINE_TOOL = "punti_di_cambio";

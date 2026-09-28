@@ -44,6 +44,9 @@ const EXPRESSION_FALLBACK: Record<string, string[]> = {
  * prima l'espressione giusta, poi quelle vicine, poi la più esagerata. Fra facce equivalenti si
  * pesca a caso, così due copertine dello stesso streamer non escono identiche.
  */
+/** Quanto sotto la foto migliore può stare una foto per essere estratta (busto e tagli pesano 25-100). */
+const GOOD_SCORE_MARGIN = 20;
+
 export function pickFaces(
   library: FaceLibraryIndex,
   people: string[],
@@ -66,9 +69,13 @@ export function pickFaces(
       const base = f.baseCover !== undefined && f.baseCover < 0.5 ? -35 : 0;
       // In una reaction chi guarda un video non urla né si arrabbia: simo le ha bocciate ("non ha senso con una reaction").
       const mood = kind === "reaction" && (f.expression === "urlo" || f.expression === "rabbia") ? -40 : 0;
-      return (f.bust === false ? -100 : f.bust ? 30 : 0) + cut + base + mood + (rank >= 0 ? (wanted.length - rank) * 10 : 0) + f.intensity * 2 + Math.random() * 3;
+      return (f.bust === false ? -100 : f.bust ? 30 : 0) + cut + base + mood + (rank >= 0 ? (wanted.length - rank) * 10 : 0) + f.intensity * 2;
     };
-    picked.push(faces.sort((a, b) => score(b) - score(a))[0]!);
+    // Estratta a caso fra le buone, non sempre la migliore: con la stessa foto ogni volta GPT rifaceva
+    // la stessa posa (simo, 2026-09-28: "utilizza sempre le stesse foto... stesse foto e posizione").
+    const scored = faces.map((f) => ({ f, s: score(f) })).sort((a, b) => b.s - a.s);
+    const good = scored.filter((x) => x.s >= scored[0]!.s - GOOD_SCORE_MARGIN).slice(0, 8);
+    picked.push(good[Math.floor(Math.random() * good.length)]!.f);
   }
   return picked;
 }
@@ -95,7 +102,8 @@ export function referenceFaces(library: FaceLibraryIndex, chosen: LibraryFace, n
     (f) => f.status === "labeled" && f.label === chosen.label && f.id !== chosen.id && f.bust !== false && !f.tags?.includes("meme"),
   );
   const tag = chosen.label ? PERSON_STYLE[chosen.label]?.tag : undefined;
-  const score = (f: LibraryFace) => (tag && f.tags?.includes(tag) ? 20 : 0) + (f.bothSidesCut ? 0 : 5) + f.intensity + Math.random() * 8;
+  // Il caso pesa quanto il resto: prima vincevano sempre le stesse 2-3 foto (per Blur quelle col Red Bull).
+  const score = (f: LibraryFace) => (tag && f.tags?.includes(tag) ? 20 : 0) + (f.bothSidesCut ? 0 : 5) + f.intensity + Math.random() * 15;
   const ranked = good.sort((a, b) => score(b) - score(a));
   // Con uno stile fisso la foto scelta per la bozza può non averlo: la si mette dopo quelle giuste.
   if (tag && !chosen.tags?.includes(tag)) return [...ranked.slice(0, 2), chosen].slice(0, n);

@@ -33,7 +33,7 @@ const envSchema = z.object({
   // una chiamata con tutta la trascrizione del pezzo, ~10 centesimi per un'ora con Sonnet 5.
   ANTHROPIC_MODEL_LONGFORM_EDIT: z.string().default("claude-sonnet-5"),
   // Giochi di una clip long-form riconosciuti dai fotogrammi (providers/ai/game-timeline.ts): un
-  // fotogramma ogni 30 s + rifinitura dei cambi, ~6 centesimi per un'ora (misurato). "off" = mai.
+  // fotogramma ogni 45 s + rifinitura dei cambi, ~2-3 centesimi per un'ora. "off" = mai.
   ANTHROPIC_MODEL_GAME_DETECT: z.string().default("claude-sonnet-5"),
   // Tutte le clip trovate vanno subito in render, per ogni video/VOD (simo, 2026-09-28: "metta a fare
   // TUTTE le clip che ha trovato, direttamente"). "off" = solo i progetti con "Genera più video".
