@@ -62,6 +62,15 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
     if (panel === "publish" && !canPublish) setPanel("info");
   }, [panel, canPublish]);
 
+  // Mentre l'invio a TikTok è in corso lo stato si aggiorna da solo (prima restava "in corso"
+  // finché non si ricaricava la pagina, simo 2026-09-28).
+  const tiktokSending = clip.tiktokStatus === "PENDING" || clip.tiktokStatus === "UPLOADING" || clip.tiktokStatus === "PROCESSING";
+  useEffect(() => {
+    if (!tiktokSending) return;
+    const id = setInterval(() => router.refresh(), 5000);
+    return () => clearInterval(id);
+  }, [tiktokSending, router]);
+
   async function call(label: string, url: string, init?: RequestInit, success?: string) {
     setBusy(label);
     setError(null);
