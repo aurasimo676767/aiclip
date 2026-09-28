@@ -6,7 +6,7 @@ import path from "node:path";
  * Manda immagini al bot Telegram di simo (anteprime delle prove, es. copertine). La chat è quella
  * di chi ha premuto "Avvia" sul bot: si ricava da getUpdates la prima volta e si salva in
  * TELEGRAM_CHAT_ID nel .env. Il token sta solo nel .env (mai nel codice).
- * Uso: tsx src/dev/tg-send.ts "<testo>" [immagine...]   (senza immagini = solo testo; fino a 10 = un album)
+ * Uso: tsx src/dev/tg-send.ts "<testo>" [immagine...]   (senza immagini = solo testo; fino a 10 = un album; un .mp4 = video)
  */
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) throw new Error("TELEGRAM_BOT_TOKEN mancante nel .env");
@@ -36,7 +36,14 @@ for (let i = 0; i < files.length; i += 10) {
   const group = files.slice(i, i + 10);
   const form = new FormData();
   form.append("chat_id", chat);
-  if (group.length === 1) {
+  if (group.length === 1 && /.mp4$/i.test(group[0]!)) {
+    // Video (prove del montaggio): Telegram accetta fino a 50 MB dai bot.
+    form.append("caption", caption.slice(0, 1000));
+    form.append("supports_streaming", "true");
+    form.append("video", new Blob([await fsp.readFile(group[0]!)]), path.basename(group[0]!));
+    const res = await fetch(api("sendVideo"), { method: "POST", body: form });
+    if (!res.ok) throw new Error(`sendVideo: ${await res.text()}`);
+  } else if (group.length === 1) {
     form.append("caption", caption.slice(0, 1000));
     form.append("photo", new Blob([await fsp.readFile(group[0]!)]), path.basename(group[0]!));
     const res = await fetch(api("sendPhoto"), { method: "POST", body: form });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Check, Loader2, AlertTriangle, MonitorPlay as YoutubeIcon } from "lucide-react";
 import { overallScore } from "@clipforge/shared";
 import type { ClipViewModel } from "./clip-list";
@@ -109,6 +110,54 @@ export function ClipCard({ clip, rank, selectable, selected, selectionActive, on
       <button onClick={onOpen} className="text-left">
         <h3 className="line-clamp-2 text-sm font-medium leading-snug text-ink transition group-hover:text-white">{clip.title}</h3>
       </button>
+      {!isShort && <EditToggle clipId={clip.id} enabled={clip.longformEdit} />}
     </div>
+  );
+}
+
+/**
+ * Interruttore "Montato" direttamente nella lista (simo, 2026-09-28): si decide clip per clip, prima
+ * di generarle, se montarla come uno YouTuber (parti morte tolte, intro "IN QUESTO VIDEO") o solo
+ * tagliarla. Stessa API dell'interruttore nel dettaglio della clip.
+ */
+function EditToggle({ clipId, enabled }: { clipId: string; enabled: boolean }) {
+  const router = useRouter();
+  const [on, setOn] = useState(enabled);
+  const [busy, setBusy] = useState(false);
+  async function toggle() {
+    const next = !on;
+    setOn(next);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/clips/${clipId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ longformEdit: next }),
+      });
+      if (!res.ok) setOn(!next);
+      else router.refresh();
+    } catch {
+      setOn(!next);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <label className="inline-flex w-fit cursor-pointer items-center gap-2 text-xs text-muted">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="Montato"
+        disabled={busy}
+        onClick={toggle}
+        className={`relative h-5 w-9 shrink-0 rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 disabled:opacity-60 ${
+          on ? "border-brand-400 bg-brand-400" : "border-line-strong bg-canvas"
+        }`}
+      >
+        <span className={`absolute top-0.5 h-3.5 w-3.5 rounded-full transition-all ${on ? "left-[18px] bg-on-brand" : "left-0.5 bg-faint"}`} />
+      </button>
+      <span className={on ? "font-medium text-ink" : ""}>Montato</span>
+    </label>
   );
 }

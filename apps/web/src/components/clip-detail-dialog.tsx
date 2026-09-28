@@ -171,7 +171,7 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
               title={
                 isShort
                   ? "Rifà il video di questa clip con l'impaginazione e i sottotitoli attuali (non usa l'AI)"
-                  : "Rifà il video con l'impostazione attuale del montaggio automatico (non usa l'AI)"
+                  : "Rifà il video con l'impostazione attuale del montaggio (se è acceso usa l'AI, pochi centesimi)"
               }
             >
               {busy === "regenerate" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
@@ -401,7 +401,7 @@ function LongformEditToggle({ enabled, busy, onChange }: { enabled: boolean; bus
       <div className="min-w-0">
         <p className="text-sm font-medium text-ink">Montaggio automatico</p>
         <p className="text-xs leading-relaxed text-muted">
-          Taglia i tempi morti e, quando qualcuno urla, stacca sulla sua faccia a tutto schermo. Vale dal prossimo render.
+          Montato come uno YouTuber: tiene solo il gioco del titolo e i momenti divertenti, toglie parti morte e divagazioni, finisce quando smettono di giocare. Parte con 2 momenti folli e la scritta «IN QUESTO VIDEO». Circa 10 centesimi per un'ora di video. Vale dal prossimo render.
         </p>
       </div>
     </div>

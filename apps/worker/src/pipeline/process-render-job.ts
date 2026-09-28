@@ -76,16 +76,23 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
     const outputPath = path.join(jobDir, "output.mp4");
 
     if (clipRow.format === "longform") {
-      // Long-form: solo taglio, oppure montaggio automatico se acceso sulla clip (vedi render-longform-clip.ts)
-      // — niente sottotitoli o crop verticale, e nessun transcript.
+      // Long-form: solo taglio, oppure montaggio "da YouTuber" se acceso sulla clip (vedi
+      // render-longform-clip.ts e longform-highlights.ts): lì serve la trascrizione. Niente sottotitoli.
+      // Colonna aggiunta dalla migrazione 0024: prima della migrazione non c'è e vale "spento".
+      const edited = (clipRow as { longform_edit?: boolean }).longform_edit === true;
+      const segments = edited ? ((await fetchTranscript(clipRow.video_id)).segments as TranscriptSegment[]) : [];
       await renderLongformClip({
         sourceVideoPath: localSourcePath,
         start: clipRow.start_time,
         end: clipRow.end_time,
         workDir: jobDir,
         outputPath,
-        // Colonna aggiunta dalla migrazione 0024: prima della migrazione non c'è e vale "spento".
-        autoEdit: (clipRow as { longform_edit?: boolean }).longform_edit === true ? { faceTracker } : undefined,
+        autoEdit: edited
+          ? {
+              faceTracker,
+              highlights: { title: clipRow.title, segments, apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_LONGFORM_EDIT },
+            }
+          : undefined,
       });
     } else {
       const transcriptRow = await fetchTranscript(clipRow.video_id);

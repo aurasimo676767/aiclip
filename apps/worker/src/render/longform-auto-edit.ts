@@ -4,6 +4,9 @@ import { runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import type { CropWindow, FaceTracker } from "../face-tracking/face-tracker.js";
 import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
+import type { TranscriptSegment } from "@clipforge/shared";
+import { planHighlights } from "../providers/ai/longform-highlights.js";
+import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
 
 /**
  * Montaggio automatico di un video long-form (opzionale, spento di default: vedi clips.longform_edit).
@@ -58,7 +61,25 @@ export interface LongformEditPlan {
   punches: Array<TimeRange & { sourceStart: number; cam: CropWindow }>;
   removedSeconds: number;
   outputDuration: number;
+  /** Momenti dell'intro "IN QUESTO VIDEO", in tempi del segmento (vuoto = nessuna intro). */
+  intro: TimeRange[];
 }
+
+/** Montaggio "da YouTuber" con l'AI: serve la trascrizione del video (tempi del VOD) e il titolo. */
+export interface HighlightsInput {
+  title: string;
+  segments: TranscriptSegment[];
+  apiKey: string;
+  model: string;
+}
+
+/** Tratto minimo tenuto e distanza sotto cui due tratti si uniscono (secondi). */
+const MIN_KEEP_SECONDS = 5;
+const MERGE_GAP_SECONDS = 4;
+/** Intro: ogni momento fra 1,5 e 5 s, al massimo 3 momenti e circa 10 s in tutto (simo: "anche 10 secondi"). */
+const INTRO_MIN_SECONDS = 1.5;
+const INTRO_MAX_SECONDS = 5;
+const INTRO_MAX_TOTAL_SECONDS = 10.5;
 
 export async function planLongformEdit(params: {
   sourceVideoPath: string;
@@ -67,6 +88,7 @@ export async function planLongformEdit(params: {
   start: number;
   end: number;
   faceTracker: FaceTracker;
+  highlights?: HighlightsInput;
 }): Promise<LongformEditPlan> {
   const duration = params.end - params.start;
   const bins = toBins(await measureRmsWindows(params.sourceVideoPath, params.start, duration));
@@ -84,6 +106,33 @@ export async function planLongformEdit(params: {
     cursor = d.end;
   }
   if (duration - cursor > 0.05) keep.push({ start: cursor, end: duration });
+
+  // Montaggio da YouTuber: l'AI sceglie cosa tenere (un argomento solo, via le parti morte e le
+  // divagazioni, fine quando smettono di giocare) e i momenti dell'intro. Dai suoi tratti si tolgono
+  // comunque i silenzi veri trovati sopra. Se l'AI non risponde si resta al montaggio solo-silenzi.
+  let intro: TimeRange[] = [];
+  if (params.highlights) {
+    const segments = params.highlights.segments
+      .map((seg) => ({ ...seg, start: seg.start - params.start, end: seg.end - params.start }))
+      .filter((seg) => seg.end > 0 && seg.start < duration);
+    const loudMoments = runsWhere(bins, (db) => db >= baseline + SCREAM_ABOVE_DB, MIN_SCREAM_SECONDS, 1).map((r) => r.start);
+    const aiPlan = await planHighlights(
+      { title: params.highlights.title, durationSeconds: duration, segments, loudMoments },
+      { apiKey: params.highlights.apiKey, model: params.highlights.model },
+    );
+    if (aiPlan) {
+      const chosen = cleanRanges(aiPlan.keep, duration, segments);
+      const chosenSeconds = chosen.reduce((sum, r) => sum + (r.end - r.start), 0);
+      // Un piano che tiene meno di un minuto è quasi certamente sbagliato: meglio il video intero.
+      if (chosenSeconds >= 60) {
+        const merged = intersectRanges(keep, chosen).filter((r) => r.end - r.start >= 1);
+        keep.splice(0, keep.length, ...merged);
+        intro = cleanIntro(aiPlan.intro, keep);
+      } else {
+        logger.warn("Montaggio da YouTuber: piano troppo corto, resto al montaggio solo-silenzi", { tenutiSecondi: Math.round(chosenSeconds) });
+      }
+    }
+  }
   const outputDuration = keep.reduce((sum, k) => sum + (k.end - k.start), 0);
 
   // Urla -> stacchi, i più forti per primi, distanziati, e solo dentro un tratto tenuto
@@ -132,7 +181,62 @@ export async function planLongformEdit(params: {
     stacchi: punches.length,
     webcamDiverse: new Set(punches.map((p) => camKey(p.cam))).size,
   });
-  return { keep, punches, removedSeconds: duration - outputDuration, outputDuration };
+  return { keep, punches, removedSeconds: duration - outputDuration, outputDuration, intro };
+}
+
+/**
+ * Tratti dell'AI resi montabili: dentro il video, agganciati all'inizio e alla fine delle frasi
+ * (mai un taglio a metà parola), uniti se vicini, scartati se cortissimi.
+ */
+function cleanRanges(ranges: TimeRange[], duration: number, segments: TranscriptSegment[]): TimeRange[] {
+  const snapped = ranges
+    .map((r) => {
+      let start = Math.max(0, Math.min(r.start, r.end));
+      let end = Math.min(duration, Math.max(r.start, r.end));
+      const startSeg = segments.find((seg) => start > seg.start && start < seg.end);
+      if (startSeg) start = startSeg.start;
+      const endSeg = segments.find((seg) => end > seg.start && end < seg.end);
+      if (endSeg) end = endSeg.end;
+      return { start: Math.max(0, start - 0.2), end: Math.min(duration, end + 0.3) };
+    })
+    .filter((r) => r.end - r.start > 0.5)
+    .sort((a, b) => a.start - b.start);
+  const merged: TimeRange[] = [];
+  for (const r of snapped) {
+    const last = merged[merged.length - 1];
+    if (last && r.start - last.end < MERGE_GAP_SECONDS) last.end = Math.max(last.end, r.end);
+    else merged.push({ ...r });
+  }
+  return merged.filter((r) => r.end - r.start >= MIN_KEEP_SECONDS);
+}
+
+function intersectRanges(a: TimeRange[], b: TimeRange[]): TimeRange[] {
+  const out: TimeRange[] = [];
+  for (const x of a) {
+    for (const y of b) {
+      const start = Math.max(x.start, y.start);
+      const end = Math.min(x.end, y.end);
+      if (end > start) out.push({ start, end });
+    }
+  }
+  return out.sort((p, q) => p.start - q.start);
+}
+
+/** Momenti dell'intro: corti, dentro i tratti tenuti, in ordine di tempo, al massimo ~10 s in tutto. */
+function cleanIntro(ranges: TimeRange[], keep: TimeRange[]): TimeRange[] {
+  const out: TimeRange[] = [];
+  let total = 0;
+  for (const r of ranges.slice(0, 3)) {
+    const start = Math.min(r.start, r.end);
+    let end = Math.min(Math.max(r.start, r.end), start + INTRO_MAX_SECONDS);
+    const inside = keep.find((k) => start >= k.start - 0.5 && start < k.end);
+    if (!inside) continue;
+    end = Math.min(end, inside.end);
+    if (end - start < INTRO_MIN_SECONDS || total + (end - start) > INTRO_MAX_TOTAL_SECONDS) continue;
+    out.push({ start, end });
+    total += end - start;
+  }
+  return out;
 }
 
 /** Renderizza il video montato secondo il piano, con la GPU (NVENC) e ripiego sulla CPU. */
@@ -153,15 +257,62 @@ export async function renderEditedLongform(params: {
   // ingrandiva TUTTI i fotogrammi del video anche fuori dagli stacchi: con 5 webcam, 5 volte il
   // lavoro (10 minuti di video non finivano in 9 minuti di render).
   const last = plan.punches.length;
-  const steps = [`[0:v]select='${keepExpr}',setpts=N/FRAME_RATE/TB,scale=1920:1080:flags=lanczos,setsar=1[${last === 0 ? "vout" : "l0"}]`];
+  const hasIntro = plan.intro.length > 0;
+  const mainV = hasIntro ? "vmain" : "vout";
+  const steps = [`[0:v]select='${keepExpr}',setpts=N/FRAME_RATE/TB,scale=1920:1080:flags=lanczos,setsar=1[${last === 0 ? mainV : "l0"}]`];
   plan.punches.forEach((p, i) => {
     const c = p.cam;
     steps.push(
       `[${i + 1}:v]crop=${c.width}:${c.height}:${c.x}:${c.y},scale=1920:1080:flags=lanczos,unsharp=5:5:0.9:5:5:0.0,setsar=1,setpts=PTS-STARTPTS+${p.start.toFixed(3)}/TB[p${i}]`,
-      `[l${i}][p${i}]overlay=0:0:eof_action=pass[${i === last - 1 ? "vout" : `l${i + 1}`}]`,
+      `[l${i}][p${i}]overlay=0:0:eof_action=pass[${i === last - 1 ? mainV : `l${i + 1}`}]`,
     );
   });
-  steps.push(`[0:a]aselect='${keepExpr}',asetpts=N/SR/TB,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[aout]`);
+  const introInputs: string[] = [];
+  if (!hasIntro) {
+    steps.push(`[0:a]aselect='${keepExpr}',asetpts=N/SR/TB,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[aout]`);
+  } else {
+    // Intro "IN QUESTO VIDEO": i momenti scelti (ognuno un ingresso a parte), la scritta bianca
+    // grande in basso al centro che entra con un pop, il whoosh; poi il video montato. Il volume
+    // si normalizza una volta sola sul risultato finale.
+    steps.push(`[0:a]aselect='${keepExpr}',asetpts=N/SR/TB,aresample=44100[amain]`);
+    const base = plan.punches.length + 1;
+    const introDuration = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0);
+    plan.intro.forEach((r, i) => {
+      introInputs.push("-ss", (params.start + r.start).toFixed(3), "-t", (r.end - r.start).toFixed(3), "-i", params.sourceVideoPath);
+      steps.push(
+        `[${base + i}:v]scale=1920:1080:flags=lanczos,setsar=1,setpts=PTS-STARTPTS[iv${i}]`,
+        `[${base + i}:a]aresample=44100,asetpts=PTS-STARTPTS[ia${i}]`,
+      );
+    });
+    const n = plan.intro.length;
+    steps.push(`${plan.intro.map((_, i) => `[iv${i}][ia${i}]`).join("")}concat=n=${n}:v=1:a=1[introv][introa]`);
+    let introV = "introv";
+    let introA = "introa";
+    const textPath = path.join(params.workDir, "in-questo-video.png");
+    const text = await renderHeadlinePng("IN QUESTO VIDEO", textPath, { allWhite: true, baseSize: 150, maxWidth: 1500 });
+    let nextInput = base + n;
+    if (text) {
+      introInputs.push("-loop", "1", "-t", introDuration.toFixed(3), "-i", textPath);
+      const sExpr = "if(lt(t,0.12),0.9+1.83*t,if(lt(t,0.25),1.12-0.92*(t-0.12),1))";
+      steps.push(
+        `[${nextInput}:v]format=rgba,scale=w='max(2,trunc(${text.width}*${sExpr}/2)*2)':h=-2:eval=frame[qv]`,
+        `[introv][qv]overlay=x='(W-w)/2':y='H-h-90':eval=frame:shortest=1[introvt]`,
+      );
+      introV = "introvt";
+      nextInput++;
+    }
+    const sfx = await ensureHeadlineSfx((a) => runFfmpeg(a));
+    if (sfx) {
+      introInputs.push("-i", sfx);
+      steps.push(`[introa][${nextInput}:a]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[introas]`);
+      introA = "introas";
+    }
+    steps.push(
+      `[${introV}][${introA}][vmain][amain]concat=n=2:v=1:a=1[vcat][acat]`,
+      "[vcat]null[vout]",
+      "[acat]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[aout]",
+    );
+  }
 
   // Lo script su file: con centinaia di tagli la riga di comando supererebbe il limite di Windows.
   const scriptPath = path.join(params.workDir, "edit-filter.txt");
@@ -177,6 +328,7 @@ export async function renderEditedLongform(params: {
     "-i",
     params.sourceVideoPath,
     ...punchInputs,
+    ...introInputs,
     "-/filter_complex",
     scriptPath,
     "-map",

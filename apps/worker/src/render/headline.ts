@@ -77,7 +77,13 @@ function textWidth(text: string, size: number): number {
  * Crea il PNG del titolo. Ritorna le sue misure, o null se il testo è vuoto. Prima riga bianca,
  * seconda (o unica) gialla, contorno nero spesso e ombra, leggermente inclinato come le copertine.
  */
-export async function renderHeadlinePng(text: string, outputPath: string): Promise<{ width: number; height: number } | null> {
+export async function renderHeadlinePng(
+  text: string,
+  outputPath: string,
+  // Per "IN QUESTO VIDEO" nei video montati: tutto bianco e più grande (video 1920x1080).
+  opts: { allWhite?: boolean; baseSize?: number; maxWidth?: number } = {},
+): Promise<{ width: number; height: number } | null> {
+  const maxWidth = opts.maxWidth ?? MAX_WIDTH;
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean) return null;
   const emojis = clean.match(EMOJI_RE) ?? [];
@@ -89,13 +95,13 @@ export async function renderHeadlinePng(text: string, outputPath: string): Promi
   if (words.length === 0) return null;
   const lines = splitLines(words).map((ws) => ws.join(" "));
 
-  let size = BASE_SIZE;
+  let size = opts.baseSize ?? BASE_SIZE;
   const emojiSlot = (s: number) => (emojis.length > 0 ? emojis.length * s * 1.1 + s * 0.15 : 0);
   // Si rimpicciolisce finché la riga più lunga (con le emoji in fondo all'ultima) sta nella larghezza.
   for (let i = 0; i < 6; i++) {
     const widest = Math.max(...lines.map((l, k) => textWidth(l, size) + (k === lines.length - 1 ? emojiSlot(size) : 0)));
-    if (widest <= MAX_WIDTH) break;
-    size = Math.floor((size * MAX_WIDTH) / widest);
+    if (widest <= maxWidth) break;
+    size = Math.floor((size * maxWidth) / widest);
   }
 
   const pad = STROKE * 2 + 16;
@@ -110,7 +116,7 @@ export async function renderHeadlinePng(text: string, outputPath: string): Promi
     const baseline = pad + size * 0.92 + k * lineH;
     const lineWidth = widths[k]!;
     const x0 = (width - lineWidth) / 2;
-    const fill = lines.length > 1 && k === 0 ? "url(#w)" : "url(#y)";
+    const fill = opts.allWhite || (lines.length > 1 && k === 0) ? "url(#w)" : "url(#y)";
     const text = `<text x="${x0}" y="${baseline}" font-family="${FONT.family}" font-size="${size}" fill="${fill}" stroke="#000" stroke-width="${STROKE}" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(line)}</text>`;
     const shadow = `<text x="${x0 + 5}" y="${baseline + 7}" font-family="${FONT.family}" font-size="${size}" fill="#000" stroke="#000" stroke-width="${STROKE}" stroke-linejoin="round" opacity="0.6">${escapeXml(line)}</text>`;
     parts.push(shadow, text);
