@@ -168,6 +168,8 @@ export async function planHighlights(
 }
 
 const TIGHTEN_TOOL = "accorcia_montaggio";
+/** Voto massimo di un pezzo che si può togliere per accorciare. */
+const WEAK_SCORE = 4;
 
 const TIGHTEN_PROMPT = `Sei il montatore di un canale YouTube italiano che ripubblica le live di streamer. Hai già montato un video, ma è troppo lungo. Ricevi i pezzi tenuti, numerati, con il loro testo. Dai a OGNI pezzo un voto da 1 a 10 su quanto è forte per il video: poi si tolgono i pezzi col voto più basso finché si arriva alla durata obiettivo.
 
@@ -243,6 +245,9 @@ export async function tightenHighlights(
     let left = total;
     for (const x of order) {
       if (left <= input.targetSeconds) break;
+      // Solo pezzi davvero deboli: se non resta niente di debole si lascia così (simo, 2026-09-28:
+      // "se non ha più nulla da tagliare lasciamo così").
+      if (x.score > WEAK_SCORE) break;
       remove.add(x.i);
       left -= x.len;
     }
