@@ -577,7 +577,16 @@ async function applyTopicChanges(
     if (!leave) continue;
     const back = c.returnQuote.trim() ? await locator.locate({ start: c.returnAt, end: c.returnAt + 30, quote: c.returnQuote }) : null;
     const cutStart = Math.max(0, leave.start - 0.3);
-    const cutEnd = back ? Math.max(cutStart, back.start - 0.3) : duration;
+    // Frase del rientro non trovata nell'audio: si torna alla riga indicata dall'AI, NON "non tornano
+    // più". Il 2026-09-28 (Ale della Giusta) quel caso tagliava da 27 minuti alla fine, e il video
+    // montato usciva di 10 minuti. Anche quando non tornano davvero, il taglio si ferma al primo
+    // pezzo che l'AI stessa ha deciso di tenere dopo l'uscita.
+    const nextKept = out.find((r) => r.start > cutStart + 1)?.start;
+    const cutEnd = back
+      ? Math.max(cutStart, back.start - 0.3)
+      : c.returnQuote.trim()
+        ? Math.max(cutStart, c.returnAt)
+        : Math.min(duration, nextKept ?? duration);
     removedSeconds += cutEnd - cutStart;
     const before = out.filter((r) => r.end <= cutStart + 1).at(-1);
     if (before && cutStart - before.end <= TOPIC_EXTEND_SECONDS) before.end = Math.max(before.end, cutStart);
