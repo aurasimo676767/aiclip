@@ -130,12 +130,21 @@ const TOOL_SCHEMA: Anthropic.Tool = {
 
 /** Sonnet 5 a volte restituisce liste e oggetti annidati come testo JSON. */
 function parseJsonText(v: unknown): unknown {
-  if (typeof v !== "string") return v;
-  try {
-    return JSON.parse(v);
-  } catch {
-    return v;
+  let out = v;
+  if (typeof out === "string") {
+    try {
+      out = JSON.parse(out);
+    } catch {
+      return v;
+    }
   }
+  // A volte la lista arriva dentro un oggetto con una sola chiave (visto il 2026-09-28:
+  // keep = "{\"segments\":[...]}"): si prende la lista, invece di scartare tutto il piano.
+  if (out && typeof out === "object" && !Array.isArray(out)) {
+    const values = Object.values(out as Record<string, unknown>);
+    if (values.length === 1 && Array.isArray(values[0])) return values[0];
+  }
+  return out;
 }
 
 const rangeSchema = z.object({ start: z.coerce.number(), end: z.coerce.number(), why: z.string().optional() });
