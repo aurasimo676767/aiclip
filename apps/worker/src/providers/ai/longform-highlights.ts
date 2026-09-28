@@ -37,7 +37,8 @@ COSA TENERE E COSA TOGLIERE
 - VIA LE PARTI MORTE: attese, caricamenti, menu, silenzi, "vabbè", tentativi ripetuti uguali senza niente di divertente, chiacchiere che non portano a niente.
 - TIENI i momenti che fanno ridere, arrabbiare o stupire, CON il loro contesto: il setup che serve a capire la battuta, la battuta, la reazione. Mai la sola frase finale staccata dal resto.
 - FINE: il video finisce quando smettono di giocare a quel gioco (o sull'ultimo momento forte). Niente dopo.
-- DURATA: quella che serve, non allungare e non tagliare per arrivare a un numero. Di solito resta tra un quarto e metà dell'originale.
+- SII SEVERO: di una partita tieni i momenti forti e quello che serve a capirli, NON la partita intera. Tentativi ripetuti, partite normali senza niente di divertente, commenti tecnici sul gioco si tolgono. Nel dubbio si taglia.
+- DURATA: quella che serve, ma di solito un'ora di live diventa 20-28 minuti (circa un terzo, mai oltre il 45%). Un montaggio che tiene più di metà è troppo lungo (simo, 2026-09-28: da 60 a 36 minuti era "un goccio assai").
 - TAGLI PULITI: ogni tratto inizia all'inizio di una frase e finisce alla fine di una frase (usa i tempi delle righe). Ogni tratto dura almeno 8 secondi; due tratti separati da meno di 4 secondi uniscili.
 
 INTRO "IN QUESTO VIDEO"
