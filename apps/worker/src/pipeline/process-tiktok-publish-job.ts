@@ -15,7 +15,7 @@ import { storageProvider } from "../lib/providers.js";
 
 const API = "https://open.tiktokapis.com/v2";
 const CHUNK_SIZE = 10 * 1024 * 1024;
-const MIN_CHUNK = 5 * 1024 * 1024;
+const MAX_SINGLE_CHUNK = 64 * 1024 * 1024;
 const STATUS_POLL_MS = 5000;
 const STATUS_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -85,9 +85,12 @@ export async function processTiktokPublishJob(job: TiktokPublishJobRow): Promise
     await storageProvider.downloadToFile(clip.output_video_path, file);
     const size = (await fsp.stat(file)).size;
 
-    // Regole TikTok: pezzi da 5 a 64 MB, l'ultimo si prende il resto; sotto i 5 MB un pezzo solo.
-    const chunkSize = size < MIN_CHUNK ? size : CHUNK_SIZE;
-    const chunkCount = size < MIN_CHUNK ? 1 : Math.floor(size / chunkSize);
+    // Regole TikTok: fino a 64 MB un pezzo solo grande quanto il video; sopra, pezzi da 10 MB e
+    // l'ultimo si prende il resto. (Con pezzi da 10 MB un video da 6,5 MB dava "0 pezzi" e TikTok
+    // rispondeva "The video info is empty", 2026-09-28.)
+    const single = size <= MAX_SINGLE_CHUNK;
+    const chunkSize = single ? size : CHUNK_SIZE;
+    const chunkCount = single ? 1 : Math.floor(size / chunkSize);
     const init = await tiktokJson<{ publish_id: string; upload_url: string }>(`${API}/post/publish/video/init/`, token, {
       post_info: {
         title: job.caption,
