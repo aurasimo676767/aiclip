@@ -15,7 +15,12 @@ const tiles = await Promise.all(
     top: Math.floor(i / cols) * cell + 4,
   })),
 );
-const labels = files.map((f, i) => `<text x="${(i % cols) * cell + 6}" y="${Math.floor(i / cols) * cell + cell - 6}" font-size="13" fill="#fff" font-family="Arial">${i}: ${f.slice(0, 22)}</text>`).join("");
+const labels = files.map((f, i) => `<text x="${(i % cols) * cell + 6}" y="${Math.floor(i / cols) * cell + cell - 6}" font-size="13" fill="#fff" font-family="Arial">${f.slice(0, 22)}</text>`).join("");
 const svg = Buffer.from(`<svg width="${cols * cell}" height="${rows * cell}" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="c" width="20" height="20" patternUnits="userSpaceOnUse"><rect width="20" height="20" fill="#2c4a6e"/><rect width="10" height="10" fill="#355a85"/><rect x="10" y="10" width="10" height="10" fill="#355a85"/></pattern></defs><rect width="100%" height="100%" fill="url(#c)"/>${labels}</svg>`);
-await sharp(svg).composite(tiles).jpeg({ quality: 85 }).toFile(out!);
+// Numeri grandi SOPRA le foto: su Telegram (immagine compressa) quelli piccoli non si leggevano (simo, 2026-09-28).
+const numbers = files
+  .map((_, i) => `<text x="${(i % cols) * cell + 8}" y="${Math.floor(i / cols) * cell + 44}" font-size="40" font-weight="bold" fill="#ffe600" stroke="#000" stroke-width="6" paint-order="stroke" font-family="Arial">${i}</text>`)
+  .join("");
+const overlay = { input: Buffer.from(`<svg width="${cols * cell}" height="${rows * cell}" xmlns="http://www.w3.org/2000/svg">${numbers}</svg>`), left: 0, top: 0 };
+await sharp(svg).composite([...tiles, overlay]).jpeg({ quality: 85 }).toFile(out!);
 console.log("ok", files.length);
