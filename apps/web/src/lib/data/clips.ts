@@ -32,17 +32,32 @@ function buildLongformDescriptionPreset(streamerName: string | null, streamerLog
 /**
  * Giochi di una clip long-form per il selettore del montato: i tratti riconosciuti dallo schermo
  * (clips.longform_games, migrazione 0029) sommati per nome, dal più lungo. La ruota non si sceglie
- * (resta sempre davanti al gioco che sceglie); tutto il resto finisce in "Altro".
+ * (resta sempre davanti al gioco che sceglie); tutto il resto finisce in "Altro", con l'elenco di
+ * cosa c'è dentro. Un "altro" che parla di un gioco (menu, caricamenti di COD) conta sotto quel
+ * gioco, come nel montaggio (vedi allowedRanges in game-timeline.ts).
  */
-function summarizeGames(raw: unknown): Array<{ name: string; seconds: number }> | null {
+function summarizeGames(raw: unknown): Array<{ name: string; seconds: number; contents?: string[] }> | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
+  const segments = raw as Array<{ start: number; end: number; kind: string; name: string; what?: string }>;
+  const games = [...new Set(segments.filter((s) => s.kind === "gioco").map((s) => s.name))];
   const totals = new Map<string, number>();
-  for (const s of raw as Array<{ start: number; end: number; kind: string; name: string }>) {
+  const contents = new Set<string>();
+  for (const s of segments) {
     if (s.kind === "ruota") continue;
-    const name = s.kind === "altro" ? "Altro" : s.name;
+    let name = s.kind === "gioco" ? s.name : "Altro";
+    if (s.kind === "altro" && s.what) {
+      const about = games.find((g) => {
+        const base = g.split(":")[0]!.trim().toLowerCase();
+        return base.length >= 4 && s.what!.toLowerCase().includes(base);
+      });
+      if (about) name = about;
+      else contents.add(s.what);
+    }
     totals.set(name, (totals.get(name) ?? 0) + Math.max(0, s.end - s.start));
   }
-  return [...totals.entries()].map(([name, seconds]) => ({ name, seconds })).sort((a, b) => b.seconds - a.seconds);
+  return [...totals.entries()]
+    .map(([name, seconds]) => (name === "Altro" ? { name, seconds, contents: [...contents] } : { name, seconds }))
+    .sort((a, b) => b.seconds - a.seconds);
 }
 
 /**

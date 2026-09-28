@@ -16,7 +16,7 @@ export function GamePicker({
   compact = false,
 }: {
   clipId: string;
-  games: Array<{ name: string; seconds: number }> | null;
+  games: Array<{ name: string; seconds: number; contents?: string[] }> | null;
   keep: string[] | null;
   compact?: boolean;
 }) {
@@ -86,6 +86,10 @@ export function GamePicker({
           );
         })}
       </div>
+      {(() => {
+        const other = games.find((g) => g.name === "Altro")?.contents ?? [];
+        return other.length > 0 ? <p className="text-[11px] leading-snug text-faint">Altro: {other.join(", ")}</p> : null;
+      })()}
       {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   );

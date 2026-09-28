@@ -24,7 +24,7 @@ export interface ClipViewModel {
   /** Solo long-form: montaggio automatico al prossimo render (tempi morti tagliati, stacchi sulle urla). */
   longformEdit: boolean;
   /** Solo long-form: giochi riconosciuti dallo schermo, con i minuti a schermo (null = non ancora riconosciuti). */
-  longformGames: Array<{ name: string; seconds: number }> | null;
+  longformGames: Array<{ name: string; seconds: number; contents?: string[] }> | null;
   /** Solo long-form: giochi da tenere nel montato scelti da simo (null = il gioco che dura di più). */
   longformKeepGames: string[] | null;
   youtubePublishStatus: string | null;
