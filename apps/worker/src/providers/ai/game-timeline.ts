@@ -286,7 +286,12 @@ export function mainGame(timeline: GameSegment[]): string | null {
  * sceglie quel gioco resta sempre, vedi le regole di simo sui VOD). "Altro" si tiene solo se scelto.
  */
 export function allowedRanges(timeline: GameSegment[], keep: string[]): Array<{ start: number; end: number }> {
-  const chosen = (s: GameSegment) => (s.kind === "gioco" && keep.includes(s.name)) || (s.kind === "altro" && keep.includes("Altro"));
+  // Un "altro" che parla di un gioco scelto (es. "caricamento menu Call of Duty", visto su COD il
+  // 2026-09-28) è quel gioco: l'AI a volte non lo mette sotto il gioco come le si chiede.
+  const baseNames = keep.filter((k) => k !== "Altro").map((k) => k.split(":")[0]!.trim().toLowerCase());
+  const aboutChosen = (s: GameSegment) => s.kind === "altro" && !!s.what && baseNames.some((b) => b.length >= 4 && s.what!.toLowerCase().includes(b));
+  const chosen = (s: GameSegment) =>
+    (s.kind === "gioco" && keep.includes(s.name)) || (s.kind === "altro" && (keep.includes("Altro") || aboutChosen(s)));
   const out: Array<{ start: number; end: number }> = [];
   timeline.forEach((s, i) => {
     const next = timeline[i + 1];
