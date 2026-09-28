@@ -26,6 +26,10 @@ export interface HighlightsPlan {
   keep: HighlightsRange[];
   /** Candidati per l'intro (fino a 4), con le parole esatte della reazione: vedi render/intro-moments.ts. */
   intro: Array<HighlightsRange & { quote: string }>;
+  /** Pezzi in cui passano a un altro argomento, con le parole esatte di quando se ne vanno e di quando tornano. */
+  topicChanges: Array<{ leaveAt: number; leaveQuote: string; returnAt: number; returnQuote: string }>;
+  /** Primi piani sulla webcam: sclero (bestemmie, insulti) o frase forte, con le parole esatte. */
+  closeups: Array<HighlightsRange & { quote: string; kind: "sclero" | "frase" }>;
 }
 
 const TOOL_NAME = "monta_video";
@@ -36,16 +40,23 @@ COSA TENERE E COSA TOGLIERE
 - UN SOLO ARGOMENTO: il video parla solo di quello del titolo. Se in mezzo parlano d'altro (leggono la chat su altri temi, parlano di altri giochi, di soldi, di sponsor, di cosa mangiano) e poi tornano al gioco, quel pezzo si toglie TUTTO.
 - VIA LE PARTI MORTE: attese, caricamenti, menu, silenzi, "vabbè", tentativi ripetuti uguali senza niente di divertente, chiacchiere che non portano a niente.
 - TIENI i momenti che fanno ridere, arrabbiare o stupire, CON il loro contesto: il setup che serve a capire la battuta, la battuta, la reazione. Mai la sola frase finale staccata dal resto.
-- FINE: il video finisce quando smettono di giocare a quel gioco (o sull'ultimo momento forte). Niente dopo.
+- FINE: il video finisce quando smettono di giocare a quel gioco (o sull'ultimo momento forte). Niente dopo. Le ULTIME partite, fino alla vittoria o sconfitta finale, restano sempre: sono il finale del video.
 - SII SEVERO: di una partita tieni i momenti forti e quello che serve a capirli, NON la partita intera. Tentativi ripetuti, partite normali senza niente di divertente, commenti tecnici sul gioco si tolgono. Nel dubbio si taglia.
-- DURATA: quella che serve, ma di solito un'ora di live diventa 20-28 minuti (circa un terzo, mai oltre il 45%). Un montaggio che tiene più di metà è troppo lungo (simo, 2026-09-28: da 60 a 36 minuti era "un goccio assai").
+- DURATA: quella che serve, calcolata sulla parte IN TEMA (dopo aver tolto i pezzi in cui fanno altro): di solito un'ora di gioco vero diventa 20-28 minuti (circa un terzo, mai oltre il 45%). Un montaggio che tiene più di metà è troppo lungo (simo, 2026-09-28: da 60 a 36 minuti era "un goccio assai"). Ma se togli 20 minuti di un altro gioco, NON tagliare il resto per compensare: in un test l'AI ha buttato 17 minuti delle ultime partite per restare nei 22 minuti totali.
 - TAGLI PULITI: ogni tratto inizia all'inizio di una frase e finisce alla fine di una frase (usa i tempi delle righe). Ogni tratto dura almeno 8 secondi; due tratti separati da meno di 4 secondi uniscili.
+- CAMBI DI ARGOMENTO: quando togli un pezzo in cui fanno altro (un altro gioco, altro), il taglio parte ESATTAMENTE dove lasciano il gioco del video (la frase in cui lanciano l'altro gioco o cambiano discorso) e riprende esattamente dove ci tornano. Non tagliare anche la fine della partita prima del cambio, se non è davvero morta. Elenca ogni cambio in "topicChanges" con le parole esatte di quando se ne vanno e di quando tornano (se non tornano più, il video finisce lì e basta).
 
 INTRO "IN QUESTO VIDEO"
-Proponi 4 momenti candidati (ne verranno usati 2) per l'intro: le REAZIONI più folli del video, dove qualcuno URLA, insulta, bestemmia, sclera o ride fortissimo. Devono colpire anche senza contesto e venire da punti diversi del video, dentro i tratti tenuti.
+Proponi 4 momenti candidati (ne verranno usati 2) per l'intro: le REAZIONI più folli del video, dove qualcuno URLA, insulta, bestemmia, sclera o ride fortissimo. Devono colpire anche senza contesto e venire da punti diversi del video, SOLO da tratti che tieni (se un momento è così forte da finire nell'intro, quel pezzo va tenuto).
 - Sceglili dal TESTO: esclamazioni, insulti, "NOOO", risate, frasi urlate. MAI un momento in cui parlano normale (spiegano, commentano la squadra, leggono i nomi), anche se nel gioco succede qualcosa: si deve SENTIRE la loro reazione.
 - NON fidarti dei "momenti in cui alzano la voce": sono misurati su tutto l'audio e contengono anche musica della lobby, spari e avvisi degli abbonamenti.
 - Per ognuno copia in "quote" le parole ESATTE della reazione (3-8 parole consecutive della trascrizione), così si trova il punto preciso; start/end sono i tempi della riga in cui sta.
+
+PRIMI PIANI SULLA WEBCAM
+Scegli i momenti in cui mostrare a tutto schermo la faccia di chi parla (uno ogni 1-3 minuti di video montato, SOLO dentro i tratti che tieni):
+- "sclero": quando si incazzano DAVVERO (bestemmie a raffica, insulti urlati, rage). Non ogni bestemmia: bestemmiano sempre, scegli i picchi. Nelle "quote" metti le parole dall'INIZIO alla FINE dello sclero, il primo piano dura tutto lo sclero.
+- "frase": una frase forte o divertente detta da qualcuno (la battuta, la risposta cattiva, l'insulto geniale), per dare il primo piano a chi la dice.
+Per ognuno copia in "quote" le parole ESATTE (3-15 parole consecutive della trascrizione); start/end sono i tempi della riga.
 
 Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
@@ -82,9 +93,37 @@ const TOOL_SCHEMA: Anthropic.Tool = {
           required: ["start", "end", "quote"],
         },
       },
+      topicChanges: {
+        type: "array",
+        description: "Pezzi tolti perché fanno altro: dove se ne vanno e dove tornano, con le parole esatte.",
+        items: {
+          type: "object",
+          properties: {
+            leaveAt: { type: "number", description: "Inizio della riga in cui lasciano il gioco del video." },
+            leaveQuote: { type: "string", description: "Le parole esatte con cui cambiano (3-10 parole)." },
+            returnAt: { type: "number", description: "Inizio della riga in cui tornano." },
+            returnQuote: { type: "string", description: "Le parole esatte con cui tornano (3-10 parole)." },
+          },
+          required: ["leaveAt", "leaveQuote", "returnAt", "returnQuote"],
+        },
+      },
+      closeups: {
+        type: "array",
+        description: "Primi piani sulla webcam di chi parla: sclero veri e frasi forti.",
+        items: {
+          type: "object",
+          properties: {
+            start: { type: "number", description: "Inizio della riga della trascrizione." },
+            end: { type: "number" },
+            kind: { type: "string", enum: ["sclero", "frase"] },
+            quote: { type: "string", description: "Le parole esatte, dall'inizio alla fine dello sclero o della frase." },
+          },
+          required: ["start", "end", "kind", "quote"],
+        },
+      },
       endReason: { type: "string", description: "Perché il video finisce dove finisce." },
     },
-    required: ["keep", "intro"],
+    required: ["keep", "intro", "topicChanges", "closeups"],
   },
 };
 
@@ -103,6 +142,15 @@ const introSchema = rangeSchema.extend({ quote: z.string().default("") });
 const responseSchema = z.object({
   keep: z.preprocess(parseJsonText, z.array(z.preprocess(parseJsonText, rangeSchema))),
   intro: z.preprocess(parseJsonText, z.array(z.preprocess(parseJsonText, introSchema))).default([]),
+  topicChanges: z
+    .preprocess(
+      parseJsonText,
+      z.array(z.preprocess(parseJsonText, z.object({ leaveAt: z.coerce.number(), leaveQuote: z.string(), returnAt: z.coerce.number(), returnQuote: z.string() }))),
+    )
+    .default([]),
+  closeups: z
+    .preprocess(parseJsonText, z.array(z.preprocess(parseJsonText, introSchema.extend({ kind: z.enum(["sclero", "frase"]).catch("frase") }))))
+    .default([]),
   endReason: z.string().optional(),
 });
 
@@ -153,10 +201,14 @@ export async function planHighlights(
       tratti: parsed.data.keep.length,
       intro: parsed.data.intro.map((r) => `${r.start.toFixed(1)}-${r.end.toFixed(1)} "${r.quote}" ${r.why ?? ""}`),
       fine: parsed.data.endReason,
+      cambiArgomento: parsed.data.topicChanges.map((c) => `${c.leaveAt.toFixed(0)} "${c.leaveQuote}" → ${c.returnAt.toFixed(0)} "${c.returnQuote}"`),
+      primiPiani: parsed.data.closeups.length,
     });
     return {
       keep: parsed.data.keep.map((r) => ({ start: r.start, end: r.end })),
       intro: parsed.data.intro.filter((r) => r.quote.trim()).map((r) => ({ start: r.start, end: r.end, quote: r.quote })),
+      topicChanges: parsed.data.topicChanges,
+      closeups: parsed.data.closeups.filter((r) => r.quote.trim()).map((r) => ({ start: r.start, end: r.end, quote: r.quote, kind: r.kind })),
     };
   } catch (error) {
     logger.warn("Montaggio da YouTuber fallito", { error: error instanceof Error ? error.message : String(error) });

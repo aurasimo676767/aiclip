@@ -9,25 +9,30 @@ import { logger } from "../lib/logger.js";
 import { measureRmsWindows } from "./word-loudness.js";
 
 /**
- * Trova l'istante ESATTO dei momenti dell'intro "IN QUESTO VIDEO".
+ * Trova l'istante ESATTO in cui viene detta una frase: per l'intro "IN QUESTO VIDEO", per i primi
+ * piani sulla webcam e per i tagli sui cambi di gioco dei video montati.
  *
- * Perché serve (2026-09-28, secondo test su Call of Duty): i VOD lunghi hanno una trascrizione a
- * blocchi di ~28 s senza i tempi delle parole, quindi l'AI sa COSA viene detto ma non DOVE dentro il
- * blocco. Cercare poi il punto "più forte" con il volume sbagliava: il forte era la musica della
- * lobby o la morte nel gioco, "non urlava nessuno" (simo). Qui invece:
- * 1. l'AI dà le parole esatte della reazione (urlo, insulto, risata);
- * 2. si ritrascrivono solo quei ~30 s con Whisper e i tempi delle parole (~0,3 centesimi l'uno);
- * 3. si cercano le parole e la clip parte mezzo secondo prima.
+ * Perché serve (2026-09-28, test su Call of Duty): i VOD lunghi hanno una trascrizione a blocchi di
+ * ~28 s senza i tempi delle parole, quindi l'AI sa COSA viene detto ma non DOVE dentro il blocco.
+ * Cercare il punto "più forte" col volume sbagliava: il forte era la musica della lobby o la morte
+ * nel gioco, "non urlava nessuno" (simo); e il taglio sul cambio di gioco partiva mentre erano
+ * ancora su COD. Qui invece:
+ * 1. l'AI dà le parole esatte;
+ * 2. si ritrascrivono solo quei ~30 s con Whisper e i tempi delle parole (~0,3 centesimi l'uno,
+ *    e un pezzo già ritrascritto si riusa);
+ * 3. si cercano le parole.
  * Se la trascrizione ha già i tempi delle parole si usano quelli, senza Whisper.
  */
 
-export interface IntroCandidate {
+export interface PhraseQuery {
+  /** Tempi della riga della trascrizione in cui l'AI ha visto la frase (secondi dal pezzo). */
   start: number;
   end: number;
   quote: string;
 }
 
-export interface LocatedIntroMoment {
+export interface LocatedPhrase {
+  /** Prima e ultima parola trovate, in secondi dall'inizio del pezzo. */
   start: number;
   end: number;
   /** Volume medio sulle parole trovate (dB): per scegliere le reazioni più forti. */
@@ -40,11 +45,6 @@ interface Word {
   start: number;
   end: number;
 }
-
-const LEAD_SECONDS = 0.5;
-const TAIL_SECONDS = 1.2;
-const MIN_SECONDS = 2;
-const MAX_SECONDS = 5;
 
 function tokens(text: string): string[] {
   return text
@@ -90,76 +90,74 @@ function findQuote(words: Word[], quote: string): { start: number; end: number; 
   return best && best.score >= 0.5 ? best : null;
 }
 
-async function transcribeWindow(client: OpenAI, sourcePath: string, from: number, duration: number, dir: string, i: number): Promise<Word[]> {
-  const audio = path.join(dir, `intro-${i}.mp3`);
-  await runFfmpeg(["-y", "-ss", from.toFixed(3), "-t", duration.toFixed(3), "-i", sourcePath, "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-b:a", "48k", audio]);
-  const response = (await client.audio.transcriptions.create({
-    file: fs.createReadStream(audio),
-    model: "whisper-1",
-    language: "it",
-    response_format: "verbose_json",
-    timestamp_granularities: ["word"],
-  })) as unknown as { words?: Word[] };
-  return (response.words ?? []).map((w) => ({ word: w.word, start: w.start + from, end: w.end + from }));
-}
+/** Cerca le frasi nell'audio di un pezzo di video; riusa le ritrascrizioni fra una ricerca e l'altra. */
+export class PhraseLocator {
+  private readonly client: OpenAI;
+  private readonly windows: Array<{ from: number; to: number; words: Word[] }> = [];
+  private dir: string | null = null;
+  private whisperSeconds = 0;
 
-/**
- * Colloca i candidati dell'AI (tempi dall'inizio del pezzo `clipStart` nel sorgente). Ritorna i
- * momenti trovati, in tempi del pezzo; quelli di cui non si trovano le parole si scartano.
- */
-export async function locateIntroMoments(params: {
-  candidates: IntroCandidate[];
-  segments: TranscriptSegment[];
-  sourceVideoPath: string;
-  clipStart: number;
-  clipDuration: number;
-  openaiApiKey: string;
-}): Promise<LocatedIntroMoment[]> {
-  const client = new OpenAI({ apiKey: params.openaiApiKey });
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "intro-"));
-  const out: LocatedIntroMoment[] = [];
-  let whisperSeconds = 0;
-  try {
-    for (const [i, c] of params.candidates.entries()) {
-      // La riga (o le righe) della trascrizione in cui l'AI ha visto la citazione, con un po' di margine.
-      const from = Math.max(0, Math.min(c.start, c.end) - 3);
-      const to = Math.min(params.clipDuration, Math.max(c.start, c.end, from + 8) + 3);
-      let words: Word[] = params.segments
-        .filter((s) => s.end > from && s.start < to)
-        .flatMap((s) => s.words ?? [])
-        .filter((w) => w.start >= from && w.start <= to);
-      try {
-        if (words.length === 0) {
-          const window = Math.min(to - from, 40);
-          words = (await transcribeWindow(client, params.sourceVideoPath, params.clipStart + from, window, dir, i)).map((w) => ({
-            ...w,
-            start: w.start - params.clipStart,
-            end: w.end - params.clipStart,
-          }));
-          whisperSeconds += window;
-        }
-      } catch (error) {
-        logger.warn("Intro: ritrascrizione fallita", { error: error instanceof Error ? error.message : String(error) });
-        continue;
-      }
-      const found = findQuote(words, c.quote);
-      if (!found) {
-        logger.info("Intro: parole non trovate, momento scartato", { quote: c.quote });
-        continue;
-      }
-      const start = Math.max(0, found.start - LEAD_SECONDS);
-      const end = Math.min(params.clipDuration, Math.max(start + MIN_SECONDS, Math.min(found.end + TAIL_SECONDS, start + MAX_SECONDS)));
-      const levels = await measureRmsWindows(params.sourceVideoPath, params.clipStart + found.start, Math.max(0.3, found.end - found.start));
-      const power = levels.filter((db) => db > -90).map((db) => 10 ** (db / 10));
-      const loudness = power.length ? 10 * Math.log10(power.reduce((a, b) => a + b, 0) / power.length) : -99;
-      out.push({ start, end, loudness, quote: c.quote });
-    }
-  } finally {
-    await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  constructor(
+    private readonly params: { segments: TranscriptSegment[]; sourceVideoPath: string; clipStart: number; clipDuration: number; openaiApiKey: string },
+  ) {
+    this.client = new OpenAI({ apiKey: params.openaiApiKey });
   }
-  logger.info("Intro: momenti collocati sulle parole", {
-    trovati: out.map((m) => `${m.start.toFixed(1)}-${m.end.toFixed(1)} ${m.loudness.toFixed(1)}dB "${m.quote}"`),
-    costoWhisperUsd: ((whisperSeconds / 60) * 0.006).toFixed(4),
-  });
-  return out;
+
+  /** Costo di Whisper speso finora (0,006 $ al minuto). */
+  get costUsd(): number {
+    return (this.whisperSeconds / 60) * 0.006;
+  }
+
+  private async wordsBetween(from: number, to: number): Promise<Word[]> {
+    const known = this.params.segments
+      .filter((s) => s.end > from && s.start < to)
+      .flatMap((s) => s.words ?? [])
+      .filter((w) => w.start >= from && w.start <= to);
+    if (known.length > 0) return known;
+    const cached = this.windows.find((w) => w.from <= from + 0.5 && w.to >= to - 0.5);
+    if (cached) return cached.words.filter((w) => w.start >= from && w.start <= to);
+
+    this.dir ??= await fsp.mkdtemp(path.join(os.tmpdir(), "phrases-"));
+    const audio = path.join(this.dir, `w-${this.windows.length}.mp3`);
+    const duration = to - from;
+    await runFfmpeg(["-y", "-ss", (this.params.clipStart + from).toFixed(3), "-t", duration.toFixed(3), "-i", this.params.sourceVideoPath, "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-b:a", "48k", audio]);
+    const response = (await this.client.audio.transcriptions.create({
+      file: fs.createReadStream(audio),
+      model: "whisper-1",
+      language: "it",
+      response_format: "verbose_json",
+      timestamp_granularities: ["word"],
+    })) as unknown as { words?: Word[] };
+    this.whisperSeconds += duration;
+    const words = (response.words ?? []).map((w) => ({ word: w.word, start: w.start + from, end: w.end + from }));
+    this.windows.push({ from, to, words });
+    return words;
+  }
+
+  /** La frase nel suo intorno, o null se le parole non si trovano. */
+  async locate(q: PhraseQuery): Promise<LocatedPhrase | null> {
+    const from = Math.max(0, Math.min(q.start, q.end) - 3);
+    const to = Math.min(this.params.clipDuration, Math.min(Math.max(q.start, q.end, from + 8) + 3, from + 40));
+    let words: Word[];
+    try {
+      words = await this.wordsBetween(from, to);
+    } catch (error) {
+      logger.warn("Ritrascrizione di una frase fallita", { error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+    const found = findQuote(words, q.quote);
+    if (!found) {
+      logger.info("Frase non trovata nell'audio", { quote: q.quote });
+      return null;
+    }
+    const levels = await measureRmsWindows(this.params.sourceVideoPath, this.params.clipStart + found.start, Math.max(0.3, found.end - found.start));
+    const power = levels.filter((db) => db > -90).map((db) => 10 ** (db / 10));
+    const loudness = power.length ? 10 * Math.log10(power.reduce((a, b) => a + b, 0) / power.length) : -99;
+    return { start: found.start, end: found.end, loudness, quote: q.quote };
+  }
+
+  async dispose(): Promise<void> {
+    if (this.dir) await fsp.rm(this.dir, { recursive: true, force: true }).catch(() => undefined);
+    logger.info("Frasi cercate nell'audio", { ritrascrittiSecondi: Math.round(this.whisperSeconds), costoWhisperUsd: this.costUsd.toFixed(4) });
+  }
 }

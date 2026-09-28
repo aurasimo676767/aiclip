@@ -6,7 +6,8 @@ import type { CropWindow, FaceTracker } from "../face-tracking/face-tracker.js";
 import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
 import type { TranscriptSegment } from "@clipforge/shared";
 import { planHighlights, tightenHighlights } from "../providers/ai/longform-highlights.js";
-import { locateIntroMoments, type LocatedIntroMoment } from "./intro-moments.js";
+import { PhraseLocator, type LocatedPhrase } from "./intro-moments.js";
+import type { HighlightsPlan } from "../providers/ai/longform-highlights.js";
 import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
 
 /**
@@ -79,6 +80,11 @@ export interface HighlightsInput {
 /** Oltre questa quota del video tenuta, secondo giro dell'AI per accorciare fino a TIGHTEN_TARGET. */
 const TIGHTEN_ABOVE = 0.45;
 const TIGHTEN_TARGET = 0.4;
+/** Sul cambio di gioco: se il pezzo tenuto prima finisce al massimo così tanto prima, lo si allunga fino al cambio. */
+const TOPIC_EXTEND_SECONDS = 90;
+/** Primi piani dell'AI: durata (sclero: tutto lo sclero, fino a 8 s) e distanza minima fra due. */
+const CLOSEUP_LIMITS = { sclero: { min: 2, max: 8 }, frase: { min: 1.5, max: 6 } } as const;
+const CLOSEUP_SPACING_SECONDS = 8;
 
 /** Tratto minimo tenuto e distanza sotto cui due tratti si uniscono (secondi). */
 const MIN_KEEP_SECONDS = 5;
@@ -118,6 +124,8 @@ export async function planLongformEdit(params: {
   // divagazioni, fine quando smettono di giocare) e i momenti dell'intro. Dai suoi tratti si tolgono
   // comunque i silenzi veri trovati sopra. Se l'AI non risponde si resta al montaggio solo-silenzi.
   let intro: TimeRange[] = [];
+  // Primi piani scelti dall'AI sulle parole (null = nessun piano AI: stacchi sulle urla come prima).
+  let aiCloseups: TimeRange[] | null = null;
   if (params.highlights) {
     const segments = params.highlights.segments
       .map((seg) => ({ ...seg, start: seg.start - params.start, end: seg.end - params.start }))
@@ -132,28 +140,43 @@ export async function planLongformEdit(params: {
       const seconds = (rs: TimeRange[]) => rs.reduce((sum, r) => sum + (r.end - r.start), 0);
       // Un piano che tiene meno di un minuto è quasi certamente sbagliato: meglio il video intero.
       if (seconds(chosen) >= 60) {
-        if (seconds(chosen) > duration * TIGHTEN_ABOVE && chosen.length > 2) {
-          const pieces = chosen.map((r) => ({
-            ...r,
-            text: segments.filter((seg) => seg.end > r.start && seg.start < r.end).map((seg) => seg.text).join(" "),
-          }));
-          const tightened = await tightenHighlights(
-            { title: params.highlights.title, pieces, targetSeconds: duration * TIGHTEN_TARGET },
-            { apiKey: params.highlights.apiKey, model: params.highlights.model },
-          );
-          if (tightened && seconds(tightened) >= 60) chosen = tightened;
-        }
-        const merged = intersectRanges(keep, chosen).filter((r) => r.end - r.start >= 1);
-        keep.splice(0, keep.length, ...merged);
-        const located = await locateIntroMoments({
-          candidates: aiPlan.intro,
+        const locator = new PhraseLocator({
           segments,
           sourceVideoPath: params.sourceVideoPath,
           clipStart: params.start,
           clipDuration: duration,
           openaiApiKey: params.highlights.openaiApiKey,
         });
-        intro = pickIntro(located, chosen);
+        try {
+          const topic = await applyTopicChanges(chosen, aiPlan.topicChanges, locator, duration);
+          chosen = topic.ranges;
+          // La quota si misura sulla parte in tema: tolto un altro gioco, il resto non va accorciato per compensare.
+          const onTopic = duration - topic.removedSeconds;
+          if (seconds(chosen) > onTopic * TIGHTEN_ABOVE && chosen.length > 2) {
+            const pieces = chosen.map((r) => ({
+              ...r,
+              text: segments.filter((seg) => seg.end > r.start && seg.start < r.end).map((seg) => seg.text).join(" "),
+            }));
+            const tightened = await tightenHighlights(
+              { title: params.highlights.title, pieces, targetSeconds: onTopic * TIGHTEN_TARGET },
+              { apiKey: params.highlights.apiKey, model: params.highlights.model },
+            );
+            if (tightened && seconds(tightened) >= 60) chosen = tightened;
+          }
+          const merged = intersectRanges(keep, chosen).filter((r) => r.end - r.start >= 1);
+          keep.splice(0, keep.length, ...merged);
+          const located: LocatedPhrase[] = [];
+          for (const c of aiPlan.intro) {
+            const f = await locator.locate(c);
+            if (!f) continue;
+            const start = Math.max(0, f.start - 0.5);
+            located.push({ ...f, start, end: Math.min(duration, Math.max(start + 2, Math.min(f.end + 1.2, start + 5))) });
+          }
+          intro = pickIntro(located, chosen);
+          aiCloseups = await locateCloseups(aiPlan.closeups, locator, keep, duration);
+        } finally {
+          await locator.dispose();
+        }
       } else {
         logger.warn("Montaggio da YouTuber: piano troppo corto, resto al montaggio solo-silenzi", { tenutiSecondi: Math.round(seconds(chosen)) });
       }
@@ -165,8 +188,8 @@ export async function planLongformEdit(params: {
   const screams = runsWhere(bins, (db) => db >= baseline + SCREAM_ABOVE_DB, MIN_SCREAM_SECONDS, 1)
     .map((r) => ({ ...r, strength: Math.max(...bins.slice(Math.floor(r.start / BIN_SECONDS), Math.ceil(r.end / BIN_SECONDS))) }))
     .sort((a, b) => b.strength - a.strength);
-  const chosen: TimeRange[] = [];
-  for (const s of screams) {
+  const chosen: TimeRange[] = aiCloseups ? [...aiCloseups] : [];
+  for (const s of aiCloseups ? [] : screams) {
     const punch = { start: Math.max(0, s.start - 0.15), end: s.start - 0.15 + PUNCH_SECONDS };
     if (!keep.some((k) => punch.start >= k.start && punch.end <= k.end)) continue;
     if (chosen.some((c) => Math.abs(c.start - punch.start) < MIN_PUNCH_SPACING_SECONDS)) continue;
@@ -253,7 +276,7 @@ function intersectRanges(a: TimeRange[], b: TimeRange[]): TimeRange[] {
  * dall'altro, al massimo ~10 s in tutto, mostrati in ordine di tempo. Prima quelli dentro i pezzi
  * tenuti (si rivedono nel video), poi, se mancano, anche gli altri.
  */
-function pickIntro(located: LocatedIntroMoment[], chosen: TimeRange[]): TimeRange[] {
+function pickIntro(located: LocatedPhrase[], chosen: TimeRange[]): TimeRange[] {
   const inside = (m: TimeRange) => chosen.some((c) => m.start >= c.start - 1 && m.start < c.end);
   const ranked = [...located].sort((a, b) => Number(inside(b)) - Number(inside(a)) || b.loudness - a.loudness);
   const out: TimeRange[] = [];
@@ -466,4 +489,70 @@ async function findCamCrop(params: {
 
 function camKey(c: CropWindow): string {
   return `${c.x},${c.y},${c.width},${c.height}`;
+}
+
+/**
+ * Taglio preciso sui cambi di argomento (simo, 2026-09-28, video di COD: "ha tagliato ancora che
+ * stavano in partita su cod, invece doveva tagliare nel momento dove cambiavano gioco"). Si cercano
+ * nell'audio le parole con cui lasciano il gioco e quelle con cui ci tornano: quel pezzo si toglie,
+ * e il tratto tenuto subito prima si allunga fino al cambio se finiva poco prima.
+ */
+async function applyTopicChanges(
+  chosen: TimeRange[],
+  changes: HighlightsPlan["topicChanges"],
+  locator: PhraseLocator,
+  duration: number,
+): Promise<{ ranges: TimeRange[]; removedSeconds: number }> {
+  let out = chosen.map((r) => ({ ...r }));
+  let removedSeconds = 0;
+  for (const c of changes) {
+    const leave = await locator.locate({ start: c.leaveAt, end: c.leaveAt + 30, quote: c.leaveQuote });
+    if (!leave) continue;
+    const back = c.returnQuote.trim() ? await locator.locate({ start: c.returnAt, end: c.returnAt + 30, quote: c.returnQuote }) : null;
+    const cutStart = Math.max(0, leave.start - 0.3);
+    const cutEnd = back ? Math.max(cutStart, back.start - 0.3) : duration;
+    removedSeconds += cutEnd - cutStart;
+    const before = out.filter((r) => r.end <= cutStart + 1).at(-1);
+    if (before && cutStart - before.end <= TOPIC_EXTEND_SECONDS) before.end = Math.max(before.end, cutStart);
+    const after = back ? out.find((r) => r.start >= cutEnd - 1) : undefined;
+    if (after && after.start - cutEnd <= TOPIC_EXTEND_SECONDS) after.start = Math.min(after.start, cutEnd);
+    out = out.flatMap((r) => {
+      if (r.end <= cutStart || r.start >= cutEnd) return [r];
+      const parts: TimeRange[] = [];
+      if (r.start < cutStart) parts.push({ start: r.start, end: cutStart });
+      if (r.end > cutEnd) parts.push({ start: cutEnd, end: r.end });
+      return parts;
+    });
+    logger.info("Cambio di argomento tagliato sulle parole", { da: cutStart.toFixed(1), a: cutEnd.toFixed(1), esce: c.leaveQuote, torna: back ? c.returnQuote : null });
+  }
+  return { ranges: out.filter((r) => r.end - r.start >= 1), removedSeconds };
+}
+
+/**
+ * Primi piani dell'AI (simo, 2026-09-28): negli sclero veri, per TUTTO lo sclero ("nei momenti dove
+ * proprio si incazzano"), e su chi dice una frase forte. Prima gli stacchi andavano dove l'audio era
+ * più forte per 1,6 s: prendevano anche spari e musica. Ogni primo piano resta dentro un tratto tenuto.
+ */
+async function locateCloseups(
+  closeups: HighlightsPlan["closeups"],
+  locator: PhraseLocator,
+  keep: TimeRange[],
+  duration: number,
+): Promise<TimeRange[]> {
+  const out: TimeRange[] = [];
+  for (const c of closeups) {
+    const f = await locator.locate(c);
+    if (!f) continue;
+    const limits = CLOSEUP_LIMITS[c.kind];
+    const start = Math.max(0, f.start - 0.3);
+    let end = Math.min(duration, Math.max(start + limits.min, Math.min(f.end + 0.5, start + limits.max)));
+    const k = keep.find((r) => start >= r.start && start < r.end);
+    if (!k) continue;
+    end = Math.min(end, k.end);
+    if (end - start < 1.2) continue;
+    if (out.some((o) => start < o.end + CLOSEUP_SPACING_SECONDS && end > o.start - CLOSEUP_SPACING_SECONDS)) continue;
+    out.push({ start, end });
+  }
+  logger.info("Primi piani dell'AI collocati", { proposti: closeups.length, messi: out.length });
+  return out.sort((a, b) => a.start - b.start);
 }
