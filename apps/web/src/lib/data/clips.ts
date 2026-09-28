@@ -111,6 +111,16 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
     }
   }
 
+  // Ultimo invio a TikTok per clip. Prima della migrazione 0030 la tabella non c'è: nessuno stato.
+  const { data: tiktokJobsRaw } =
+    clipIds.length > 0
+      ? await supabase.from("tiktok_publish_jobs").select("clip_id, status, error_message, created_at").in("clip_id", clipIds).order("created_at", { ascending: false })
+      : { data: [] as never[] };
+  const latestTiktokByClip = new Map<string, { status: string; error: string | null }>();
+  for (const job of tiktokJobsRaw ?? []) {
+    if (!latestTiktokByClip.has(job.clip_id)) latestTiktokByClip.set(job.clip_id, { status: job.status, error: job.error_message });
+  }
+
   const videoByProject = new Map<string, ProjectDetail["video"]>();
   const streamerByProject = new Map<string, { name: string | null; login: string | null }>();
   for (const v of videos ?? []) {
@@ -163,6 +173,8 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       longformGames: summarizeGames((c as { longform_games?: unknown }).longform_games),
       longformKeepGames: ((c as { longform_keep_games?: string[] | null }).longform_keep_games ?? null) as string[] | null,
       youtubePublishStatus: publish?.status ?? null,
+      tiktokStatus: latestTiktokByClip.get(c.id)?.status ?? null,
+      tiktokError: latestTiktokByClip.get(c.id)?.error ?? null,
       youtubeUrl: publish?.youtubeUrl ?? null,
       youtubeError: publish?.errorMessage ?? null,
       youtubePublishAt: publish?.publishAt ?? null,

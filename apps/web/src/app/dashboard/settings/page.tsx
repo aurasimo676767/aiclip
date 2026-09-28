@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { YoutubeConnectionPanel } from "@/components/youtube-connection-panel";
+import { TiktokConnectionPanel } from "@/components/tiktok-connection-panel";
 import { FollowedChannelsPanel } from "@/components/followed-channels-panel";
 import { FollowedTwitchChannelsPanel } from "@/components/followed-twitch-channels-panel";
 import { PublishSchedulePanel } from "@/components/publish-schedule-panel";
@@ -12,13 +13,19 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: { youtube_connected?: string; youtube_error?: string };
+  searchParams: { youtube_connected?: string; youtube_error?: string; tiktok_connected?: string; tiktok_error?: string };
 }) {
   const { supabase, user } = await requireUser();
   const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
   const { data: youtubeConnection } = await supabase
     .from("youtube_connections")
     .select("channel_title")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  // Tabella della migrazione 0030: prima della migrazione la query fallisce e vale "non collegato".
+  const { data: tiktokConnection } = await supabase
+    .from("tiktok_connections")
+    .select("display_name, avatar_url")
     .eq("user_id", user.id)
     .maybeSingle();
   const { data: followedChannels } = await supabase
@@ -43,10 +50,16 @@ export default async function SettingsPage({
 
       {searchParams.youtube_connected && <Alert tone="success">Account YouTube collegato.</Alert>}
       {searchParams.youtube_error && <Alert>Connessione YouTube fallita: {searchParams.youtube_error}</Alert>}
+      {searchParams.tiktok_connected && <Alert tone="success">Account TikTok collegato.</Alert>}
+      {searchParams.tiktok_error && <Alert>Connessione TikTok fallita: {searchParams.tiktok_error}</Alert>}
 
       <div className="divide-y divide-line">
         <Section title="YouTube" description="Serve per pubblicare e programmare le clip direttamente da qui.">
           <YoutubeConnectionPanel channelTitle={youtubeConnection?.channel_title ?? null} />
+        </Section>
+
+        <Section title="TikTok" description="Serve per pubblicare le clip su TikTok da qui, con il tasto nella clip.">
+          <TiktokConnectionPanel displayName={tiktokConnection ? tiktokConnection.display_name : null} avatarUrl={tiktokConnection?.avatar_url ?? null} />
         </Section>
 
         <Section title="Orari di pubblicazione" description="La griglia usata quando programmi più clip insieme.">

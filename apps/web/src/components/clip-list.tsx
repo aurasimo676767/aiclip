@@ -28,6 +28,9 @@ export interface ClipViewModel {
   /** Solo long-form: giochi da tenere nel montato scelti da simo (null = il gioco che dura di più). */
   longformKeepGames: string[] | null;
   youtubePublishStatus: string | null;
+  /** Ultima pubblicazione su TikTok (tiktok_publish_jobs, migrazione 0030): null se mai inviata. */
+  tiktokStatus: string | null;
+  tiktokError: string | null;
   youtubeUrl: string | null;
   youtubeError: string | null;
   youtubePublishAt: string | null;

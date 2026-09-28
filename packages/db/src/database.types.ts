@@ -31,6 +31,7 @@ export type ClipStatus = "SUGGESTED" | "QUEUED" | "RENDERING" | "COMPLETED" | "F
 export type RenderJobStatus = "PENDING" | "RENDERING" | "COMPLETED" | "FAILED";
 
 export type YoutubePublishStatus = "PENDING" | "UPLOADING" | "COMPLETED" | "FAILED";
+export type TiktokPublishStatus = "PENDING" | "UPLOADING" | "PROCESSING" | "COMPLETED" | "FAILED";
 
 export type YoutubePrivacyStatus = "public" | "unlisted" | "private";
 
@@ -434,6 +435,107 @@ export interface Database {
         Relationships: [];
       };
 
+      tiktok_connections: {
+        Row: {
+          id: string;
+          user_id: string;
+          open_id: string;
+          display_name: string;
+          avatar_url: string | null;
+          access_token: string;
+          refresh_token: string;
+          expires_at: string;
+          refresh_expires_at: string | null;
+          scope: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          open_id: string;
+          display_name?: string;
+          avatar_url?: string | null;
+          access_token: string;
+          refresh_token: string;
+          expires_at: string;
+          refresh_expires_at?: string | null;
+          scope?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          open_id?: string;
+          display_name?: string;
+          avatar_url?: string | null;
+          access_token?: string;
+          refresh_token?: string;
+          expires_at?: string;
+          refresh_expires_at?: string | null;
+          scope?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
+      tiktok_publish_jobs: {
+        Row: {
+          id: string;
+          clip_id: string;
+          user_id: string;
+          status: TiktokPublishStatus;
+          caption: string;
+          privacy_level: string;
+          disable_comment: boolean;
+          disable_duet: boolean;
+          disable_stitch: boolean;
+          brand_organic_toggle: boolean;
+          brand_content_toggle: boolean;
+          publish_id: string | null;
+          tiktok_post_id: string | null;
+          error_message: string | null;
+          claimed_by: string | null;
+          claimed_at: string | null;
+          attempts: number;
+          started_at: string | null;
+          completed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          clip_id: string;
+          user_id: string;
+          status?: TiktokPublishStatus;
+          caption?: string;
+          privacy_level: string;
+          disable_comment?: boolean;
+          disable_duet?: boolean;
+          disable_stitch?: boolean;
+          brand_organic_toggle?: boolean;
+          brand_content_toggle?: boolean;
+          publish_id?: string | null;
+          tiktok_post_id?: string | null;
+          error_message?: string | null;
+          claimed_by?: string | null;
+          claimed_at?: string | null;
+          attempts?: number;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          status?: TiktokPublishStatus;
+          publish_id?: string | null;
+          tiktok_post_id?: string | null;
+          error_message?: string | null;
+          completed_at?: string | null;
+        };
+        Relationships: [];
+      };
+
       followed_channels: {
         Row: {
           id: string;
@@ -809,6 +911,10 @@ export interface Database {
         Args: { p_worker_id: string; p_stale_seconds?: number; p_max_attempts?: number };
         Returns: Database["public"]["Tables"]["youtube_publish_jobs"]["Row"] | null;
       };
+      claim_next_tiktok_publish_job: {
+        Args: { p_worker_id: string; p_stale_seconds?: number; p_max_attempts?: number };
+        Returns: Database["public"]["Tables"]["tiktok_publish_jobs"]["Row"] | null;
+      };
       claim_next_voiceover_job: {
         Args: { p_worker_id: string; p_stale_seconds?: number; p_max_attempts?: number };
         Returns: Database["public"]["Tables"]["voiceover_jobs"]["Row"] | null;
@@ -872,6 +978,9 @@ export type FollowedTwitchChannelInsert = Database["public"]["Tables"]["followed
 export type YoutubePublishJobRow = Database["public"]["Tables"]["youtube_publish_jobs"]["Row"];
 export type YoutubePublishJobInsert = Database["public"]["Tables"]["youtube_publish_jobs"]["Insert"];
 export type YoutubePublishJobUpdate = Database["public"]["Tables"]["youtube_publish_jobs"]["Update"];
+
+export type TiktokConnectionRow = Database["public"]["Tables"]["tiktok_connections"]["Row"];
+export type TiktokPublishJobRow = Database["public"]["Tables"]["tiktok_publish_jobs"]["Row"];
 
 export type VoiceoverJobRow = Database["public"]["Tables"]["voiceover_jobs"]["Row"];
 export type VoiceoverJobInsert = Database["public"]["Tables"]["voiceover_jobs"]["Insert"];

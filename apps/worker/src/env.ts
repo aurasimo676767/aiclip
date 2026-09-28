@@ -38,6 +38,10 @@ const envSchema = z.object({
   // Tutte le clip trovate vanno subito in render, per ogni video/VOD (simo, 2026-09-28: "metta a fare
   // TUTTE le clip che ha trovato, direttamente"). "off" = solo i progetti con "Genera più video".
   AUTO_GENERATE_ALL_CLIPS: z.enum(["on", "off"]).default("on"),
+  // TikTok (Content Posting API): le stesse chiavi messe su Vercel. Senza, la coda TikTok fallisce
+  // solo quando serve rinnovare il token.
+  TIKTOK_CLIENT_KEY: z.string().optional(),
+  TIKTOK_CLIENT_SECRET: z.string().optional(),
   // Regia del pannello del gioco negli Shorts (providers/ai/content-focus.ts): quando mostrare il
   // gioco intero o zoomare su quello che indica lo streamer. Una chiamata con ~30 fotogrammi per
   // ogni render. "off" = gioco sempre riempito al centro, nessuna chiamata.

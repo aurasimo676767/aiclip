@@ -9,6 +9,8 @@ import { claimNextThumbnailJob } from "./queue/thumbnail-queue.js";
 import { processVideoJob } from "./pipeline/process-video-job.js";
 import { processRenderJob } from "./pipeline/process-render-job.js";
 import { processPublishJob } from "./pipeline/process-publish-job.js";
+import { claimNextTiktokPublishJob } from "./queue/tiktok-queue.js";
+import { processTiktokPublishJob } from "./pipeline/process-tiktok-publish-job.js";
 import { processVoiceoverJob } from "./pipeline/process-voiceover-job.js";
 import { processThumbnailJob } from "./pipeline/process-thumbnail-job.js";
 import { refreshYoutubeStats } from "./pipeline/refresh-youtube-stats.js";
@@ -80,6 +82,27 @@ async function publishQueueLoop(): Promise<void> {
       }
     } catch (err) {
       logger.error("Errore nel loop della coda publish", { error: err instanceof Error ? err.message : String(err) });
+    }
+    await sleep(env.QUEUE_POLL_INTERVAL_MS);
+  }
+}
+
+/** Loop di polling per la coda di pubblicazione su TikTok (migrazione 0030). */
+async function tiktokPublishQueueLoop(): Promise<void> {
+  while (!shuttingDown) {
+    try {
+      if (await isWorkerPaused()) {
+        await sleep(env.QUEUE_POLL_INTERVAL_MS);
+        continue;
+      }
+      const job = await claimNextTiktokPublishJob();
+      if (job) {
+        logger.info("TikTok publish job claimato", { jobId: job.id, workerId: WORKER_ID });
+        await processTiktokPublishJob(job);
+        continue;
+      }
+    } catch (err) {
+      logger.error("Errore nel loop della coda TikTok", { error: err instanceof Error ? err.message : String(err) });
     }
     await sleep(env.QUEUE_POLL_INTERVAL_MS);
   }
@@ -179,6 +202,7 @@ await Promise.all([
   ...videoLoops,
   ...renderLoops,
   publishQueueLoop(),
+  tiktokPublishQueueLoop(),
   voiceoverQueueLoop(),
   thumbnailQueueLoop(),
   statsRefreshLoop(),

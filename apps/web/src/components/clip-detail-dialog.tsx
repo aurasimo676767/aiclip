@@ -15,6 +15,7 @@ import { PublishPanel, PublishStatus } from "./publish-youtube-button";
 import { CoverGenerator } from "./cover-generator";
 import { ScoreRing, formatDuration, scoreTone } from "./ui";
 import { GamePicker } from "./game-picker";
+import { TiktokPublishPanel } from "./tiktok-publish-panel";
 
 const BADGE_LABELS: Record<ClipBadge, string> = {
   gotcha: "🎯 Gotcha",
@@ -24,7 +25,7 @@ const BADGE_LABELS: Record<ClipBadge, string> = {
   high_energy: "⚡ Energia alta",
 };
 
-type Panel = "info" | "edit" | "trim" | "publish";
+type Panel = "info" | "edit" | "trim" | "publish" | "tiktok";
 
 export function ClipDetailDialog({ clip, youtubeConnected, onClose }: { clip: ClipViewModel | null; youtubeConnected: boolean; onClose: () => void }) {
   return (
@@ -185,6 +186,11 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
               <Send size={14} /> Pubblica
             </button>
           )}
+          {clip.status === "COMPLETED" && clip.tiktokStatus !== "PENDING" && clip.tiktokStatus !== "UPLOADING" && clip.tiktokStatus !== "PROCESSING" && (
+            <button onClick={() => setPanel("tiktok")} className="btn btn-secondary btn-sm">
+              <Send size={14} /> TikTok
+            </button>
+          )}
           {working && (
             <button onClick={cancelRender} disabled={busy !== null} className="btn btn-secondary btn-sm">
               <X size={14} /> Annulla render
@@ -230,6 +236,24 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
           youtubePublishAt={clip.youtubePublishAt}
           youtubeCancelledAt={clip.youtubeCancelledAt}
         />
+        {clip.tiktokStatus && (
+          <p
+            className={`rounded-lg border px-3 py-2 text-xs ${
+              clip.tiktokStatus === "FAILED"
+                ? "border-red-500/30 bg-red-500/10 text-red-200"
+                : clip.tiktokStatus === "COMPLETED"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                  : "border-line bg-raised text-muted"
+            }`}
+          >
+            TikTok:{" "}
+            {clip.tiktokStatus === "COMPLETED"
+              ? "pubblicato."
+              : clip.tiktokStatus === "FAILED"
+                ? `non riuscito: ${clip.tiktokError ?? "errore sconosciuto"}`
+                : "invio in corso, il video può impiegare qualche minuto per comparire sul profilo."}
+          </p>
+        )}
         {!youtubeConnected && clip.status === "COMPLETED" && <p className="text-xs text-faint">Collega YouTube dalle Opzioni per pubblicare da qui.</p>}
 
         {clip.status === "COMPLETED" && <CoverGenerator clipId={clip.id} isShort={isShort} />}
@@ -243,6 +267,18 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
               duration={clip.duration}
               getCurrentTime={clip.videoUrl ? () => videoRef.current?.currentTime ?? null : undefined}
               onDone={() => { setPanel("info"); setNotice("Taglio applicato: il video si sta rigenerando."); }}
+              onCancel={() => setPanel("info")}
+            />
+          )}
+          {panel === "tiktok" && (
+            <TiktokPublishPanel
+              clipId={clip.id}
+              defaultCaption={[clip.title, ...clip.hashtags.map((h) => (h.startsWith("#") ? h : `#${h}`))].join(" ")}
+              durationSeconds={clip.duration}
+              onDone={(msg) => {
+                setPanel("info");
+                setNotice(msg);
+              }}
               onCancel={() => setPanel("info")}
             />
           )}
