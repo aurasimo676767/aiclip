@@ -127,7 +127,7 @@ export async function planLongformEdit(params: {
       if (chosenSeconds >= 60) {
         const merged = intersectRanges(keep, chosen).filter((r) => r.end - r.start >= 1);
         keep.splice(0, keep.length, ...merged);
-        intro = cleanIntro(aiPlan.intro, keep);
+        intro = cleanIntro(aiPlan.intro, keep, bins, baseline);
       } else {
         logger.warn("Montaggio da YouTuber: piano troppo corto, resto al montaggio solo-silenzi", { tenutiSecondi: Math.round(chosenSeconds) });
       }
@@ -222,21 +222,45 @@ function intersectRanges(a: TimeRange[], b: TimeRange[]): TimeRange[] {
   return out.sort((p, q) => p.start - q.start);
 }
 
-/** Momenti dell'intro: corti, dentro i tratti tenuti, in ordine di tempo, al massimo ~10 s in tutto. */
-function cleanIntro(ranges: TimeRange[], keep: TimeRange[]): TimeRange[] {
+/**
+ * Momenti dell'intro: corti, dentro i tratti tenuti, al massimo ~10 s in tutto, e con la VOCE ALTA
+ * misurata sull'audio vero. simo (2026-09-28), sul primo test: un momento in cui "lo killano" ma
+ * restano zitti non funziona, "ci deve essere movimento, urla/insulti". Un momento dell'AI senza un
+ * urlo dentro si scarta; se ne restano meno di 2 si aggiungono gli urli più forti del video.
+ */
+function cleanIntro(ranges: TimeRange[], keep: TimeRange[], bins: number[], baseline: number): TimeRange[] {
+  const loud = baseline + SCREAM_ABOVE_DB;
+  const peak = (r: TimeRange) => Math.max(-99, ...bins.slice(Math.floor(r.start / BIN_SECONDS), Math.ceil(r.end / BIN_SECONDS)));
   const out: TimeRange[] = [];
   let total = 0;
-  for (const r of ranges.slice(0, 3)) {
-    const start = Math.min(r.start, r.end);
-    let end = Math.min(Math.max(r.start, r.end), start + INTRO_MAX_SECONDS);
+  const tryAdd = (rawStart: number, rawEnd: number): boolean => {
+    const start = Math.min(rawStart, rawEnd);
+    let end = Math.min(Math.max(rawStart, rawEnd), start + INTRO_MAX_SECONDS);
     const inside = keep.find((k) => start >= k.start - 0.5 && start < k.end);
-    if (!inside) continue;
+    if (!inside) return false;
     end = Math.min(end, inside.end);
-    if (end - start < INTRO_MIN_SECONDS || total + (end - start) > INTRO_MAX_TOTAL_SECONDS) continue;
-    out.push({ start, end });
+    const range = { start, end };
+    if (end - start < INTRO_MIN_SECONDS || total + (end - start) > INTRO_MAX_TOTAL_SECONDS) return false;
+    if (peak(range) < loud) return false;
+    if (out.some((o) => start < o.end + 20 && end > o.start - 20)) return false;
+    out.push(range);
     total += end - start;
+    return true;
+  };
+  for (const r of ranges.slice(0, 3)) {
+    if (!tryAdd(r.start, r.end)) logger.info("Intro: momento dell'AI scartato (niente urla)", { da: r.start.toFixed(1), a: r.end.toFixed(1) });
   }
-  return out;
+  if (out.length < 2) {
+    // Ripiego: gli urli più forti dentro i tratti tenuti, 1 s prima dell'urlo e ~4 s in tutto.
+    const screams = runsWhere(bins, (db) => db >= loud, MIN_SCREAM_SECONDS, 1)
+      .map((r) => ({ ...r, strength: peak(r) }))
+      .sort((a, b) => b.strength - a.strength);
+    for (const s of screams) {
+      if (out.length >= 2) break;
+      tryAdd(Math.max(0, s.start - 1), s.start + 3.5);
+    }
+  }
+  return out.sort((a, b) => a.start - b.start);
 }
 
 /** Renderizza il video montato secondo il piano, con la GPU (NVENC) e ripiego sulla CPU. */

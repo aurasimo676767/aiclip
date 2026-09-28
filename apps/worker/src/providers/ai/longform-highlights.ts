@@ -41,7 +41,7 @@ COSA TENERE E COSA TOGLIERE
 - TAGLI PULITI: ogni tratto inizia all'inizio di una frase e finisce alla fine di una frase (usa i tempi delle righe). Ogni tratto dura almeno 8 secondi; due tratti separati da meno di 4 secondi uniscili.
 
 INTRO "IN QUESTO VIDEO"
-Scegli 2 momenti (al massimo 3) cortissimi, 2-5 secondi l'uno, al massimo 10 secondi in tutto: i più folli del video, dove urlano, sclerano, ridono fortissimo. Devono colpire anche senza contesto. Devono stare dentro i tratti tenuti (li si rivedrà nel video) e venire da punti diversi del video.
+Scegli 2 momenti (al massimo 3) cortissimi, 2-5 secondi l'uno, al massimo 10 secondi in tutto: i più folli del video, dove urlano, insultano, sclerano, ridono fortissimo. Devono colpire anche senza contesto. MAI un momento in cui restano zitti, anche se nel gioco succede qualcosa (li uccidono, vincono): nell'intro deve sentirsi la loro voce forte, meglio se un momento cade vicino a uno dei momenti in cui alzano la voce elencati sopra. Devono stare dentro i tratti tenuti (li si rivedrà nel video) e venire da punti diversi del video.
 
 Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
