@@ -125,7 +125,7 @@ export async function planLongformEdit(params: {
 
   // Montaggio da YouTuber: l'AI sceglie cosa tenere (un argomento solo, via le parti morte e le
   // divagazioni, fine quando smettono di giocare) e i momenti dell'intro. Dai suoi tratti si tolgono
-  // comunque i silenzi veri trovati sopra. Se l'AI non risponde si resta al montaggio solo-silenzi.
+  // comunque i silenzi veri trovati sopra. Se l'AI non risponde (dopo un secondo tentativo) il render fallisce.
   let intro: TimeRange[] = [];
   // Primi piani scelti dall'AI sulle parole (null = nessun piano AI: stacchi sulle urla come prima).
   let aiCloseups: TimeRange[] | null = null;
@@ -141,19 +141,30 @@ export async function planLongformEdit(params: {
       .filter((seg) => seg.end > 0 && seg.start < duration)
       .filter((seg) => !byScreen || byScreen.some((r) => seg.end > r.start && seg.start < r.end));
     const loudMoments = runsWhere(bins, (db) => db >= baseline + SCREAM_ABOVE_DB, MIN_SCREAM_SECONDS, 1).map((r) => r.start);
-    const aiPlan = await planHighlights(
-      {
-        title: params.highlights.title,
-        durationSeconds: duration,
-        segments,
-        loudMoments,
-        note: byScreen
-          ? `Le parti in cui fanno altro (altri giochi, chiacchiere) sono già state tolte guardando lo schermo: dove i tempi saltano c'era altro. Resta solo: ${games!.keep.join(", ")}. Non servono cambi di argomento (topicChanges vuoto).`
-          : undefined,
-      },
-      { apiKey: params.highlights.apiKey, model: params.highlights.model },
-    );
-    if (aiPlan) {
+    const hl = params.highlights;
+    const askPlan = () =>
+      planHighlights(
+        {
+          title: hl.title,
+          durationSeconds: duration,
+          segments,
+          loudMoments,
+          note: byScreen
+            ? `Le parti in cui fanno altro (altri giochi, chiacchiere) sono già state tolte guardando lo schermo: dove i tempi saltano c'era altro. Resta solo: ${games!.keep.join(", ")}. Non servono cambi di argomento (topicChanges vuoto).`
+            : undefined,
+        },
+        { apiKey: hl.apiKey, model: hl.model },
+      );
+    // Un piano che non arriva si riprova una volta; se manca ancora il render fallisce: un "montato"
+    // senza tagli né intro è peggio di un errore (simo, 2026-09-28, video su Ale della Giusta:
+    // "non ha montato mi sa, stessa durata, e non ha aggiunto IN QUESTO VIDEO").
+    let aiPlan = await askPlan();
+    if (!aiPlan) {
+      logger.warn("Montaggio da YouTuber: piano non arrivato, riprovo una volta");
+      aiPlan = await askPlan();
+    }
+    if (!aiPlan) throw new Error("Montaggio AI non riuscito due volte: premi di nuovo Rigenera clip (il motivo è nel log del worker)");
+    {
       let chosen = cleanRanges(aiPlan.keep, duration, segments);
       if (byScreen) chosen = intersectRanges(chosen, byScreen).filter((r) => r.end - r.start >= 1);
       const seconds = (rs: TimeRange[]) => rs.reduce((sum, r) => sum + (r.end - r.start), 0);
@@ -197,11 +208,21 @@ export async function planLongformEdit(params: {
           }
           intro = pickIntro(located, chosen);
           aiCloseups = await locateCloseups(aiPlan.closeups, locator, keep, duration);
+          // L'intro c'è SEMPRE (simo): se nessuna frase dell'intro si trova nell'audio, si usano i
+          // primi piani già collocati sulle parole (sclero e frasi forti), i due più corti.
+          if (intro.length === 0 && aiCloseups.length > 0) {
+            intro = [...aiCloseups]
+              .sort((a, b) => a.end - a.start - (b.end - b.start))
+              .slice(0, 2)
+              .map((r) => ({ start: r.start, end: Math.min(r.end, r.start + INTRO_MAX_SECONDS) }))
+              .sort((a, b) => a.start - b.start);
+            logger.warn("Intro: nessuna frase trovata, uso i primi piani", { intro: intro.map((r) => r.start.toFixed(1)) });
+          }
         } finally {
           await locator.dispose();
         }
       } else {
-        logger.warn("Montaggio da YouTuber: piano troppo corto, resto al montaggio solo-silenzi", { tenutiSecondi: Math.round(seconds(chosen)) });
+        throw new Error(`Montaggio AI sbagliato (tiene solo ${Math.round(seconds(chosen))} s): premi di nuovo Rigenera clip`);
       }
     }
   }
