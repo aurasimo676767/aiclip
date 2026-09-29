@@ -75,5 +75,24 @@ export async function publishTiktokViaZernio(
   if (status === "failed" || status === "error") {
     throw new Error(`Zernio ha rifiutato il video: ${String(post.error ?? post.errorMessage ?? post.message ?? "motivo non indicato")}`);
   }
-  return { postId: String(post._id ?? post.id ?? "") || null, url: (post.platformPostUrl as string | undefined) ?? null };
+  const postId = String(post._id ?? post.id ?? "") || null;
+  // Programmato: pubblica Zernio all'orario, qui non c'è altro da aspettare.
+  if (!postId || (job.publish_at && new Date(job.publish_at).getTime() > Date.now())) {
+    return { postId, url: (post.platformPostUrl as string | undefined) ?? null };
+  }
+  // Subito: Zernio risponde "publishing" e carica su TikTok dopo. Si aspetta l'esito vero, così il
+  // sito non dice "pubblicato" per un video che TikTok poi rifiuta.
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 10000));
+    const cur = await zernio<Json>(key, `/posts/${postId}`);
+    const p = ((cur.post as Json) ?? cur) as Json;
+    const tt = (Array.isArray(p.platforms) ? (p.platforms as Json[]) : []).find((x) => String(x.platform ?? "").toLowerCase() === "tiktok") ?? {};
+    const st = String(tt.status ?? p.status ?? "").toLowerCase();
+    if (st === "published") return { postId, url: (tt.platformPostUrl as string | undefined) ?? null };
+    if (st === "failed" || st === "error") {
+      throw new Error(`TikTok ha rifiutato il video: ${String(tt.errorMessage ?? tt.error ?? p.errorMessage ?? "motivo non indicato")}`);
+    }
+  }
+  throw new Error("Zernio non ha confermato la pubblicazione in 10 minuti: controlla il profilo TikTok");
 }
