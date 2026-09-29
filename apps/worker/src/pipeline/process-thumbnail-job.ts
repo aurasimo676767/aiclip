@@ -143,6 +143,8 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     const { data: video } = await supabase.from("videos").select("streamer_name").eq("id", clip.video_id).maybeSingle();
     const streamerAlias = video?.streamer_name ? (LONGFORM_STREAMER_ALIASES[video.streamer_name.toLowerCase()] ?? null) : null;
 
+    // Istruzioni libere scritte da simo nel sito (colonna della migrazione 0033).
+    const coverInstructions = (job as { cover_instructions?: string | null }).cover_instructions?.trim() || undefined;
     const selection = await selectThumbnailAssets({
       apiKey: env.ANTHROPIC_API_KEY,
       model: env.ANTHROPIC_MODEL_CHEAP,
@@ -150,6 +152,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       clipHook: clip.hook,
       clipCaption: clip.caption ?? "",
       frameJpegsBase64: lowResBase64,
+      userInstructions: coverInstructions,
     });
 
     // 3) Sfondo, in ordine di affidabilità:
@@ -280,6 +283,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           styleExamplePath: await fsp.access(stylePath).then(() => stylePath, () => null),
           logoPath,
           videoTitle: clip.title,
+          userInstructions: coverInstructions,
           outputPath: aiPath,
         });
         composedPath = aiPath;

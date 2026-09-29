@@ -14,6 +14,8 @@ const bodySchema = z.object({
   people: z.array(z.string().trim().min(1).max(40)).max(4).optional(),
   /** Scritta scelta a mano (vince su quella dell'AI). */
   text: z.string().trim().max(40).optional(),
+  /** Istruzioni libere per l'AI (gioco, scritte, stile): vincono sulle regole standard. */
+  instructions: z.string().trim().max(1000).optional(),
 });
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -35,9 +37,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const row = { clip_id: clip.id, ...(people?.length ? { cover_people: people } : {}) };
   let { data: inserted, error } = await supabase
     .from("thumbnail_jobs")
-    .insert({ ...row, ...(text ? { cover_text: text } : {}) })
+    .insert({ ...row, ...(text ? { cover_text: text } : {}), ...(parsed.data.instructions ? { cover_instructions: parsed.data.instructions } : {}) })
     .select("id")
     .single();
+  if (error?.message.includes("cover_instructions")) {
+    return NextResponse.json({ error: "Per le istruzioni serve la migrazione 0033 su Supabase" }, { status: 500 });
+  }
   // Prima della migrazione 0027 la colonna cover_text non c'è: si genera con la scritta dell'AI.
   if (error?.message.includes("cover_text")) {
     ({ data: inserted, error } = await supabase.from("thumbnail_jobs").insert(row).select("id").single());

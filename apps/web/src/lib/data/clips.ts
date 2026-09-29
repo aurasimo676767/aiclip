@@ -1,4 +1,5 @@
 import type { ClipScores, ClipBadge, VideoUsageStats } from "@clipforge/shared";
+import { SHORTS_HASHTAGS, withShortsHashtags } from "@clipforge/shared";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { ClipViewModel } from "@/components/clip-list";
 import { getPresignedDownloadUrl } from "@/lib/storage/r2";
@@ -154,7 +155,10 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
     // Una descrizione scritta a mano vince sul testo generato (vedi clips.publish_description).
     const publishDescription =
       c.publish_description ??
-      (c.format === "longform" ? buildLongformDescriptionPreset(streamer?.name ?? null, streamer?.login ?? null) : (c.caption ?? ""));
+      (c.format === "longform"
+        ? buildLongformDescriptionPreset(streamer?.name ?? null, streamer?.login ?? null)
+        : // Shorts: sul sito come verrà pubblicato, con gli hashtag fissi (vedi shared/text/hashtags.ts).
+          withShortsHashtags(c.caption ?? ""));
     const clip: ClipViewModel = {
       id: c.id,
       title: c.title,
@@ -164,7 +168,8 @@ export async function fetchProjectDetails(supabase: SupabaseServerClient, projec
       scores: c.scores as ClipScores,
       status: c.status,
       errorMessage: c.error_message,
-      hashtags: (c.hashtags as string[] | null) ?? [],
+      // Shorts: sempre gli hashtag fissi, gli stessi che vanno su YouTube e TikTok (simo, 2026-09-29).
+      hashtags: c.format === "short" ? SHORTS_HASHTAGS.map((h) => h.slice(1)) : ((c.hashtags as string[] | null) ?? []),
       caption: c.caption ?? "",
       publishDescription,
       badges: (c.badges as ClipBadge[] | null) ?? [],

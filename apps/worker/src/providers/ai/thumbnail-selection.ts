@@ -82,6 +82,8 @@ export interface ThumbnailSelectionOptions {
   clipCaption: string;
   /** Fotogrammi JPEG in base64, nello stesso ordine con cui vengono numerati nel prompt. */
   frameJpegsBase64: string[];
+  /** Istruzioni scritte da simo nel sito (gioco, scritte, stile): hanno la precedenza. */
+  userInstructions?: string;
 }
 
 export interface ThumbnailSelection {
@@ -101,7 +103,9 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
   const content: Anthropic.MessageParam["content"] = [
     {
       type: "text",
-      text: `Video: "${options.clipTitle}"\nRiassunto: ${options.clipHook}\nDescrizione: ${options.clipCaption}`,
+      text: `Video: "${options.clipTitle}"\nRiassunto: ${options.clipHook}\nDescrizione: ${options.clipCaption}${
+        options.userInstructions ? `\n\nISTRUZIONI DEL PROPRIETARIO DEL CANALE (hanno la precedenza su tutto, anche sul gioco e sulla scritta): ${options.userInstructions}` : ""
+      }`,
     },
   ];
   options.frameJpegsBase64.forEach((jpeg, index) => {

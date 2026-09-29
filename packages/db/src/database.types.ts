@@ -801,6 +801,7 @@ export interface Database {
           apply_requested: boolean;
           cover_people: string[] | null;
           cover_text: string | null;
+          cover_instructions: string | null;
           status: ThumbnailJobStatus;
           result_storage_path: string | null;
           youtube_thumbnail_set: boolean;
@@ -820,6 +821,7 @@ export interface Database {
           apply_requested?: boolean;
           cover_people?: string[] | null;
           cover_text?: string | null;
+          cover_instructions?: string | null;
           status?: ThumbnailJobStatus;
           result_storage_path?: string | null;
           youtube_thumbnail_set?: boolean;
@@ -839,6 +841,7 @@ export interface Database {
           apply_requested?: boolean;
           cover_people?: string[] | null;
           cover_text?: string | null;
+          cover_instructions?: string | null;
           status?: ThumbnailJobStatus;
           result_storage_path?: string | null;
           youtube_thumbnail_set?: boolean;

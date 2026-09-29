@@ -43,6 +43,8 @@ export interface AiCoverParams {
   logoPath?: string | null;
   /** Titolo del video: spunto per i bigliettini (non va scritto uguale). */
   videoTitle?: string;
+  /** Istruzioni scritte da simo nel sito: vincono sulle regole qui sotto (scritte, bigliettini, stile). */
+  userInstructions?: string;
   outputPath: string;
 }
 
@@ -140,6 +142,10 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
       ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. First line white with a light grey gradient, second line in one bold color that fits the video (red, yellow-orange, purple, green or blue gradient with a glossy highlight), thick dark outline, 3D extrusion and drop shadow, soft glow.`
       : `Text: exactly "${line1}", spelled exactly, one line. Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. One bold color that fits the video (red, yellow-orange, purple, green or blue gradient with a glossy highlight), thick dark outline, 3D extrusion and drop shadow, soft glow.`,
     "Apart from the title, the game logo and the small stickers: no other text, no channel logos, no watermarks, no borders. Very sharp.",
+    // simo, 2026-09-29: "voglio poter dire all'ia come farle". Le sue istruzioni (in italiano) vincono.
+    ...(params.userInstructions
+      ? ["", `INSTRUCTIONS FROM THE CHANNEL OWNER (written in Italian; they have the HIGHEST priority and override any rule above about the text, how many texts, stickers, game, layout and style; the faces must still stay the real people): ${params.userInstructions}`]
+      : []),
   ].join("\n");
 
   const form = new FormData();

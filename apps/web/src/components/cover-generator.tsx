@@ -24,6 +24,7 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
   const [people, setPeople] = useState<string[]>([]);
   const [chosen, setChosen] = useState<string[]>([]);
   const [text, setText] = useState("");
+  const [instructions, setInstructions] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,7 +56,7 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
       const res = await fetch(`/api/clips/${clipId}/cover`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ people: chosen.length ? chosen : undefined, text: text.trim() || undefined }),
+        body: JSON.stringify({ people: chosen.length ? chosen : undefined, text: text.trim() || undefined, instructions: instructions.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Avvio fallito");
@@ -129,6 +130,18 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
           onChange={(e) => setText(e.target.value)}
           placeholder="Scritta (facoltativa, se no la sceglie l'AI)"
           className="input text-sm"
+        />
+      )}
+
+      {!working && (
+        // simo, 2026-09-29: "voglio poter dire all'ia come farle". Vuoto = fa tutto l'AI.
+        <textarea
+          value={instructions}
+          maxLength={1000}
+          rows={3}
+          onChange={(e) => setInstructions(e.target.value)}
+          placeholder="Istruzioni per l'AI (facoltative): che gioco è, quali e quante scritte, colori, cosa mettere dietro… Se lasci vuoto fa tutto lei."
+          className="input resize-y text-sm"
         />
       )}
 
