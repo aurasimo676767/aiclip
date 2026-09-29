@@ -195,7 +195,9 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
               <Send size={14} /> Pubblica
             </button>
           )}
-          {clip.status === "COMPLETED" && clip.tiktokStatus !== "PENDING" && clip.tiktokStatus !== "UPLOADING" && clip.tiktokStatus !== "PROCESSING" && (
+          {/* TikTok parte insieme a YouTube dal tasto Pubblica (simo, 2026-09-29): il tasto a parte resta
+              solo per riprovare un invio fallito. */}
+          {clip.status === "COMPLETED" && clip.tiktokStatus === "FAILED" && (
             <button onClick={() => setPanel("tiktok")} className="btn btn-secondary btn-sm">
               <Send size={14} /> TikTok
             </button>

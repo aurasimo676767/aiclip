@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { queueTiktokAlongside } from "@/lib/tiktok-auto";
 import { getValidYoutubeAccessToken, filterExistingYoutubeVideoIds } from "@/lib/youtube-scan";
 import { pickNextFixedSlots } from "@/lib/publish-schedule";
 import { buildLongformDescription } from "@/lib/longform-description";
@@ -243,6 +244,9 @@ export async function POST(request: Request) {
       errors.push({ clipId, error: insertError.message });
       continue;
     }
+
+    // Gli Shorts escono anche su TikTok allo stesso orario (un tasto solo).
+    await queueTiktokAlongside(supabase, user.id, { id: clipId, format: clip.format, title: clip.title, hashtags: clip.hashtags }, publishAt);
 
     scheduled.push({ clipId, publishAt });
   }

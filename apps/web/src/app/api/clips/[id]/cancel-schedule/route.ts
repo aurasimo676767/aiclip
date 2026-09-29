@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getValidYoutubeAccessToken } from "@/lib/youtube-scan";
+import { zernioKey } from "@/lib/zernio";
 
 /**
  * Annulla una pubblicazione YouTube GIÀ CARICATA (privata, in attesa che YouTube la renda
@@ -71,5 +72,30 @@ export async function POST(_request: Request, { params }: { params: { id: string
     return NextResponse.json({ error: `Aggiornamento fallito: ${updateError.message}` }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true });
+  // Lo Short programmato anche su TikTok (stesso tasto Pubblica) si annulla insieme: se era già stato
+  // passato a Zernio si cancella il post programmato lì. Un errore qui non annulla quello su YouTube.
+  const tiktokWarning = await cancelScheduledTiktok(supabase, params.id);
+
+  return NextResponse.json({ ok: true, ...(tiktokWarning ? { warning: tiktokWarning } : {}) });
+}
+
+async function cancelScheduledTiktok(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, clipId: string): Promise<string | null> {
+  const { data: tj } = await supabase
+    .from("tiktok_publish_jobs")
+    .select("id, status, publish_at, publish_id")
+    .eq("clip_id", clipId)
+    .neq("status", "FAILED")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!tj || !tj.publish_at || new Date(tj.publish_at).getTime() <= Date.now()) return null;
+  const key = zernioKey();
+  if (tj.status === "COMPLETED" && tj.publish_id && key) {
+    const res = await fetch(`https://zernio.com/api/v1/posts/${encodeURIComponent(tj.publish_id)}`, { method: "DELETE", headers: { Authorization: `Bearer ${key}` } }).catch(
+      () => null,
+    );
+    if (!res || (!res.ok && res.status !== 404)) return "Annullato su YouTube, ma non su TikTok: cancellalo dalla programmazione di Zernio";
+  }
+  const { error } = await supabase.from("tiktok_publish_jobs").update({ status: "FAILED", error_message: "Programmazione annullata" }).eq("id", tj.id);
+  return error ? "Annullato su YouTube; su TikTok serve la migrazione 0032" : null;
 }

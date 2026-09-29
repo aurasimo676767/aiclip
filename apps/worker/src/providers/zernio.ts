@@ -45,11 +45,18 @@ export async function publishTiktokViaZernio(
   const accountId = acc ? String(acc._id ?? acc.id ?? acc.accountId ?? "") : "";
   if (!accountId) throw new Error("Nessun account TikTok collegato in Zernio: collegalo su zernio.com");
 
+  // Quello che l'account TikTok permette (duetti/stitch possono essere disattivati da TikTok): si
+  // chiede solo ciò che è consentito, se no TikTok rifiuta il video.
+  const info = await zernio<Json>(key, `/accounts/${accountId}/tiktok/creator-info`).catch(() => ({}) as Json);
+  const interactions = (((info.postingLimits as Json | undefined)?.interactionSettings as Record<string, { enabled?: boolean }> | undefined) ?? {});
+  const allowed = (k: string) => interactions[k]?.enabled !== false;
+  const levels = Array.isArray(info.privacyLevels) ? (info.privacyLevels as Array<{ value?: string }>).map((l) => l.value) : [];
+  const privacy = levels.length === 0 || levels.includes(job.privacy_level) ? job.privacy_level : (levels[0] ?? job.privacy_level);
   const tiktokSettings = {
-    privacy_level: job.privacy_level,
-    allow_comment: !job.disable_comment,
-    allow_duet: !job.disable_duet,
-    allow_stitch: !job.disable_stitch,
+    privacy_level: privacy,
+    allow_comment: !job.disable_comment && allowed("allow_comment"),
+    allow_duet: !job.disable_duet && allowed("allow_duet"),
+    allow_stitch: !job.disable_stitch && allowed("allow_stitch"),
     // Obbligatori per TikTok: simo ha visto l'anteprima e ha premuto Pubblica nella finestra del sito.
     content_preview_confirmed: true,
     express_consent_given: true,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { queueTiktokAlongside } from "@/lib/tiktok-auto";
 
 const bodySchema = z.object({
   title: z.string().trim().min(1).max(100),
@@ -31,7 +32,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Payload non valido" }, { status: 400 });
   }
 
-  const { data: clip, error: clipError } = await supabase.from("clips").select("id, status").eq("id", params.id).single();
+  const { data: clip, error: clipError } = await supabase.from("clips").select("id, status, format, title, hashtags").eq("id", params.id).single();
   if (clipError || !clip) {
     return NextResponse.json({ error: "Clip non trovata" }, { status: 404 });
   }
@@ -60,5 +61,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ error: `Creazione job di pubblicazione fallita: ${insertError.message}` }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true });
+  // Gli Shorts escono anche su TikTok con lo stesso orario (un tasto solo).
+  const tiktok = await queueTiktokAlongside(supabase, user.id, { id: clip.id, format: clip.format, title, hashtags: clip.hashtags }, publishAt ?? null);
+
+  return NextResponse.json({ ok: true, tiktok });
 }
