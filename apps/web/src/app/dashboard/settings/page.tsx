@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { YoutubeConnectionPanel } from "@/components/youtube-connection-panel";
 import { TiktokConnectionPanel } from "@/components/tiktok-connection-panel";
+import { zernioKey, zernioTiktokAccount } from "@/lib/zernio";
 import { FollowedChannelsPanel } from "@/components/followed-channels-panel";
 import { FollowedTwitchChannelsPanel } from "@/components/followed-twitch-channels-panel";
 import { PublishSchedulePanel } from "@/components/publish-schedule-panel";
@@ -28,6 +29,9 @@ export default async function SettingsPage({
     .select("display_name, avatar_url")
     .eq("user_id", user.id)
     .maybeSingle();
+  // Con Zernio si mostra l'account collegato su zernio.com (se la chiave è sbagliata, un errore leggibile).
+  const zk = zernioKey();
+  const zernio = zk ? await zernioTiktokAccount(zk).then((a) => ({ account: a, error: null as string | null })).catch((e) => ({ account: null, error: e instanceof Error ? e.message : String(e) })) : null;
   const { data: followedChannels } = await supabase
     .from("followed_channels")
     .select("id, channel_title")
@@ -59,7 +63,20 @@ export default async function SettingsPage({
         </Section>
 
         <Section title="TikTok" description="Serve per pubblicare le clip su TikTok da qui, con il tasto nella clip.">
-          <TiktokConnectionPanel displayName={tiktokConnection ? tiktokConnection.display_name : null} avatarUrl={tiktokConnection?.avatar_url ?? null} />
+          {zernio ? (
+            <p className="text-sm text-muted">
+              {zernio.account ? (
+                <>
+                  Pubblica tramite <span className="font-medium text-ink">Zernio</span> come{" "}
+                  <span className="font-medium text-ink">{zernio.account.displayName || zernio.account.username}</span>
+                </>
+              ) : (
+                zernio.error ?? "Nessun account TikTok collegato su zernio.com"
+              )}
+            </p>
+          ) : (
+            <TiktokConnectionPanel displayName={tiktokConnection ? tiktokConnection.display_name : null} avatarUrl={tiktokConnection?.avatar_url ?? null} />
+          )}
         </Section>
 
         <Section title="Orari di pubblicazione" description="La griglia usata quando programmi più clip insieme.">

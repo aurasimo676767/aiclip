@@ -5,6 +5,7 @@ import { env } from "../env.js";
 import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
+import { publishTiktokViaZernio } from "../providers/zernio.js";
 
 /**
  * Pubblica una clip su TikTok con la Content Posting API (Direct Post, caricamento del file a pezzi).
@@ -78,6 +79,16 @@ export async function processTiktokPublishJob(job: TiktokPublishJobRow): Promise
     await setStatus(job.id, { status: "UPLOADING", error_message: null });
     const { data: clip } = await supabase.from("clips").select("output_video_path").eq("id", job.clip_id).single();
     if (!clip?.output_video_path) throw new Error("La clip non ha un video renderizzato");
+
+    // Con Zernio (app TikTok già approvata) si passa il link del video e pubblicano loro.
+    if (env.ZERNIO_API_KEY) {
+      const videoUrl = await storageProvider.getSignedUrl(clip.output_video_path, 6 * 3600);
+      const { postId, url } = await publishTiktokViaZernio(env.ZERNIO_API_KEY, job, videoUrl);
+      await setStatus(job.id, { status: "COMPLETED", publish_id: postId, tiktok_post_id: url, completed_at: new Date().toISOString() });
+      logger.info("TikTok (Zernio): pubblicato", { jobId: job.id, postId, url });
+      return;
+    }
+
     const token = await accessToken(job.user_id);
 
     await fsp.mkdir(workDir, { recursive: true });

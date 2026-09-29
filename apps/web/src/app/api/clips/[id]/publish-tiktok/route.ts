@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { zernioKey } from "@/lib/zernio";
 
 const bodySchema = z.object({
   caption: z.string().max(2200),
@@ -36,7 +37,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (clip.status !== "COMPLETED") return NextResponse.json({ error: "La clip non è ancora pronta" }, { status: 409 });
 
   const { data: conn } = await supabase.from("tiktok_connections").select("id").eq("user_id", user.id).maybeSingle();
-  if (!conn) return NextResponse.json({ error: "Collega prima TikTok dalle Opzioni" }, { status: 409 });
+  // Con Zernio l'account TikTok è collegato da loro, non serve il nostro collegamento.
+  if (!conn && !zernioKey()) return NextResponse.json({ error: "Collega prima TikTok dalle Opzioni" }, { status: 409 });
 
   const { error } = await supabase.from("tiktok_publish_jobs").insert({
     clip_id: clip.id,

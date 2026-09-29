@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { tiktokAccessToken, tiktokCreatorInfo } from "@/lib/tiktok";
+import { zernioCreatorInfo, zernioKey } from "@/lib/zernio";
 
 /**
  * Chi pubblica e con quali opzioni (privacy possibili, commenti/duetti/stitch disattivati
@@ -14,6 +15,9 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
   try {
+    // Con Zernio (app TikTok già approvata) l'account è quello collegato su zernio.com.
+    const zk = zernioKey();
+    if (zk) return NextResponse.json(await zernioCreatorInfo(zk));
     const token = await tiktokAccessToken(supabase, user.id);
     if (!token) return NextResponse.json({ error: "Collega prima TikTok dalle Opzioni" }, { status: 409 });
     return NextResponse.json(await tiktokCreatorInfo(token));

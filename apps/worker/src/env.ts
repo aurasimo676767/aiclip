@@ -42,6 +42,8 @@ const envSchema = z.object({
   // solo quando serve rinnovare il token.
   TIKTOK_CLIENT_KEY: z.string().optional(),
   TIKTOK_CLIENT_SECRET: z.string().optional(),
+  // Zernio (zernio.com, app TikTok già approvata): se c'è, il tasto TikTok pubblica tramite loro.
+  ZERNIO_API_KEY: z.string().optional(),
   // Regia del pannello del gioco negli Shorts (providers/ai/content-focus.ts): quando mostrare il
   // gioco intero o zoomare su quello che indica lo streamer. Una chiamata con ~30 fotogrammi per
   // ogni render. "off" = gioco sempre riempito al centro, nessuna chiamata.
