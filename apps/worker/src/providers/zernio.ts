@@ -1,5 +1,6 @@
 import type { TiktokPublishJobRow } from "@clipforge/db";
 import { logger } from "../lib/logger.js";
+import { censorText } from "@clipforge/shared";
 
 /**
  * Pubblicazione su TikTok tramite Zernio (zernio.com), che ha già l'app TikTok approvata: la usiamo
@@ -61,7 +62,7 @@ export async function publishTiktokViaZernio(
   const res = await zernio<Json>(key, "/posts", {
     method: "POST",
     body: {
-      content: job.caption,
+      content: censorText(job.caption),
       mediaItems: [{ type: "video", url: videoUrl }],
       platforms: [{ platform: "tiktok", accountId, platformSpecificData: { tiktokSettings } }],
       tiktokSettings,

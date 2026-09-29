@@ -3,6 +3,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import { logger } from "../lib/logger.js";
+import { censorText } from "@clipforge/shared";
 
 /**
  * Titolo fisso in alto negli Shorts, come immagine (PNG trasparente) da sovrapporre al video con
@@ -84,7 +85,8 @@ export async function renderHeadlinePng(
   opts: { allWhite?: boolean; baseSize?: number; maxWidth?: number } = {},
 ): Promise<{ width: number; height: number } | null> {
   const maxWidth = opts.maxWidth ?? MAX_WIDTH;
-  const clean = text.replace(/\s+/g, " ").trim();
+  // Parole che YouTube/TikTok penalizzano censurate ("cicci0ni"), vedi shared/text/censor.ts.
+  const clean = censorText(text).replace(/\s+/g, " ").trim();
   if (!clean) return null;
   const emojis = clean.match(EMOJI_RE) ?? [];
   const words = clean

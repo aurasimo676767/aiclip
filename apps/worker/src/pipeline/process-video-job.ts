@@ -44,6 +44,7 @@ import { updateVideoStatus } from "../queue/video-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
 import { isVideoCancelled } from "../lib/cancellation.js";
 import { ensureLongformGames } from "./longform-games.js";
+import { censorText } from "@clipforge/shared";
 
 // Tentativi automatici prima di arrendersi e marcare FAILED (serve poi il pulsante "Riprova"
 // manuale): stesso numero di default usato da claim_next_video per lo stale-reclaim, così i due
@@ -401,7 +402,8 @@ function buildInsertRow(params: {
     start_time: params.start,
     end_time: params.end,
     duration: params.duration,
-    title: params.title,
+    // Titolo e descrizione con le parole penalizzate censurate (simo, 2026-09-29: "CICCIONI").
+    title: censorText(params.title),
     hook: params.hook,
     reason: params.reason,
     scores: params.scores,
@@ -409,7 +411,7 @@ function buildInsertRow(params: {
     template: params.template,
     edl: params.edl,
     hashtags: params.hashtags,
-    caption: params.caption,
+    caption: params.caption ? censorText(params.caption) : params.caption,
     badges: params.badges,
     format: params.format,
     status: "SUGGESTED" as const,

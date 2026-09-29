@@ -4,6 +4,7 @@ import type { CaptionStyleConfig, TranscriptSegment, TranscriptWord } from "@cli
 import { OUTPUT_RESOLUTION } from "@clipforge/shared";
 import type { Layout } from "../face-tracking/face-tracker.js";
 import { toFfmpegFilterPath } from "./ffmpeg-filter-utils.js";
+import { censorText, censorWord } from "@clipforge/shared";
 
 interface WordChunk {
   words: TranscriptWord[];
@@ -95,7 +96,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 function buildPlainEvents(segments: TranscriptSegment[], style: CaptionStyleConfig): string[] {
   const lines = segments.filter((seg) => seg.words.length > 0).sort((a, b) => a.start - b.start);
   return lines.map((seg, i) => {
-    const text = applyTextCase(seg.text.trim(), style.uppercase);
+    const text = applyTextCase(censorText(seg.text.trim()), style.uppercase);
     // Mai due righe a schermo insieme: libass le IMPILEREBBE una sopra l'altra.
     const next = lines[i + 1];
     const end = next ? Math.min(seg.end, next.start) : seg.end;
@@ -134,7 +135,7 @@ function buildSingleWordEvents(
     }
     if (end - word.start < 0.04) continue; // parola "schiacciata" fra due quasi simultanee: si salta
 
-    const text = applyTextCase(word.word.trim(), style.uppercase);
+    const text = applyTextCase(censorWord(word.word.trim()), style.uppercase);
     const isHighlighted = highlightWords.has(normalizeWord(text));
     const shout = shoutLevel.get(word) ?? 0;
     const color = shout > 0 ? `\\c${SHOUT_COLOR}` : isHighlighted ? `\\c${hexToAssColor(style.highlightColor)}` : "";
@@ -169,7 +170,7 @@ function buildKaraokeEvents(
   return chunks.map((chunk, i) => {
     const parts = chunk.words.map((word) => {
       const durationCentis = Math.max(1, Math.round((word.end - word.start) * 100));
-      const text = applyTextCase(word.word.trim(), style.uppercase);
+      const text = applyTextCase(censorWord(word.word.trim()), style.uppercase);
       const escaped = escapeAssText(text);
       return highlightWords.has(normalizeWord(text))
         ? `{\\k${durationCentis}}{\\c${hexToAssColor(style.highlightColor)}}${escaped}{\\r} `

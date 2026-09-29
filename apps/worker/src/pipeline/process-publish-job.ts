@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
 import { uploadVideoToYoutube, setYoutubeThumbnail } from "../providers/youtube/youtube-publisher.js";
 import { updatePublishJobStatus } from "../queue/publish-queue.js";
+import { censorText } from "@clipforge/shared";
 
 export async function processPublishJob(job: YoutubePublishJobRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `publish-${job.id}`);
@@ -57,8 +58,8 @@ export async function processPublishJob(job: YoutubePublishJobRow): Promise<void
         expiryDate: new Date(connection.expires_at).getTime(),
       },
       filePath: localVideoPath,
-      title: job.title,
-      description: job.description,
+      title: censorText(job.title),
+      description: censorText(job.description),
       tags: (job.tags as string[] | null) ?? [],
       privacyStatus: job.privacy_status,
       publishAt: job.publish_at,

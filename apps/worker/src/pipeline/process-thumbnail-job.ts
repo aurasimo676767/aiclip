@@ -20,6 +20,7 @@ import {
   type YoutubeCredentials,
 } from "../providers/youtube/youtube-publisher.js";
 import { updateThumbnailJobStatus } from "../queue/thumbnail-queue.js";
+import { censorText } from "@clipforge/shared";
 
 const CANDIDATE_FRAME_COUNT = 8;
 // Le card dei crediti (3s) all'inizio/fine del render long-form non sono contenuto vero — le
@@ -238,7 +239,8 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       ? manualText
       : isReaction
         ? `${people[0] ?? streamerAlias ?? "BLUR"} REACTION`
-        : (selection.coverWords ?? (isShort ? shortCoverWords(clip.title) : extractBannerText(clip.title)));
+        : // Parole scelte dall'AI censurate ("cicci0ni"); il testo scritto a mano da simo resta com'è.
+          censorText(selection.coverWords ?? (isShort ? shortCoverWords(clip.title) : extractBannerText(clip.title)));
     logger.info("Copertina", { jobId: job.id, tipo: isShort ? "short" : isReaction ? "reaction" : "gioco", gioco: selection.gameName, persone: people, facce: chosenFaces.map((f) => `${f.label}:${f.expression}`), scritta: title });
 
     const draftPath = isShort ? null : path.join(jobDir, "thumbnail-draft.jpg");
