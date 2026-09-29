@@ -47,8 +47,9 @@ export async function publishTiktokViaZernio(key: string, job: TiktokPublishJobR
     // Obbligatori per TikTok: simo ha visto l'anteprima e ha premuto Pubblica nella finestra del sito.
     content_preview_confirmed: true,
     express_consent_given: true,
-    brand_organic_toggle: job.brand_organic_toggle,
-    brand_content_toggle: job.brand_content_toggle,
+    // Nomi dei campi del contenuto commerciale secondo creator-info di Zernio (commercialContentTypes).
+    is_brand_organic_post: job.brand_organic_toggle,
+    brand_partner_promote: job.brand_content_toggle,
   };
   const res = await zernio<Json>(key, "/posts", {
     method: "POST",

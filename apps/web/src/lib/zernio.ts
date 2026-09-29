@@ -63,18 +63,22 @@ export async function zernioTiktokAccount(key: string): Promise<ZernioTiktokAcco
 export async function zernioCreatorInfo(key: string): Promise<TiktokCreatorInfo & { zernioAccountId: string }> {
   const acc = await zernioTiktokAccount(key);
   if (!acc) throw new Error("Nessun account TikTok collegato in Zernio: collegalo su zernio.com");
+  // Formato visto il 2026-09-29: { creator: {nickname, avatarUrl}, privacyLevels: [{value}],
+  // postingLimits: { maxVideoDurationSec, interactionSettings: { allow_comment: {enabled} ... } } }.
   const raw = await zernioGet<Json>(`/accounts/${acc.id}/tiktok/creator-info`, key);
-  const info = ((raw.data as Json) ?? (raw.creatorInfo as Json) ?? raw) as Json;
-  const options = info.privacy_level_options ?? info.privacyLevelOptions;
+  const creator = (raw.creator as Json | undefined) ?? {};
+  const limits = (raw.postingLimits as Json | undefined) ?? {};
+  const interactions = (limits.interactionSettings as Record<string, { enabled?: boolean }> | undefined) ?? {};
+  const levels = Array.isArray(raw.privacyLevels) ? (raw.privacyLevels as Array<{ value?: string }>).map((l) => l.value).filter((v): v is string => !!v) : [];
   return {
     zernioAccountId: acc.id,
-    creator_avatar_url: str(info, "creator_avatar_url", "creatorAvatarUrl") || acc.avatarUrl || "",
-    creator_username: str(info, "creator_username", "creatorUsername") || acc.username,
-    creator_nickname: str(info, "creator_nickname", "creatorNickname") || acc.displayName,
-    privacy_level_options: Array.isArray(options) && options.length > 0 ? (options as string[]) : ["PUBLIC_TO_EVERYONE", "FOLLOWER_OF_CREATOR", "MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY"],
-    comment_disabled: Boolean(info.comment_disabled ?? info.commentDisabled),
-    duet_disabled: Boolean(info.duet_disabled ?? info.duetDisabled),
-    stitch_disabled: Boolean(info.stitch_disabled ?? info.stitchDisabled),
-    max_video_post_duration_sec: Number(info.max_video_post_duration_sec ?? info.maxVideoPostDurationSec ?? 600),
+    creator_avatar_url: str(creator, "avatarUrl") || acc.avatarUrl || "",
+    creator_username: acc.username,
+    creator_nickname: str(creator, "nickname") || acc.displayName,
+    privacy_level_options: levels.length > 0 ? levels : ["PUBLIC_TO_EVERYONE"],
+    comment_disabled: interactions.allow_comment?.enabled === false,
+    duet_disabled: interactions.allow_duet?.enabled === false,
+    stitch_disabled: interactions.allow_stitch?.enabled === false,
+    max_video_post_duration_sec: Number(limits.maxVideoDurationSec ?? 600),
   };
 }
