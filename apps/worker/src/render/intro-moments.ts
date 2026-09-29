@@ -7,6 +7,8 @@ import type { TranscriptSegment } from "@clipforge/shared";
 import { runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import { measureRmsWindows } from "./word-loudness.js";
+import { env } from "../env.js";
+import { LocalFasterWhisperProvider } from "../providers/transcription/local-faster-whisper-provider.js";
 
 /**
  * Trova l'istante ESATTO in cui viene detta una frase: per l'intro "IN QUESTO VIDEO", per i primi
@@ -18,8 +20,9 @@ import { measureRmsWindows } from "./word-loudness.js";
  * nel gioco, "non urlava nessuno" (simo); e il taglio sul cambio di gioco partiva mentre erano
  * ancora su COD. Qui invece:
  * 1. l'AI dà le parole esatte;
- * 2. si ritrascrivono solo quei ~30 s con Whisper e i tempi delle parole (~0,3 centesimi l'uno,
- *    e un pezzo già ritrascritto si riusa);
+ * 2. si ritrascrivono solo quei ~30 s con Whisper e i tempi delle parole: col Whisper LOCALE del PC
+ *    (gratis, simo 2026-09-29: "se ne sono andati euro ed euro"), con OpenAI solo se il locale non
+ *    risponde (~0,3 centesimi l'uno). Un pezzo già ritrascritto si riusa;
  * 3. si cercano le parole.
  * Se la trascrizione ha già i tempi delle parole si usano quelli, senza Whisper.
  */
@@ -96,6 +99,7 @@ export class PhraseLocator {
   private readonly windows: Array<{ from: number; to: number; words: Word[] }> = [];
   private dir: string | null = null;
   private whisperSeconds = 0;
+  private localSeconds = 0;
 
   constructor(
     private readonly params: { segments: TranscriptSegment[]; sourceVideoPath: string; clipStart: number; clipDuration: number; openaiApiKey: string },
@@ -121,15 +125,25 @@ export class PhraseLocator {
     const audio = path.join(this.dir, `w-${this.windows.length}.mp3`);
     const duration = to - from;
     await runFfmpeg(["-y", "-ss", (this.params.clipStart + from).toFixed(3), "-t", duration.toFixed(3), "-i", this.params.sourceVideoPath, "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-b:a", "48k", audio]);
-    const response = (await this.client.audio.transcriptions.create({
-      file: fs.createReadStream(audio),
-      model: "whisper-1",
-      language: "it",
-      response_format: "verbose_json",
-      timestamp_granularities: ["word"],
-    })) as unknown as { words?: Word[] };
-    this.whisperSeconds += duration;
-    const words = (response.words ?? []).map((w) => ({ word: w.word, start: w.start + from, end: w.end + from }));
+    let raw: Word[];
+    try {
+      const local = new LocalFasterWhisperProvider(env.LOCAL_WHISPER_URL, this.dir);
+      const t = await local.transcribe(audio);
+      raw = t.segments.flatMap((seg) => seg.words ?? []);
+      this.localSeconds += duration;
+    } catch (error) {
+      logger.warn("Whisper locale non disponibile, uso OpenAI per questa frase", { error: error instanceof Error ? error.message : String(error) });
+      const response = (await this.client.audio.transcriptions.create({
+        file: fs.createReadStream(audio),
+        model: "whisper-1",
+        language: "it",
+        response_format: "verbose_json",
+        timestamp_granularities: ["word"],
+      })) as unknown as { words?: Word[] };
+      raw = response.words ?? [];
+      this.whisperSeconds += duration;
+    }
+    const words = raw.map((w) => ({ word: w.word, start: w.start + from, end: w.end + from }));
     this.windows.push({ from, to, words });
     return words;
   }
@@ -158,6 +172,10 @@ export class PhraseLocator {
 
   async dispose(): Promise<void> {
     if (this.dir) await fsp.rm(this.dir, { recursive: true, force: true }).catch(() => undefined);
-    logger.info("Frasi cercate nell'audio", { ritrascrittiSecondi: Math.round(this.whisperSeconds), costoWhisperUsd: this.costUsd.toFixed(4) });
+    logger.info("Frasi cercate nell'audio", {
+      whisperLocaleSecondi: Math.round(this.localSeconds),
+      whisperOpenaiSecondi: Math.round(this.whisperSeconds),
+      costoWhisperUsd: this.costUsd.toFixed(4),
+    });
   }
 }
