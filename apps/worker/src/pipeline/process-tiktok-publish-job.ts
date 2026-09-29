@@ -77,13 +77,15 @@ export async function processTiktokPublishJob(job: TiktokPublishJobRow): Promise
   const workDir = path.join(env.WORKER_TMP_DIR, `tiktok-${job.id}`);
   try {
     await setStatus(job.id, { status: "UPLOADING", error_message: null });
-    const { data: clip } = await supabase.from("clips").select("output_video_path").eq("id", job.clip_id).single();
+    const { data: clip } = await supabase.from("clips").select("output_video_path, cover_path").eq("id", job.clip_id).single();
     if (!clip?.output_video_path) throw new Error("La clip non ha un video renderizzato");
 
     // Con Zernio (app TikTok già approvata) si passa il link del video e pubblicano loro.
     if (env.ZERNIO_API_KEY) {
       const videoUrl = await storageProvider.getSignedUrl(clip.output_video_path, 6 * 3600);
-      const { postId, url } = await publishTiktokViaZernio(env.ZERNIO_API_KEY, job, videoUrl);
+      const coverPath = (clip as { cover_path?: string | null }).cover_path;
+      const coverUrl = coverPath ? await storageProvider.getSignedUrl(coverPath, 6 * 3600) : null;
+      const { postId, url } = await publishTiktokViaZernio(env.ZERNIO_API_KEY, job, videoUrl, coverUrl);
       await setStatus(job.id, { status: "COMPLETED", publish_id: postId, tiktok_post_id: url, completed_at: new Date().toISOString() });
       logger.info("TikTok (Zernio): pubblicato", { jobId: job.id, postId, url });
       return;

@@ -33,7 +33,12 @@ async function zernio<T>(key: string, path: string, init?: { method: string; bod
   return (text ? JSON.parse(text) : {}) as T;
 }
 
-export async function publishTiktokViaZernio(key: string, job: TiktokPublishJobRow, videoUrl: string): Promise<{ postId: string | null; url: string | null }> {
+export async function publishTiktokViaZernio(
+  key: string,
+  job: TiktokPublishJobRow,
+  videoUrl: string,
+  coverUrl: string | null,
+): Promise<{ postId: string | null; url: string | null }> {
   const accounts = asList(await zernio<unknown>(key, "/accounts"));
   const acc = accounts.find((a) => String(a.platform ?? "").toLowerCase() === "tiktok");
   const accountId = acc ? String(acc._id ?? acc.id ?? acc.accountId ?? "") : "";
@@ -50,6 +55,8 @@ export async function publishTiktokViaZernio(key: string, job: TiktokPublishJobR
     // Nomi dei campi del contenuto commerciale secondo creator-info di Zernio (commercialContentTypes).
     is_brand_organic_post: job.brand_organic_toggle,
     brand_partner_promote: job.brand_content_toggle,
+    // Copertina scelta sul sito (simo, 2026-09-29: "non c'è la copertina"); senza, un fotogramma.
+    ...(coverUrl ? { video_cover_image_url: coverUrl } : { video_cover_timestamp_ms: 1000 }),
   };
   const res = await zernio<Json>(key, "/posts", {
     method: "POST",
