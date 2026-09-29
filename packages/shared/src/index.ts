@@ -18,3 +18,4 @@ export * from "./schemas/longform-candidates.schema.js";
 export * from "./schemas/longform-ranking.schema.js";
 
 export * from "./text/censor.js";
+export * from "./text/hashtags.js";

@@ -7,7 +7,7 @@ import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
 import { uploadVideoToYoutube, setYoutubeThumbnail } from "../providers/youtube/youtube-publisher.js";
 import { updatePublishJobStatus } from "../queue/publish-queue.js";
-import { censorText } from "@clipforge/shared";
+import { censorText, withShortsHashtags } from "@clipforge/shared";
 
 export async function processPublishJob(job: YoutubePublishJobRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `publish-${job.id}`);
@@ -59,7 +59,8 @@ export async function processPublishJob(job: YoutubePublishJobRow): Promise<void
       },
       filePath: localVideoPath,
       title: censorText(job.title),
-      description: censorText(job.description),
+      // Shorts: sempre gli stessi hashtag, uguali a TikTok (vedi shared/text/hashtags.ts).
+      description: clip.format === "longform" ? censorText(job.description) : withShortsHashtags(censorText(job.description)),
       tags: (job.tags as string[] | null) ?? [],
       privacyStatus: job.privacy_status,
       publishAt: job.publish_at,

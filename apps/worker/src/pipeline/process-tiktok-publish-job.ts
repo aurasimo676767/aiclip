@@ -6,7 +6,7 @@ import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
 import { publishTiktokViaZernio } from "../providers/zernio.js";
-import { censorText } from "@clipforge/shared";
+import { censorText, withShortsHashtags } from "@clipforge/shared";
 
 /**
  * Pubblica una clip su TikTok con la Content Posting API (Direct Post, caricamento del file a pezzi).
@@ -107,7 +107,7 @@ export async function processTiktokPublishJob(job: TiktokPublishJobRow): Promise
     const chunkCount = single ? 1 : Math.floor(size / chunkSize);
     const init = await tiktokJson<{ publish_id: string; upload_url: string }>(`${API}/post/publish/video/init/`, token, {
       post_info: {
-        title: censorText(job.caption),
+        title: withShortsHashtags(censorText(job.caption)),
         privacy_level: job.privacy_level,
         disable_comment: job.disable_comment,
         disable_duet: job.disable_duet,
