@@ -58,7 +58,8 @@ export async function publishTiktokViaZernio(key: string, job: TiktokPublishJobR
       mediaItems: [{ type: "video", url: videoUrl }],
       platforms: [{ platform: "tiktok", accountId, platformSpecificData: { tiktokSettings } }],
       tiktokSettings,
-      publishNow: true,
+      // Programmato: pubblica Zernio all'orario scelto (anche a PC spento). Altrimenti subito.
+      ...(job.publish_at && new Date(job.publish_at).getTime() > Date.now() ? { scheduledFor: job.publish_at, timezone: "Europe/Rome" } : { publishNow: true }),
     },
   });
   const post = ((res.post as Json) ?? (res.data as Json) ?? res) as Json;

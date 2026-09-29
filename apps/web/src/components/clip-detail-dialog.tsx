@@ -256,7 +256,9 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
             }`}
           >
             TikTok:{" "}
-            {clip.tiktokStatus === "COMPLETED"
+            {clip.tiktokStatus === "COMPLETED" && clip.tiktokPublishAt && new Date(clip.tiktokPublishAt).getTime() > Date.now()
+              ? `programmato per ${new Date(clip.tiktokPublishAt).toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}.`
+              : clip.tiktokStatus === "COMPLETED"
               ? "pubblicato."
               : clip.tiktokStatus === "FAILED"
                 ? `non riuscito: ${clip.tiktokError ?? "errore sconosciuto"}`

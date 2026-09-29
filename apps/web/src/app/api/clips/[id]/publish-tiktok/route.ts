@@ -11,6 +11,8 @@ const bodySchema = z.object({
   allowStitch: z.boolean(),
   brandOrganic: z.boolean(),
   brandContent: z.boolean(),
+  // Orario ISO per la pubblicazione programmata (solo tramite Zernio); assente = subito.
+  publishAt: z.string().datetime({ offset: true }).optional(),
 });
 
 /**
@@ -32,6 +34,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ error: "Un contenuto sponsorizzato non può essere visibile solo a te" }, { status: 400 });
   }
 
+  if (b.publishAt && new Date(b.publishAt).getTime() < Date.now() + 5 * 60 * 1000) {
+    return NextResponse.json({ error: "L'orario deve essere almeno fra 5 minuti" }, { status: 400 });
+  }
+
   const { data: clip } = await supabase.from("clips").select("id, status").eq("id", params.id).maybeSingle();
   if (!clip) return NextResponse.json({ error: "Clip non trovata" }, { status: 404 });
   if (clip.status !== "COMPLETED") return NextResponse.json({ error: "La clip non è ancora pronta" }, { status: 409 });
@@ -50,7 +56,11 @@ export async function POST(request: Request, { params }: { params: { id: string 
     disable_stitch: !b.allowStitch,
     brand_organic_toggle: b.brandOrganic,
     brand_content_toggle: b.brandContent,
+    ...(b.publishAt ? { publish_at: b.publishAt } : {}),
   });
-  if (error) return NextResponse.json({ error: `Messa in coda fallita: ${error.message}` }, { status: 500 });
+  if (error) {
+    if (error.message.includes("publish_at")) return NextResponse.json({ error: "Manca la colonna publish_at: lancia la migrazione 0031 su Supabase" }, { status: 500 });
+    return NextResponse.json({ error: `Messa in coda fallita: ${error.message}` }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }

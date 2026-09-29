@@ -60,7 +60,7 @@ export async function zernioTiktokAccount(key: string): Promise<ZernioTiktokAcco
 }
 
 /** Stessa forma di creator_info di TikTok, per riusare la finestra "Pubblica su TikTok". */
-export async function zernioCreatorInfo(key: string): Promise<TiktokCreatorInfo & { zernioAccountId: string }> {
+export async function zernioCreatorInfo(key: string): Promise<TiktokCreatorInfo & { zernioAccountId: string; canSchedule: true }> {
   const acc = await zernioTiktokAccount(key);
   if (!acc) throw new Error("Nessun account TikTok collegato in Zernio: collegalo su zernio.com");
   // Formato visto il 2026-09-29: { creator: {nickname, avatarUrl}, privacyLevels: [{value}],
@@ -71,6 +71,7 @@ export async function zernioCreatorInfo(key: string): Promise<TiktokCreatorInfo 
   const interactions = (limits.interactionSettings as Record<string, { enabled?: boolean }> | undefined) ?? {};
   const levels = Array.isArray(raw.privacyLevels) ? (raw.privacyLevels as Array<{ value?: string }>).map((l) => l.value).filter((v): v is string => !!v) : [];
   return {
+    canSchedule: true,
     zernioAccountId: acc.id,
     creator_avatar_url: str(creator, "avatarUrl") || acc.avatarUrl || "",
     creator_username: acc.username,

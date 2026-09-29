@@ -494,6 +494,7 @@ export interface Database {
           disable_stitch: boolean;
           brand_organic_toggle: boolean;
           brand_content_toggle: boolean;
+          publish_at: string | null;
           publish_id: string | null;
           tiktok_post_id: string | null;
           error_message: string | null;
@@ -516,6 +517,7 @@ export interface Database {
           disable_stitch?: boolean;
           brand_organic_toggle?: boolean;
           brand_content_toggle?: boolean;
+          publish_at?: string | null;
           publish_id?: string | null;
           tiktok_post_id?: string | null;
           error_message?: string | null;

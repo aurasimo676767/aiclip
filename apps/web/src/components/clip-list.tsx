@@ -31,6 +31,8 @@ export interface ClipViewModel {
   /** Ultima pubblicazione su TikTok (tiktok_publish_jobs, migrazione 0030): null se mai inviata. */
   tiktokStatus: string | null;
   tiktokError: string | null;
+  /** Orario della pubblicazione programmata su TikTok (null = subito). */
+  tiktokPublishAt: string | null;
   youtubeUrl: string | null;
   youtubeError: string | null;
   youtubePublishAt: string | null;

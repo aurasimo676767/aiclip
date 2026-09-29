@@ -13,6 +13,8 @@ interface CreatorInfo {
   duet_disabled: boolean;
   stitch_disabled: boolean;
   max_video_post_duration_sec: number;
+  /** true se si pubblica tramite Zernio, che sa programmare. */
+  canSchedule?: boolean;
 }
 
 const PRIVACY_LABELS: Record<string, string> = {
@@ -52,6 +54,8 @@ export function TiktokPublishPanel({
   const [commercial, setCommercial] = useState(false);
   const [brandOrganic, setBrandOrganic] = useState(false);
   const [brandContent, setBrandContent] = useState(false);
+  const [when, setWhen] = useState<"now" | "later">("now");
+  const [scheduleAt, setScheduleAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,7 +94,9 @@ export function TiktokPublishPanel({
   const tooLong = durationSeconds > info.max_video_post_duration_sec;
   const commercialIncomplete = commercial && !brandOrganic && !brandContent;
   const privateBranded = brandContent && privacy === "SELF_ONLY";
-  const canPublish = !busy && privacy !== "" && !tooLong && !commercialIncomplete && !privateBranded;
+  const scheduledDate = when === "later" && scheduleAt ? new Date(scheduleAt) : null;
+  const scheduleInvalid = when === "later" && (!scheduledDate || scheduledDate.getTime() < Date.now() + 5 * 60 * 1000);
+  const canPublish = !busy && privacy !== "" && !tooLong && !commercialIncomplete && !privateBranded && !scheduleInvalid;
 
   async function publish() {
     setBusy(true);
@@ -107,12 +113,17 @@ export function TiktokPublishPanel({
           allowStitch,
           brandOrganic: commercial && brandOrganic,
           brandContent: commercial && brandContent,
+          ...(scheduledDate ? { publishAt: scheduledDate.toISOString() } : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Pubblicazione non riuscita");
       router.refresh();
-      onDone("Inviato a TikTok: il video può impiegare qualche minuto per comparire sul profilo.");
+      onDone(
+        scheduledDate
+          ? `Programmato su TikTok per ${scheduledDate.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}.`
+          : "Inviato a TikTok: il video può impiegare qualche minuto per comparire sul profilo.",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -189,6 +200,24 @@ export function TiktokPublishPanel({
         )}
       </div>
 
+      {info.canSchedule && (
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted">Quando</p>
+          <div className="flex flex-wrap items-center gap-3 text-sm text-ink">
+            <label className="flex items-center gap-1.5">
+              <input type="radio" name="tt-when" checked={when === "now"} onChange={() => setWhen("now")} className="accent-brand-400" /> Subito
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="radio" name="tt-when" checked={when === "later"} onChange={() => setWhen("later")} className="accent-brand-400" /> Programma
+            </label>
+            {when === "later" && (
+              <input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className="input py-1.5" />
+            )}
+          </div>
+          {when === "later" && scheduleInvalid && <p className="text-xs text-amber-300">Scegli un orario almeno fra 5 minuti.</p>}
+        </div>
+      )}
+
       <p className="text-xs leading-relaxed text-muted">
         Pubblicando accetti la{" "}
         <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank" rel="noreferrer" className="underline">
@@ -209,7 +238,7 @@ export function TiktokPublishPanel({
 
       <div className="flex gap-2">
         <button onClick={publish} disabled={!canPublish} className="btn btn-primary btn-sm">
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Pubblica su TikTok
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} {when === "later" ? "Programma su TikTok" : "Pubblica su TikTok"}
         </button>
         <button onClick={onCancel} className="btn btn-ghost btn-sm">
           Annulla
