@@ -88,6 +88,10 @@ export function pickFaces(
 export const PERSON_STYLE: Record<string, { note: string; tag?: string }> = {
   // simo, 2026-09-26: "blur, facciamolo SEMPRE con cuffie della redbull, o cappello della redbull".
   BLUR: { note: "always wearing his Red Bull cap or his Red Bull gaming headphones, exactly as in his reference photos that show them", tag: "redbull" },
+  // simo, 2026-09-30, dopo le prove: "marza non è ciccione", "lo fa sempre ciccione".
+  MARZA: { note: "SLIM: thin face, defined cheekbones, no double chin, slim body. Never draw him heavier or chubbier than in the photos" },
+  // simo, 2026-09-30: "manuxo è diventato marocchino", "cambia sempre etnia", "sembra uscito da gossip girl".
+  MANUXO: { note: "a young Italian guy with fair skin: keep EXACTLY his skin tone, nose, eyes and messy dark hair from the photos, a normal streamer look (not a model or an actor)" },
 };
 
 /**

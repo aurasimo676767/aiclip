@@ -107,7 +107,7 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     (params.kind === "reaction"
       ? "watching and reacting to the video: curious, amused or surprised, relaxed natural pose"
       : params.kind === "game"
-        ? "playing the game with friends: hyped, shocked or laughing, expressive but still perfectly recognizable faces"
+        ? "playing the game together: everyone with the SAME kind of expression (e.g. all fired-up and competitive, or all laughing), expressive but still perfectly recognizable faces"
         : "reacting to the key moment of the clip (laughing, shocked, disgusted...): a strong, readable expression that matches it");
   const prompt = [
     vertical
@@ -133,7 +133,8 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     ...(params.kind === "reaction"
       ? [`Keep the main person or subject of the original thumbnail (image ${bgIndex}) clearly visible in the background: it is what the streamers are reacting to.`]
       : []),
-    `${layout}${protagonist ? ` "${protagonist}" is the main character.` : ""} Mood: ${mood}. Clean cutout edges with a subtle white outline, lit to match the background.`,
+    // simo, 2026-09-30: "tutti facce incazzate mentre blur sembra che stia ammirando..." — una faccia fuori tono stona.
+    `${layout}${protagonist ? ` "${protagonist}" is the main character.` : ""} Mood: ${mood}. All the people share the same mood: nobody has an unrelated or odd expression (no dreamy, admiring or confused look when the others are fired-up). Clean cutout edges with a subtle white outline, lit to match the background.`,
     // Stile scelto da simo il 2026-09-26: le copertine del canale AvraiAuraBooter (fatte anche loro
     // con l'AI): piene, sature, facce enormi, logo del gioco, bigliettini, costumi a tema.
     "Visual style: like the top Italian clip channels (e.g. \"Avrai Aura Booter\"): a dense, busy, hyper-saturated composition, glossy and dramatic, strong rim light and colored glow around the people, subtle vignette, bright complementary colors (blue/orange, purple/yellow, red/yellow). The people fill most of the frame, big faces close together, slightly overlapping, the main one biggest.",
