@@ -17,9 +17,11 @@ import { env } from "../env.js";
  * faccia "labeled". I ritagli giudicati sporchi si scartano. A pagamento: ~0,005 $ ogni 8 foto.
  * Uso: tsx src/dev/add-labeled-faces.ts [--cutout] <NOME> <cartella di lavoro> <foto> [foto...]
  * --cutout: le immagini sono GIÀ ritagli scontornati (PNG): si saltano rilevamento, ritaglio e scontorno.
+ * --ref: foto confermate da simo come riferimento per il volto (tag "ref"): face-reference.ts le preferisce sempre.
  */
 const cutoutMode = process.argv.includes("--cutout");
-const [labelArg, workArg, ...photos] = process.argv.slice(2).filter((a) => a !== "--cutout");
+const refMode = process.argv.includes("--ref");
+const [labelArg, workArg, ...photos] = process.argv.slice(2).filter((a) => a !== "--cutout" && a !== "--ref");
 if (!labelArg || !workArg || photos.length === 0) throw new Error("Uso: tsx src/dev/add-labeled-faces.ts <NOME> <cartella> <foto>...");
 const label = labelArg.toUpperCase();
 const work = path.resolve(workArg);
@@ -65,6 +67,7 @@ for (const photo of photos) {
     bust: await isBustCutout(cut),
     ...(await measureCutout(cut).then((s) => ({ bothSidesCut: s.cuts.left && s.cuts.right, baseCover: Number(s.baseCover.toFixed(2)) }))),
     sourceFile: path.basename(photo),
+    ...(refMode ? { tags: ["ref"] } : {}),
   };
   library.faces.push(face);
   added++;

@@ -24,7 +24,7 @@ const CROP_SIZE = 768;
 /** Quanto allargare il riquadro del volto per tenere capelli, barba, occhiali e cuffie. */
 const HEAD_EXPAND = 2.0;
 /** Candidate scaricate per persona: la libreria ne ha al massimo ~25. */
-const MAX_CANDIDATES = 14;
+const MAX_CANDIDATES = 20;
 
 export interface HeadCrop {
   face: LibraryFace;
@@ -94,7 +94,8 @@ export async function bestHeadCrops(library: FaceLibraryIndex, label: string, n:
   const tag = PERSON_STYLE[label]?.tag;
   const pool = library.faces
     .filter((f) => f.status === "labeled" && f.label === label && !f.tags?.includes("meme"))
-    .sort((a, b) => a.intensity - b.intensity)
+    // Prima quelle confermate da simo come riferimento, poi le meno esagerate.
+    .sort((a, b) => Number(Boolean(b.tags?.includes("ref"))) - Number(Boolean(a.tags?.includes("ref"))) || a.intensity - b.intensity)
     .slice(0, MAX_CANDIDATES);
   const files = await downloadFaces(pool, dir);
   const crops: HeadCrop[] = [];
