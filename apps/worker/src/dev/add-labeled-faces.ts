@@ -18,10 +18,13 @@ import { env } from "../env.js";
  * Uso: tsx src/dev/add-labeled-faces.ts [--cutout] <NOME> <cartella di lavoro> <foto> [foto...]
  * --cutout: le immagini sono GIÀ ritagli scontornati (PNG): si saltano rilevamento, ritaglio e scontorno.
  * --ref: foto confermate da simo come riferimento per il volto (tag "ref"): face-reference.ts le preferisce sempre.
+ * --no-rate: niente giudizio di Haiku (per le foto già confermate da simo: il giudizio scartava i
+ *            fotogrammi delle live per le scritte della chat, che al riferimento del volto non danno fastidio).
  */
 const cutoutMode = process.argv.includes("--cutout");
 const refMode = process.argv.includes("--ref");
-const [labelArg, workArg, ...photos] = process.argv.slice(2).filter((a) => a !== "--cutout" && a !== "--ref");
+const noRate = process.argv.includes("--no-rate");
+const [labelArg, workArg, ...photos] = process.argv.slice(2).filter((a) => a !== "--cutout" && a !== "--ref" && a !== "--no-rate");
 if (!labelArg || !workArg || photos.length === 0) throw new Error("Uso: tsx src/dev/add-labeled-faces.ts <NOME> <cartella> <foto>...");
 const label = labelArg.toUpperCase();
 const work = path.resolve(workArg);
@@ -48,8 +51,7 @@ for (const photo of photos) {
   const id = crypto.randomUUID();
   const local = path.join(work, "faces", `${id}.png`);
   await fsp.writeFile(local, cut);
-  const { ratings } = await rateFaceImages([local], { apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_CHEAP });
-  const rating = ratings.get(local);
+  const rating = noRate ? undefined : (await rateFaceImages([local], { apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_CHEAP })).ratings.get(local);
   if (rating && !rating.usable) {
     console.warn(`scartata ${path.basename(photo)}: ${rating.issues.join("; ")}`);
     continue;
@@ -60,7 +62,7 @@ for (const photo of photos) {
     id,
     path: key,
     expression: rating?.expression ?? "neutra",
-    intensity: rating?.intensity ?? 3,
+    intensity: rating?.intensity ?? 2,
     sourceVideoId: "foto-di-simo",
     label,
     status: "labeled",
