@@ -54,7 +54,7 @@ async function sharpnessOf(image: Buffer): Promise<number> {
 }
 
 /** Primo piano quadrato della testa da un ritaglio della libreria; null se non si trova un volto. */
-export async function headCrop(pngPath: string, outPath: string): Promise<{ faceWidth: number; sharpness: number } | null> {
+export async function headCrop(pngPath: string, outPath: string, cropSize = CROP_SIZE): Promise<{ faceWidth: number; sharpness: number } | null> {
   const flat = await sharp(pngPath).flatten({ background: "#9a9a9a" }).toBuffer();
   const meta = await sharp(flat).metadata();
   const w = meta.width ?? 0;
@@ -80,7 +80,7 @@ export async function headCrop(pngPath: string, outPath: string): Promise<{ face
   const crop = await sharp(flat).extract({ left, top, width: side, height: side }).toBuffer();
   const sharpness = await sharpnessOf(crop);
   // Mai ingrandire più di 2,5 volte: oltre, l'upscaling inventa dettagli quanto il modello.
-  const size = Math.min(CROP_SIZE, Math.round(side * 2.5));
+  const size = Math.min(cropSize, Math.round(side * 2.5));
   await sharp(crop).resize(size, size, { kernel: "lanczos3" }).jpeg({ quality: 94 }).toFile(outPath);
   return { faceWidth: box.width, sharpness };
 }
@@ -90,7 +90,7 @@ export async function headCrop(pngPath: string, outPath: string): Promise<{ face
  * esagerata (urla e smorfie deformano la faccia e il modello le prende per lineamenti), niente foto
  * "meme". Se la persona ha uno stile fisso (Blur col Red Bull) almeno una foto lo mostra.
  */
-export async function bestHeadCrops(library: FaceLibraryIndex, label: string, n: number, dir: string): Promise<HeadCrop[]> {
+export async function bestHeadCrops(library: FaceLibraryIndex, label: string, n: number, dir: string, cropSize = CROP_SIZE): Promise<HeadCrop[]> {
   const tag = PERSON_STYLE[label]?.tag;
   const pool = library.faces
     .filter((f) => f.status === "labeled" && f.label === label && !f.tags?.includes("meme"))
@@ -101,8 +101,8 @@ export async function bestHeadCrops(library: FaceLibraryIndex, label: string, n:
   const crops: HeadCrop[] = [];
   for (let i = 0; i < pool.length; i++) {
     const face = pool[i]!;
-    const out = path.join(dir, `ref-${face.id}.jpg`);
-    const measured = await headCrop(files[i]!, out).catch(() => null);
+    const out = path.join(dir, `ref-${face.id}-${cropSize}.jpg`);
+    const measured = await headCrop(files[i]!, out, cropSize).catch(() => null);
     if (!measured) continue;
     const score =
       (face.tags?.includes("ref") ? 3 : 0) + // scelte da simo come riferimento: vincono sempre
