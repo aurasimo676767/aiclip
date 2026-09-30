@@ -76,8 +76,8 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     const last = images.length;
     inputLines.push(
       (first === last
-        ? `- image ${first}: reference photo of the real streamer nicknamed "${person.name}"`
-        : `- images ${first}-${last}: ${last - first + 1} different photos of the SAME single streamer, nicknamed "${person.name}" (draw them only once)`) +
+        ? `- image ${first}: close-up reference photo of the face of the real streamer nicknamed "${person.name}"`
+        : `- images ${first}-${last}: ${last - first + 1} close-up reference photos of the face of the SAME single streamer, nicknamed "${person.name}" (draw them only once)`) +
         (person.styleNote ? `. In the thumbnail "${person.name}" is ${person.styleNote}.` : ""),
     );
   }
@@ -107,7 +107,7 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     (params.kind === "reaction"
       ? "watching and reacting to the video: curious, amused or surprised, relaxed natural pose"
       : params.kind === "game"
-        ? "playing the game with friends: hyped, shocked or laughing, strong exaggerated expressions"
+        ? "playing the game with friends: hyped, shocked or laughing, expressive but still perfectly recognizable faces"
         : "reacting to the key moment of the clip (laughing, shocked, disgusted...): a strong, readable expression that matches it");
   const prompt = [
     vertical
@@ -120,6 +120,8 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     // "Blur" preso alla lettera: la faccia di Blur usciva sfocata.
     `Names like "Blur" are only nicknames: never blur, soften or hide anyone; every face must be perfectly sharp and in focus.`,
     "The people are real streamers. Their faces must stay EXACTLY these people: same face shape, eyes, nose, beard, glasses, hairline, skin tone. Do not beautify, change age, or make them look like someone else.",
+    // simo, 2026-09-30: "blur occhi strambi, marza lo fa sempre ciccione, manuxo sempre uno appena uscito dai balletti di tiktok".
+    "Identity is the most important thing in this image, more than style or expression. Copy from the close-up photos: the exact face width and cheeks, jawline and chin, body build (never make anyone fatter, thinner, more muscular or more 'handsome'), eye shape, eye size and eye spacing, eyebrows, nose, lips, ears, hairstyle and hair color, beard or stubble exactly as it is (bald stays bald), glasses frames exactly as in the photos. Eyes must be natural and symmetrical, both looking in the same direction. The expression can be strong but must not deform the face: someone who knows these streamers must recognize each of them at first glance.",
     // simo (2026-09-26): Blur usciva sempre con la stessa foto e la sciarpa blu, che nel tour della
     // casa di Murri "non ha senso". Le foto servono solo per il volto: posa, vestiti ed espressione
     // li decide il modello in base al video.

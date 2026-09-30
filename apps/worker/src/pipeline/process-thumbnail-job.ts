@@ -12,6 +12,7 @@ import { selectThumbnailAssets } from "../providers/ai/thumbnail-selection.js";
 import { composeCover, COVER_THEMES } from "../render/compose-cover.js";
 import { readFaceLibrary } from "../lib/face-library.js";
 import { participantsFromTitle, pickFaces, downloadFaces, findSteamHero, findSteamLogo, referenceFaces, PERSON_STYLE } from "./cover-builder.js";
+import { bestHeadCrops } from "./face-reference.js";
 import { generateAiCover } from "../providers/ai/cover-image-ai.js";
 import {
   setYoutubeThumbnail,
@@ -263,8 +264,10 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       try {
         const aiPeople = [];
         for (const face of chosenFaces) {
-          const refs = referenceFaces(library, face, 3);
-          aiPeople.push({ name: face.label ?? "", photos: await downloadFaces(refs, jobDir), styleNote: face.label ? PERSON_STYLE[face.label]?.note : undefined });
+          // Primi piani stretti, grandi e nitidi (vedi face-reference.ts); se non se ne trovano, le foto intere di prima.
+          const crops = face.label ? await bestHeadCrops(library, face.label, 4, jobDir).catch(() => []) : [];
+          const photos = crops.length > 0 ? crops.map((c) => c.path) : await downloadFaces(referenceFaces(library, face, 3), jobDir);
+          aiPeople.push({ name: face.label ?? "", photos, styleNote: face.label ? PERSON_STYLE[face.label]?.note : undefined });
         }
         const stylePath = path.resolve("assets", "cover-style", "modello-scritta.jpg");
         // Logo vero del gioco (come nelle copertine di AvraiAuraBooter), anche negli Short di gioco.
