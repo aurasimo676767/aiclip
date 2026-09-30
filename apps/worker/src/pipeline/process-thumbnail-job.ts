@@ -148,7 +148,9 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     const coverInstructions = (job as { cover_instructions?: string | null }).cover_instructions?.trim() || undefined;
     const selection = await selectThumbnailAssets({
       apiKey: env.ANTHROPIC_API_KEY,
-      model: env.ANTHROPIC_MODEL_CHEAP,
+      // Con le istruzioni di simo il modello economico le ignorava (2026-09-30: "Rematch, NON Alpaca
+      // Ball" e lui sceglieva Alpaca Ball): quando ci sono si usa quello più bravo.
+      model: coverInstructions ? env.ANTHROPIC_MODEL_STRONG : env.ANTHROPIC_MODEL_CHEAP,
       clipTitle: clip.title,
       clipHook: clip.hook,
       clipCaption: clip.caption ?? "",
@@ -283,7 +285,9 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           people: aiPeople,
           title: title.toUpperCase(),
           gameName: selection.gameName ?? null,
-          styleExamplePath: await fsp.access(stylePath).then(() => stylePath, () => null),
+          // Se simo chiede un font o uno stile della scritta, la copertina-modello non si passa: GPT
+          // la copiava comunque (2026-09-30, "usa il font del logo di Rematch" → uscito il font solito).
+          styleExamplePath: coverInstructions && /font|carattere|scritta|stile/i.test(coverInstructions) ? null : await fsp.access(stylePath).then(() => stylePath, () => null),
           logoPath,
           videoTitle: clip.title,
           userInstructions: coverInstructions,
