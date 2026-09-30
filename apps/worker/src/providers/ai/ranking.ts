@@ -1,6 +1,6 @@
 import type { TranscriptSegment, ClipCandidateWindow, RankedClip } from "@clipforge/shared";
 import { rankedClipsResponseSchema, TEMPLATE_NAMES, EDITING_STYLES, CLIP_BADGES, CLIP_DURATION_TARGET } from "@clipforge/shared";
-import { getAnthropicClient, cachedSystemPrompt } from "./anthropic-client.js";
+import { getAnthropicClient, cachedSystemPrompt, logAnthropicCost } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
 import { extractCandidateFrameJpegs } from "./frame-sampler.js";
 import { buildPerformanceFeedback } from "./performance-feedback.js";
@@ -258,6 +258,7 @@ export async function rankAndBuildEdl(
       tools: [RANKING_TOOL_SCHEMA],
       tool_choice: { type: "tool", name: TOOL_NAME },
     });
+    logAnthropicCost("scelta Shorts (ranking)", options.model, message.usage);
 
     const toolUseBlock = message.content.find(
       (block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === TOOL_NAME,

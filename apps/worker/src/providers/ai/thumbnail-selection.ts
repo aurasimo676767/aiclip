@@ -1,4 +1,4 @@
-import { getAnthropicClient, toolChoiceFor } from "./anthropic-client.js";
+import { getAnthropicClient, toolChoiceFor, logAnthropicCost } from "./anthropic-client.js";
 import { logger } from "../../lib/logger.js";
 import type Anthropic from "@anthropic-ai/sdk";
 
@@ -121,6 +121,7 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     tools: [TOOL_SCHEMA],
     tool_choice: toolChoiceFor(options.model, TOOL_NAME),
   });
+  logAnthropicCost("scelta copertina", options.model, message.usage);
 
   const toolUseBlock = message.content.find(
     (block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === TOOL_NAME,

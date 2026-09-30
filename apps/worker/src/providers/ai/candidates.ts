@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { TranscriptSegment } from "@clipforge/shared";
 import { clipCandidateSchema, type ClipCandidatesResponse } from "@clipforge/shared";
 import { CANDIDATE_CHUNK_OVERLAP_SECONDS, CANDIDATE_CHUNK_WINDOW_SECONDS, CLIP_DURATION_TARGET } from "@clipforge/shared";
-import { getAnthropicClient, cachedSystemPrompt } from "./anthropic-client.js";
+import { getAnthropicClient, cachedSystemPrompt, logAnthropicCost } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
 import type { LoudMoment } from "../../pipeline/vocal-energy.js";
 import { logger } from "../../lib/logger.js";
@@ -130,6 +130,7 @@ ${formatSegments(windowSegments)}`;
       tools: [CANDIDATES_TOOL_SCHEMA],
       tool_choice: { type: "tool", name: TOOL_NAME },
     });
+    logAnthropicCost("candidati Shorts", options.model, message.usage);
 
     const parsed = extractToolInput(message);
     if (!parsed) {

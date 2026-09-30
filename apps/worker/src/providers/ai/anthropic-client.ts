@@ -1,4 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { classifyModelTier, computeModelCostUsd } from "@clipforge/shared";
+import { logger } from "../../lib/logger.js";
 
 let client: Anthropic | null = null;
 
@@ -47,4 +49,16 @@ export function readCacheUsage(usage: Anthropic.Usage): { cacheRead: number; cac
 export function toolChoiceFor(model: string, toolName: string): Anthropic.MessageCreateParams["tool_choice"] {
   if (/opus-5/.test(model)) return { type: "auto" };
   return { type: "tool", name: toolName };
+}
+
+/**
+ * Scrive nel log il costo REALE di una chiamata (stesso formato delle altre righe "Costo REALE
+ * misurato"), per sapere dove vanno davvero i soldi. Aggiunto il 2026-09-30 per gli Shorts, che
+ * prima non si misuravano.
+ */
+export function logAnthropicCost(label: string, model: string, usage: Anthropic.Usage): void {
+  const tier = classifyModelTier(model);
+  const cache = readCacheUsage(usage);
+  const tokens = { input: usage.input_tokens, output: usage.output_tokens, cacheRead: cache.cacheRead, cacheWrite: cache.cacheWrite, calls: 1 };
+  logger.info(`Costo REALE misurato — ${label}`, { model, ...tokens, costUsd: tier ? computeModelCostUsd(tier, tokens).toFixed(4) : "?" });
 }
