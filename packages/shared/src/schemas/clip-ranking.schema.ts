@@ -29,7 +29,7 @@ export const rankedClipSchema = z.object({
   editing_style: z.enum(EDITING_STYLES),
   edl: editDecisionListSchema,
   hashtags: z.array(z.string().min(1).max(30)).max(10).default([]),
-  caption: z.string().min(1).max(300),
+  caption: z.string().max(300), // vuota ammessa: la descrizione può essere solo hashtag (simo, 2026-09-30)
   badges: z.array(z.enum(CLIP_BADGES)).max(5).default([]),
   reactedContentStart: z.number().nonnegative().nullable().optional(),
   whyStop: z.string().max(400).optional(),

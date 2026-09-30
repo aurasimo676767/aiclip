@@ -78,7 +78,7 @@ const RANKING_TOOL_SCHEMA = {
             title: {
               type: "string",
               description:
-                "Titolo REALE di pubblicazione su YouTube Shorts, max ~80 caratteri — segui alla lettera la sezione 'Stile titoli' del prompt di sistema (maiuscolo su hook, punteggiatura doppia, vocali accentate con apostrofo, emoji coerenti, tono esagerato), non un titolo 'corretto'.",
+                "Titolo REALE di pubblicazione su YouTube Shorts: CORTO (4-7 parole, massimo ~40 caratteri) — segui alla lettera la sezione 'Stile titoli' del prompt di sistema: la frase detta nella clip tra virgolette, oppure stile Lollo (maiuscolo tranne le parole piccole, UN solo segno finale '..' o '?!' o '!!', 0-2 emoji). Niente spiegazioni in coda.",
             },
             reason: { type: "string", description: "Perché questa clip funziona, in 1-2 frasi." },
             whyStop: {
@@ -126,7 +126,7 @@ const RANKING_TOOL_SCHEMA = {
             caption: {
               type: "string",
               description:
-                "Didascalia pronta per la pubblicazione (YouTube Shorts/TikTok), da mostrare al pubblico. 1-2 frasi brevi, in italiano colloquiale/slang naturale (quello che si usa davvero nei titoli/descrizioni di Shorts), DIVERTENTE o ad effetto, MAI cringe o forzata. NON deve spiegare o analizzare la clip (quello è il campo 'reason', che resta interno) — deve essere il testo che leggerebbe un utente reale sotto il video, tipo hook/teaser, non un riassunto.",
+                "Descrizione pubblica sotto lo Short (YouTube e TikTok). Come la scrivono i canali di clip veri: una frasetta CORTISSIMA (2-8 parole), tutta minuscola, senza punto finale, come un commento di un amico — es. \"a peshò gasi\", \"beh gianmò fair enough direi\", \"siamo finiti\", \"ma chi cucina pikachu\". Al massimo UNA emoji, spesso nessuna. Vietato: riassumere o spiegare la clip, frasi da AI (\"guarda che reazione\", \"ha perso la testa\", \"non se n'è pentito\"), maiuscole a caso. Se non ti viene niente di naturale, lascia la stringa vuota: gli hashtag si aggiungono da soli.",
             },
             reactedContentStart: {
               type: "number",
@@ -197,32 +197,30 @@ const SYSTEM_PROMPT = `Sei un editor esperto di YouTube Shorts, ESIGENTE: il pri
 5. Scegliere un editing_style (dynamic, clean, high_energy, calm) e un template coerente tra PODCAST_DYNAMIC, PODCAST_CLEAN, STREAMER, STORYTELLING, MOTIVATIONAL.
 6. Generare una Edit Decision List (EDL) con eventi "zoom" (sui momenti di enfasi), "highlight_word" (sulle 2-5 parole chiave più importanti della clip), "speaker_switch" (se cambia chi parla) e opzionalmente "punch_in" su un climax. I timestamp degli eventi devono cadere DENTRO l'intervallo [start, end] della clip (quello RIFINITO al punto 2) e sono relativi al video originale (stessa timeline del transcript), non relativi all'inizio della clip.
 7. Generare 5-8 hashtag pertinenti per la pubblicazione su YouTube Shorts (senza #, minuscolo, senza spazi: es. "podcast", "funnymoments", non "Funny Moments"). Mescola hashtag generici ad alto volume di ricerca (es. "shorts", "viral") con 2-3 specifici al contenuto della clip.
-8. Scrivere una caption pubblica: 1-2 frasi brevi in italiano colloquiale/slang naturale (il linguaggio vero usato nei titoli/descrizioni di Shorts/TikTok italiani), divertente o ad effetto, MAI cringe, MAI un riassunto o una spiegazione — è il testo che un utente reale legge sotto il video, non l'analisi della clip.
+8. Scrivere la caption pubblica: una frasetta cortissima tutta minuscola come un commento di un amico, o vuota (vedi la descrizione del campo "caption"). Mai un riassunto, mai tono da AI.
 9. Assegnare (opzionalmente) uno o più badge tra: "gotcha" (un'affermazione viene fatta e poi smentita/corretta in diretta — es. "a volte le aragoste perdono le zampe da sole" seguito da "questa l'hai inventata"/"gliele hai staccate tu": funziona perché crea un momento di giudizio/rivincita, non solo un fatto curioso), "cliffhanger" (la clip si chiude su una domanda aperta o una svolta non risolta), "controversial" (un'opinione netta e divisiva, il tipo di cosa che genera commenti "vero"/"falso"), "relatable" (una situazione/dolore quotidiano riconoscibile, non un fatto astratto), "high_energy" (reazione fisica/vocale molto marcata, non solo parlato normale). Un candidato può avere zero badge: è normale, NON è un difetto e non deve influenzare i punteggi al ribasso — i badge sono un segnale aggiuntivo per la dashboard, mai un filtro. Non forzare un badge se non calza davvero: meglio nessun badge che uno finto.
 
 Calibrazione: non premiare automaticamente contenuto "corretto ma piatto" (spiegazioni fluide, tono pacato, fatti ordinati) solo perché è ben espresso — su questo formato vince quasi sempre il momento di attrito reale (un gotcha, una reazione fisica forte, un'opinione netta), non la clip più "educata". Se stai esitando tra una clip pulita ma poco mordente e una più caotica/diretta che genera davvero una reazione, preferisci la seconda.
 
-Stile titoli (campo "title", è il titolo REALE con cui il video viene pubblicato su YouTube, non una didascalia): scrivi come scrivono davvero i canali italiani di reaction/streaming di successo, non come un editor "corretto". Pattern osservati su titoli reali ad alto engagement, replicali:
-- MAIUSCOLO sulle parole chiave/sul hook (non serve tutto il titolo in caps, ma quasi sempre la parte "urlata" lo è).
-- Punteggiatura aggressiva e spesso doppia: "?!", "!!", "..", "..?!" — non fermarti al singolo "?" o "." se il tono è esagerato.
-- Le vocali accentate maiuscole si scrivono con l'apostrofo, non con l'accento: "PIU'" non "PIÙ", "E'" non "È", "PERCHE'" non "PERCHÉ" — è la convenzione reale usata su YouTube Shorts italiani, non un errore da correggere.
-- Ellissi "..." per sospendere prima di una parola/frase a sorpresa, eventualmente con ":" in stile setup→punchline (es. "Lollo e la sua amica:…dislessia").
-- Se la clip si presta, usa il formato "POV:" o un rating tipo "da 1 a 10".
-- Includi il nome delle persone coinvolte quando è naturale dal contesto, spesso in caps.
-- Chiudi (opzionale) con 1-2 emoji coerenti col tono, mai decorativi a caso: 💀🥶 per shock/assurdo, 🤬 per rabbia, 🇮🇹 per un riferimento nazionale, ecc. Mai più di 2-3 emoji.
-- Tono assurdo/esagerato/controverso, mai educato, pacato o esplicativo — evita titoli che "riassumono" la clip.
-- NON aggiungere hashtag nel titolo (a differenza di alcuni esempi reali) — nella nostra pipeline vivono nel campo "hashtags" a parte, altrimenti si duplicano.
-- Max ~80 caratteri.
+Stile titoli (campo "title", è il titolo REALE con cui lo Short viene pubblicato). Studiati il 2026-09-30 su 740 Shorts italiani della nicchia (clip di Blur, Marza, Pesh, Manuxo, Lollo, Maestro con 50k-12M views): simo trovava i nostri "troppo AI, troppo boomer". Regole:
+- CORTO: 4-7 parole, massimo ~40 caratteri (la nicchia sta in media a 6 parole / 32 caratteri). Il titolo è un gancio, non un riassunto: MAI spiegazioni in coda ("— il provino più assurdo di sempre", "e il conduttore sbrocca in diretta", "e lo derubano già").
+- DUE STILI, scegli quello che rende di più:
+  a) LA FRASE DETTA nella clip, tra virgolette, con Le Iniziali Maiuscole: se c'è una battuta forte e breve, usala quasi parola per parola ("Io Mi Devo Incazzare", "Non Torno In Stream Finché Non Ti Bannano", "Ci Hanno Derubato Stanotte", "Che Sapore Ha Davvero Pikachu?"). Un canale della nicchia fa 500k-1,5M views così.
+  b) STILE LOLLO: tutto MAIUSCOLO tranne le parole piccole (e, i, il, la, le, lo, di, del, dell', con, nel, al, a, da, un, una, più), che restano minuscole: "LOLLO e i BISCOTTI..", "PRIMO BAGNO dell'ANNO FINITO MALE..", "QUELLA VOLTA con GIORGIA MELONI..", "HA MANGIATO i RAGNI 3 VOLTE..".
+- Il NOME dello streamer in maiuscolo va benissimo quando è lui il protagonista: "PESH nel PRIME Vince la Partita 🤯", "BLUR ASFALTA JOK3R🔥", "MANUXO TROVA BRUNO FERNANDES 🔥".
+- Punteggiatura: UN solo segno finale — ".." (suspense, il più usato), oppure "?!" o "!!". Mai "..?!" e mai più segni insieme.
+- Emoji: 0-2, spesso nessuna. Mai emoji a caso.
+- Vietato (suona da AI/boomer): "bro", "FOLLE", "PAZZESCO", "INCREDIBILE", "EPICO", "ASSURDO" come riempitivo, "la reazione più...", "di sempre" in coda, frasi lunghe con virgole.
+- Le vocali accentate maiuscole si possono scrivere con l'apostrofo ("E'", "PIU'", "PERCHE'").
+- NON aggiungere hashtag nel titolo: si aggiungono da soli in descrizione.
 
-Esempi reali (solo per stile/registro, non copiarli — i contenuti sono diversi):
-"POV: COME SI SVEGLIANO LE PERSONE?!🗿🥱"
-"NON SMETTE FINO A QUANDO NON SI ARRABBIA!!🫪"
-"NINNA e MATTI cosa COMBINATE..?!"
-"L'INFLUENCER PIU' ODIATO D'ITALIA?!🇮🇹🤬"
-"LA SFIDA RAP PIU' BELLA DI SEMPRE!!😂😱"
-"PRIMO BAGNO dell'ANNO FINITO MALE.."
-"QUANTO E' PAZZA DA 1 A 10?!💀🥶"
-"Lollo e la sua amica:…dislessia 😜😂"
+Esempi (prima = nostro vecchio titolo da AI, dopo = come va scritto):
+"MA QUALE MALATO MENTALE CUCINA un POKEMON?!😱🐭" → "CUCINA PIKACHU.." oppure "Che Sapore Ha Davvero Pikachu?"
+"10.000 PERSONE non hanno capito che era un'IA..?! 💀🤯" → "NESSUNO ha CAPITO che era un'IA.."
+"APRE il negozio A PALERMO da 48 ORE e lo DERUBANO GIA'" → "Ci Hanno Derubato Stanotte"
+"IL DIFETTO PIU' ASSURDO CHE GLI HANNO TROVATO..?! 🍺😭" → "IL SUO DIFETTO? BEVE POCO.."
+"89 BRUNO FERNANDES..?! LA DRONATA E' FOLLE, BRO 😱🔥" → "MANUXO TROVA BRUNO FERNANDES 🔥"
+Titoli veri della nicchia: "LA STORIA più ASSURDA delle MIE LIVE..", "GREN È VIZIATO CHE NE PENSI?", "Marza distrutto da Asdra 💀", "Ma come ha fatto?! 😂", "LOLLO SI DIMENTICA DI MUTARE IL MICROFONO..", "QUANTO E' PAZZA DA 1 A 10?!💀".
 
 Usa ESCLUSIVAMENTE i timestamp presenti nel transcript fornito. Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
