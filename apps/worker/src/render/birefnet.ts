@@ -20,6 +20,8 @@ let sessionPromise: Promise<ort.InferenceSession> | null = null;
 
 function getSession(): Promise<ort.InferenceSession> {
   sessionPromise ??= (async () => {
+    // BIREFNET_PROVIDER=cpu: direttamente il processore (script lunghi mentre la scheda video serve a Whisper).
+    if (process.env.BIREFNET_PROVIDER === "cpu") return ort.InferenceSession.create(MODEL_PATH, { executionProviders: ["cpu"] });
     // Prima la scheda video (DirectML su Windows), altrimenti il processore: è solo più lento.
     try {
       const s = await ort.InferenceSession.create(MODEL_PATH, { executionProviders: ["dml", "cpu"] });
@@ -50,6 +52,9 @@ async function personMask(image: Buffer, width: number, height: number): Promise
     // La scheda video (8 GB) può non bastare, soprattutto con Whisper già caricato: si passa al
     // processore per il resto della sessione (più lento, ma con 32 GB di RAM ci sta sempre).
     logger.warn("BiRefNet: scheda video senza memoria, passo al processore", { error: error instanceof Error ? error.message.slice(0, 160) : String(error) });
+    // Prima si libera la sessione sulla scheda video: tenendola in vita anche il processore restava
+    // senza memoria ("Failed to allocate ... bfc_arena", 2026-09-30).
+    await session.release().catch(() => undefined);
     sessionPromise = ort.InferenceSession.create(MODEL_PATH, { executionProviders: ["cpu"] });
     session = await sessionPromise;
     output = await session.run({ [session.inputNames[0]!]: input });
