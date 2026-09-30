@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Loader2, MoreHorizontal, Pencil, RefreshCw, RotateCcw, Scissors, Send, Sparkles, X, Wand2 } from "lucide-react";
-import { overallScore, type ClipBadge, type ClipScores } from "@clipforge/shared";
+import { feedRisk, overallScore, type ClipBadge, type ClipScores } from "@clipforge/shared";
 import type { ClipViewModel } from "./clip-list";
 import { isRenderable } from "./clip-list";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui-kit/dialog";
@@ -138,6 +138,8 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
                 <span>{isShort ? "Short verticale" : "Video long-form"}</span>
               </div>
             </DialogDescription>
+            {isShort && <FeedRiskWarning text={`${clip.title}
+${clip.publishDescription}`} />}
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-faint transition hover:bg-raised hover:text-ink" aria-label="Chiudi">
             <X size={18} />
@@ -416,6 +418,8 @@ function EditPanel({ clip, onDone, onCancel }: { clip: ClipViewModel; onDone: (m
         <label className="label">Hashtag</label>
         <input value={hashtags} onChange={(e) => setHashtags(e.target.value)} placeholder="blur reaction gtavi" className="input" />
       </div>
+      {clip.format === "short" && <FeedRiskWarning text={`${title}
+${description}`} />}
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex gap-2">
         <button type="submit" disabled={saving || title.trim().length === 0} className="btn btn-primary btn-sm">
@@ -456,5 +460,20 @@ function LongformEditToggle({ enabled, busy, onChange }: { enabled: boolean; bus
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * Avviso sulle parole che fanno sparire uno Short dal feed di YouTube (misurato il 2026-09-30:
+ * con queste nel titolo o nella descrizione gli Shorts fanno 2-150 views invece di ~1.200).
+ */
+function FeedRiskWarning({ text }: { text: string }) {
+  const words = feedRisk(text);
+  if (words.length === 0) return null;
+  return (
+    <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-300">
+      YouTube probabilmente non lo farà girare per {words.length === 1 ? "questa parola" : "queste parole"} nel titolo o nella descrizione:{" "}
+      <strong>{words.join(", ")}</strong>. Anche scritte con numeri o asterischi vengono riconosciute: meglio toglierle.
+    </p>
   );
 }
