@@ -38,6 +38,8 @@ const envSchema = z.object({
   // Tutte le clip trovate vanno subito in render, per ogni video/VOD (simo, 2026-09-28: "metta a fare
   // TUTTE le clip che ha trovato, direttamente"). "off" = solo i progetti con "Genera più video".
   AUTO_GENERATE_ALL_CLIPS: z.enum(["on", "off"]).default("on"),
+  // Analisi dei VOD (mappa, confini, titoli) tramite Message Batches: metà prezzo, più lenta.
+  ANTHROPIC_BATCH_VOD: z.enum(["on", "off"]).default("on"),
   // TikTok (Content Posting API): le stesse chiavi messe su Vercel. Senza, la coda TikTok fallisce
   // solo quando serve rinnovare il token.
   TIKTOK_CLIENT_KEY: z.string().optional(),

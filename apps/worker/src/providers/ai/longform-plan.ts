@@ -2,7 +2,8 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { TranscriptSegment, ModelTokenUsage } from "@clipforge/shared";
 import { classifyModelTier, computeModelCostUsd } from "@clipforge/shared";
-import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor } from "./anthropic-client.js";
+import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor, createMessage } from "./anthropic-client.js";
+import { env } from "../../env.js";
 import { formatChapters, type TwitchChapter } from "../../lib/twitch-chapters.js";
 import { logger } from "../../lib/logger.js";
 
@@ -193,14 +194,14 @@ ${transcriptText}`;
   const usage: ModelTokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 };
 
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const message = await client.messages.create({
+    const message = await createMessage(client, {
       model: options.model,
       max_tokens: 16000,
       system: cachedSystemPrompt(SYSTEM_PROMPT),
       messages,
       tools: [TIMELINE_TOOL_SCHEMA],
       tool_choice: toolChoiceFor(options.model, TOOL_NAME),
-    });
+    }, { batch: env.ANTHROPIC_BATCH_VOD === "on", label: "mappa del VOD" });
     usage.calls++;
     usage.input += message.usage.input_tokens;
     usage.output += message.usage.output_tokens;

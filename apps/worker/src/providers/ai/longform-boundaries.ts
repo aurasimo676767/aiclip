@@ -2,7 +2,8 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { TranscriptSegment, ModelTokenUsage } from "@clipforge/shared";
 import { classifyModelTier, computeModelCostUsd } from "@clipforge/shared";
-import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor } from "./anthropic-client.js";
+import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor, createMessage } from "./anthropic-client.js";
+import { env } from "../../env.js";
 import type { PlannedVideo } from "./longform-plan.js";
 import { fmt } from "./longform-plan.js";
 import { logger } from "../../lib/logger.js";
@@ -216,14 +217,14 @@ ${t.lines.map((l) => `[${Math.round(l.start)}] ${l.text}`).join("\n")}`;
   const client = getAnthropicClient(options.apiKey);
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: userPrompt }];
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const message = await client.messages.create({
+    const message = await createMessage(client, {
       model: options.model,
       max_tokens: 16000,
       system: cachedSystemPrompt(SYSTEM_PROMPT),
       messages,
       tools: [TOOL_SCHEMA],
       tool_choice: toolChoiceFor(options.model, TOOL_NAME),
-    });
+    }, { batch: env.ANTHROPIC_BATCH_VOD === "on", label: "confini del VOD" });
     usage.calls++;
     usage.input += message.usage.input_tokens;
     usage.output += message.usage.output_tokens;

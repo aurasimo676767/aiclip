@@ -341,8 +341,11 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     // comunque, sono tracciate per entrambe le pipeline.
     const costUsdByModel: Partial<Record<ModelUsageKey, number>> = {};
     let totalCostUsd = 0;
+    // VOD con i batch: le chiamate principali costano la metà (vedi createMessage). Se un batch è
+    // ricaduto sulla chiamata normale qui risulta un po' meno del vero: lo dice il log.
+    const priceFactor = isLongform && env.ANTHROPIC_BATCH_VOD === "on" ? 0.5 : 1;
     for (const [tier, usage] of Object.entries(usageByModel) as [ModelUsageKey, ModelTokenUsage][]) {
-      const cost = computeModelCostUsd(tier, usage);
+      const cost = computeModelCostUsd(tier, usage) * priceFactor;
       costUsdByModel[tier] = cost;
       totalCostUsd += cost;
     }

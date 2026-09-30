@@ -2,7 +2,8 @@ import type { TranscriptSegment, RankedLongformClip, ModelTokenUsage, ClipScores
 import { CLIP_BADGES, buildLongformTitleStylePrompt, computeModelCostUsd, classifyModelTier } from "@clipforge/shared";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
-import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor } from "./anthropic-client.js";
+import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor, createMessage } from "./anthropic-client.js";
+import { env } from "../../env.js";
 import { fmt, type PlannedVideo, type TimelineBlock } from "./longform-plan.js";
 import { logger } from "../../lib/logger.js";
 
@@ -144,14 +145,14 @@ export async function describePlannedVideos(
   const byIndex = new Map<number, z.infer<typeof itemSchema>>();
 
   for (let attempt = 1; attempt <= 2 && byIndex.size < videos.length; attempt++) {
-    const message = await client.messages.create({
+    const message = await createMessage(client, {
       model: options.model,
       max_tokens: 8000,
       system: cachedSystemPrompt(SYSTEM_PROMPT),
       messages,
       tools: [TOOL_SCHEMA],
       tool_choice: toolChoiceFor(options.model, TOOL_NAME),
-    });
+    }, { batch: env.ANTHROPIC_BATCH_VOD === "on", label: "titoli del VOD" });
     usage.calls++;
     usage.input += message.usage.input_tokens;
     usage.output += message.usage.output_tokens;
