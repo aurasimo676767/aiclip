@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, AlertTriangle, MonitorPlay as YoutubeIcon } from "lucide-react";
-import { overallScore } from "@clipforge/shared";
+import { feedRisk, overallScore } from "@clipforge/shared";
 import type { ClipViewModel } from "./clip-list";
 import { StatusBadge } from "./status-badge";
 import { ScoreRing, formatDuration } from "./ui";
@@ -111,6 +111,7 @@ export function ClipCard({ clip, rank, selectable, selected, selectionActive, on
       <button onClick={onOpen} className="text-left">
         <h3 className="line-clamp-2 text-sm font-medium leading-snug text-ink transition group-hover:text-white">{clip.title}</h3>
       </button>
+      {isShort && <PublishChips clip={clip} />}
       {!isShort && <EditToggle clipId={clip.id} enabled={clip.longformEdit} />}
       {!isShort && clip.longformEdit && <GamePicker clipId={clip.id} games={clip.longformGames} keep={clip.longformKeepGames} compact />}
     </div>
@@ -161,5 +162,30 @@ function EditToggle({ clipId, enabled }: { clipId: string; enabled: boolean }) {
       </button>
       <span className={on ? "font-medium text-ink" : ""}>Montato</span>
     </label>
+  );
+}
+
+/** Stato TikTok e avviso sul titolo a rischio, sotto il titolo della scheda. */
+function PublishChips({ clip }: { clip: ClipViewModel }) {
+  const risky = !clip.youtubeUrl && feedRisk(`${clip.title}
+${clip.publishDescription}`).length > 0;
+  const tiktok =
+    clip.tiktokStatus === "COMPLETED"
+      ? { label: "TikTok ok", cls: "bg-raised text-ink" }
+      : clip.tiktokStatus === "FAILED"
+        ? { label: "TikTok non uscito", cls: "bg-red-500/15 text-red-300" }
+        : clip.tiktokStatus
+          ? { label: "TikTok in corso", cls: "bg-amber-500/15 text-amber-200" }
+          : null;
+  if (!risky && !tiktok) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 text-[11px] font-medium">
+      {tiktok && <span className={`rounded-md px-1.5 py-0.5 ${tiktok.cls}`}>{tiktok.label}</span>}
+      {risky && (
+        <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-amber-200" title="Parole che YouTube non fa girare: apri la clip per vederle">
+          <AlertTriangle size={11} /> Titolo a rischio
+        </span>
+      )}
+    </div>
   );
 }

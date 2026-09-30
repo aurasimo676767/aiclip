@@ -78,3 +78,19 @@ export function overallScore(scores: ClipScores): number {
   const values = Object.values(scores);
   return Math.round(values.reduce((sum, v) => sum + v, 0) / values.length);
 }
+
+/**
+ * Short trovato dall'AI ma scartato, salvato sul video (videos.discarded_shorts) con il motivo:
+ * sul sito simo lo vede e può recuperarlo (simo, 2026-09-30). `row` è la clip pronta da inserire.
+ */
+export interface DiscardedShort {
+  reason: string;
+  title: string;
+  start: number;
+  end: number;
+  duration: number;
+  score: number;
+  /** Perché secondo l'AI funzionava (campo interno "reason" della clip). */
+  aiReason: string;
+  row: Record<string, unknown>;
+}

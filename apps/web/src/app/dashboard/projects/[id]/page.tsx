@@ -6,6 +6,8 @@ import { StatusBadge, isProcessingStatus } from "@/components/status-badge";
 import { ProcessingProgressBar } from "@/components/processing-progress-bar";
 import { PollingRefresher } from "@/components/polling-refresher";
 import { ClipList } from "@/components/clip-list";
+import { DiscardedShortsPanel } from "@/components/discarded-shorts-panel";
+import type { DiscardedShort } from "@clipforge/shared";
 import { UsageStatsPanel } from "@/components/usage-stats-panel";
 import { RetryProjectButton } from "@/components/retry-project-button";
 import { CancelProjectButton } from "@/components/cancel-project-button";
@@ -20,7 +22,14 @@ export const dynamic = "force-dynamic";
 export default async function ProjectDetailPage({ params }: { params: { id: string } }) {
   const { supabase, user } = await requireUser();
 
-  const [details, youtubeConnected] = await Promise.all([fetchProjectDetails(supabase, [params.id]), fetchYoutubeConnected(supabase, user.id)]);
+  const [details, youtubeConnected, discardedRes] = await Promise.all([
+    fetchProjectDetails(supabase, [params.id]),
+    fetchYoutubeConnected(supabase, user.id),
+    // Query a parte: prima della migrazione 0034 la colonna non c'è e la pagina deve funzionare lo stesso.
+    supabase.from("videos").select("id, discarded_shorts").eq("project_id", params.id).maybeSingle(),
+  ]);
+  const discardedVideoId = discardedRes.error ? null : (discardedRes.data?.id ?? null);
+  const discardedShorts = discardedRes.error ? [] : ((discardedRes.data?.discarded_shorts as DiscardedShort[] | null) ?? []);
   const detail = details.get(params.id);
   if (!detail) {
     notFound();
@@ -92,6 +101,8 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
       )}
 
       {clips.length > 0 && <ClipList clips={clips} youtubeConnected={youtubeConnected} />}
+
+      {discardedVideoId && discardedShorts.length > 0 && <DiscardedShortsPanel videoId={discardedVideoId} items={discardedShorts} />}
 
       {video?.usageStats && <UsageStatsPanel stats={video.usageStats} />}
     </div>

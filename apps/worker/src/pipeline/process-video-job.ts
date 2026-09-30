@@ -3,6 +3,7 @@ import path from "node:path";
 import type { VideoRow } from "@clipforge/db";
 import {
   overallScore,
+  type DiscardedShort,
   DEFAULT_TEMPLATES,
   MAX_SUGGESTED_CLIPS,
   MAX_SUGGESTED_LONGFORM_CLIPS,
@@ -230,6 +231,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     // restituiscono ancora l'uso token — vedi la nota nel salvataggio di usage_stats più sotto.
     let usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>> = {};
     let longformTimeline: VideoUsageStats["longformTimeline"];
+    let discardedShorts: DiscardedShort[] = [];
     if (isLongform) {
       const result = await buildLongformClipsToInsert(video, transcript.segments, transcript.durationSeconds, videoTitle);
       clipsToInsert = result.clipsToInsert;
@@ -242,7 +244,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
       if (!localVideoPath) {
         throw new Error("localVideoPath mancante per la pipeline Shorts: percorso inatteso");
       }
-      clipsToInsert = await buildShortClipsToInsert(
+      const shorts = await buildShortClipsToInsert(
         video,
         transcript.segments,
         transcript.durationSeconds,
@@ -250,6 +252,8 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
         project.user_id,
         localVideoPath,
       );
+      clipsToInsert = shorts.rows;
+      discardedShorts = shorts.discarded;
     }
     stageDurationsSeconds.aiAnalysisSeconds = (Date.now() - aiAnalysisStartedAt) / 1000;
 
@@ -268,6 +272,12 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     );
     if (insertError) {
       throw new Error(`Inserimento clip fallito: ${insertError.message}`);
+    }
+
+    // Shorts scartati con il motivo, da vedere e recuperare sul sito (migrazione 0034).
+    if (!isLongform) {
+      const { error: discardedError } = await supabase.from("videos").update({ discarded_shorts: discardedShorts }).eq("id", video.id);
+      if (discardedError) logger.warn("Salvataggio Shorts scartati fallito", { videoId: video.id, error: discardedError.message });
     }
 
     // Nessuna selezione manuale: si mette subito in render tutto ciò che l'AI ha trovato. Vale per
@@ -426,7 +436,7 @@ async function buildShortClipsToInsert(
   videoTitle: string,
   userId: string,
   localVideoPath: string,
-): Promise<ClipToInsert[]> {
+): Promise<{ rows: ClipToInsert[]; discarded: DiscardedShort[] }> {
   // Segnale audio (urla/reazioni concitate) calcolato una volta sola sul video: costa mezzo
   // secondo di ffmpeg e dice al modello dove il video si accende davvero, cosa che leggendo il
   // solo transcript non può sapere. Vedi vocal-energy.ts.
@@ -451,17 +461,22 @@ async function buildShortClipsToInsert(
 
   // Correzione deterministica dei confini PRIMA di tagliare ai primi N: senza, le clip scartate
   // (troppo corte, sovrapposte) avrebbero comunque occupato uno slot dei suggerimenti.
-  const worthIt = rankedClips.filter((clip) => {
-    const keep = isWorthPublishing(clip);
-    if (!keep) logger.info("Short scartato: non vale la pena pubblicarlo", { videoId: video.id, title: clip.title, whyStop: clip.whyStop, streamerReacts: clip.streamerReacts, scores: clip.scores });
-    return keep;
-  });
-  const withBreath = await addBreathBeforeHook(sanitizeShortClips(worthIt, segments, video.id), segments, localVideoPath, readPcmWindow);
-  const sanitized = await alignReactionStarts(withBreath, segments, localVideoPath, video.id, detectSceneCuts);
-  return sanitized
-    .slice(0, MAX_SUGGESTED_CLIPS)
-    .map((clip) => enforceHardDurationCap(clip, video.id))
-    .map((clip) =>
+  const worthIt: RankedClip[] = [];
+  const rejected: Array<{ clip: RankedClip; reason: string }> = [];
+  for (const clip of rankedClips) {
+    const why = whyNotWorthPublishing(clip);
+    if (why) {
+      logger.info("Short scartato: non vale la pena pubblicarlo", { videoId: video.id, title: clip.title, why, whyStop: clip.whyStop, streamerReacts: clip.streamerReacts, scores: clip.scores });
+      rejected.push({ clip, reason: why });
+    } else worthIt.push(clip);
+  }
+  const prepare = async (clips: RankedClip[]) => {
+    const withBreath = await addBreathBeforeHook(sanitizeShortClips(clips, segments, video.id), segments, localVideoPath, readPcmWindow);
+    const aligned = await alignReactionStarts(withBreath, segments, localVideoPath, video.id, detectSceneCuts);
+    return aligned.map((clip) => enforceHardDurationCap(clip, video.id));
+  };
+  const sanitized = await prepare(worthIt);
+  const toRow = (clip: RankedClip) =>
       buildInsertRow({
         video,
         start: clip.start,
@@ -478,8 +493,30 @@ async function buildShortClipsToInsert(
         caption: clip.caption,
         badges: clip.badges,
         format: "short",
-      }),
-    );
+      });
+
+  // Gli scartati si preparano come gli altri, così dal sito si recuperano già pronti. Un errore qui
+  // non deve far perdere gli Shorts buoni.
+  const discarded: DiscardedShort[] = [];
+  const describe = (clip: RankedClip, reason: string): DiscardedShort => ({
+    reason,
+    title: clip.title,
+    start: clip.start,
+    end: clip.end,
+    duration: clip.end - clip.start,
+    score: Math.round(overallScore(clip.scores)),
+    aiReason: clip.reason,
+    row: toRow(clip) as unknown as Record<string, unknown>,
+  });
+  try {
+    const reasonByHook = new Map(rejected.map((r) => [r.clip.hook, r.reason]));
+    for (const clip of await prepare(rejected.map((r) => r.clip))) discarded.push(describe(clip, reasonByHook.get(clip.hook) ?? "Scartato dall'AI"));
+  } catch (error) {
+    logger.warn("Preparazione Shorts scartati fallita", { videoId: video.id, error: error instanceof Error ? error.message : String(error) });
+  }
+  for (const clip of sanitized.slice(MAX_SUGGESTED_CLIPS)) discarded.push(describe(clip, `Oltre il massimo di ${MAX_SUGGESTED_CLIPS} Shorts per video`));
+
+  return { rows: sanitized.slice(0, MAX_SUGGESTED_CLIPS).map(toRow), discarded };
 }
 
 /**
@@ -668,8 +705,11 @@ function readPcmWindow(videoPath: string, absStart: number, duration: number): P
  * fra 64 e 85 e nessuno veniva scartato. Esce solo chi supera la soglia ED è una reazione vera dello
  * streamer. Sugli ultimi 40 Shorts la soglia scartava proprio quelli che simo ha indicato come inutili.
  */
-function isWorthPublishing(clip: RankedClip): boolean {
-  if (clip.streamerReacts === false) return false;
-  if (clip.whyStop !== undefined && clip.whyStop.trim().length < 10) return false;
-  return overallScore(clip.scores) >= 70 && clip.scores.payoff >= 68;
+function whyNotWorthPublishing(clip: RankedClip): string | null {
+  if (clip.streamerReacts === false) return "Lo streamer quasi non reagisce: si sente soprattutto il video reagito";
+  if (clip.whyStop !== undefined && clip.whyStop.trim().length < 10) return "L'AI non ha trovato un motivo per cui uno si fermi a guardarlo";
+  const score = Math.round(overallScore(clip.scores));
+  if (score < 70) return `Voto ${score}, serve almeno 70`;
+  if (clip.scores.payoff < 68) return `Finale debole (payoff ${Math.round(clip.scores.payoff)}, serve almeno 68)`;
+  return null;
 }
