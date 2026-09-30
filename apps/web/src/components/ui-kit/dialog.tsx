@@ -25,20 +25,22 @@ DialogOverlay.displayName = "DialogOverlay";
 
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean }
->(({ className, children, hideClose, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean; mobileFullscreen?: boolean }
+>(({ className, children, hideClose, mobileFullscreen, ...props }, ref) => (
   <DialogPrimitive.Portal>
     <DialogOverlay />
     {/* Centrata con flexbox e non con translate(-50%): con dimensioni dispari la traslazione cade a
         mezzo pixel e sfoca tutto il contenuto, video compreso. Niente backdrop-blur sull'overlay: con
         un video a 60fps sopra, il browser ricalcolava la sfocatura della pagina a ogni fotogramma e
         il player perdeva fotogrammi (sembrava a 10fps). */}
-    <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className={cn("pointer-events-none fixed inset-0 z-50 flex items-center justify-center", mobileFullscreen ? "p-0 md:p-4" : "p-4")}>
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          "pointer-events-auto relative max-h-[94vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-line bg-surface p-6 shadow-2xl focus:outline-none data-[state=open]:animate-dialog-in",
+          "pointer-events-auto relative max-h-[94vh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl border border-line bg-surface p-6 shadow-2xl focus:outline-none data-[state=open]:animate-dialog-in",
           className,
+          // Da telefono a tutto schermo: niente riquadro che scorre dentro la pagina.
+          mobileFullscreen && "max-md:h-[100dvh] max-md:max-h-[100dvh] max-md:max-w-none max-md:rounded-none max-md:border-0",
         )}
         {...props}
       >

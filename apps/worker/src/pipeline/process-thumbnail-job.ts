@@ -265,7 +265,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
         const aiPeople = [];
         for (const face of chosenFaces) {
           // Primi piani stretti, grandi e nitidi (vedi face-reference.ts); se non se ne trovano, le foto intere di prima.
-          const crops = face.label ? await bestHeadCrops(library, face.label, 4, jobDir).catch(() => []) : [];
+          const crops = face.label ? await bestHeadCrops(library, face.label, 5, jobDir).catch(() => []) : [];
           const photos = crops.length > 0 ? crops.map((c) => c.path) : await downloadFaces(referenceFaces(library, face, 3), jobDir);
           aiPeople.push({ name: face.label ?? "", photos, styleNote: face.label ? PERSON_STYLE[face.label]?.note : undefined });
         }

@@ -184,7 +184,7 @@ export function ClipList({ clips, youtubeConnected, compact = false }: { clips: 
       {visible.length === 0 ? (
         <EmptyState title="Nessuna clip in questa vista" description="Cambia filtro per vedere le altre." />
       ) : (
-        <div className={`grid gap-4 ${compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"}`}>
+        <div className={`grid grid-flow-row-dense gap-4 ${compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"}`}>
           {visible.map((clip) => (
             <ClipCard
               key={clip.id}

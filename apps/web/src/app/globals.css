@@ -10,6 +10,23 @@ body {
   @apply bg-canvas text-ink;
 }
 
+/* Da telefono la pagina non deve mai scorrere di lato (simo, 2026-09-30: "non si può andare di lato,
+   da telefono zooma, si bugga"). clip e non hidden: non crea un contenitore di scroll, sticky funziona. */
+html,
+body {
+  overflow-x: clip;
+}
+
+/* Safari su iPhone ingrandisce la pagina quando si tocca un campo con testo sotto i 16px, e poi
+   resta ingrandita: sui telefoni i campi stanno a 16px. */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 ::selection {
   @apply bg-brand-400 text-on-brand;
 }

@@ -33,6 +33,7 @@ export function ClipDetailDialog({ clip, youtubeConnected, onClose }: { clip: Cl
       {clip && (
         <DialogContent
           hideClose
+          mobileFullscreen
           className={`p-0 ${clip.format === "short" ? "max-w-5xl" : "max-w-6xl"}`}
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
@@ -100,10 +101,17 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
 
   return (
     <div className="flex flex-col md:flex-row">
+      {/* Da telefono: barra in alto sempre visibile per chiudere (prima la X stava sotto il video). */}
+      <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-line bg-surface/95 px-3 py-2 md:hidden">
+        <button onClick={onClose} className="-ml-1 rounded-md p-2 text-muted transition hover:bg-raised hover:text-ink" aria-label="Chiudi">
+          <X size={20} />
+        </button>
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{clip.title}</p>
+      </div>
       {/* Colonna player */}
       <div className={`flex shrink-0 items-center justify-center bg-black md:rounded-l-2xl ${isShort ? "p-3" : "md:w-[58%]"}`}>
         {/* Player grande: il video è 1080x1920, mostrato largo 300px sembrava a bassa risoluzione. */}
-        <div className={`relative overflow-hidden rounded-xl ${isShort ? "aspect-[9/16] w-full max-w-[400px] md:h-[min(82vh,760px)] md:w-auto md:max-w-none" : "aspect-video w-full"}`}>
+        <div className={`relative overflow-hidden rounded-xl ${isShort ? "aspect-[9/16] h-[56dvh] w-auto md:h-[min(82vh,760px)]" : "aspect-video w-full"}`}>
           {clip.videoUrl ? (
             <video ref={videoRef} src={clip.videoUrl} poster={clip.thumbnailUrl ?? undefined} controls playsInline preload="auto" className="h-full w-full bg-black object-contain" />
           ) : (
@@ -141,7 +149,7 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
             {isShort && <FeedRiskWarning text={`${clip.title}
 ${clip.publishDescription}`} />}
           </div>
-          <button onClick={onClose} className="rounded-md p-1 text-faint transition hover:bg-raised hover:text-ink" aria-label="Chiudi">
+          <button onClick={onClose} className="hidden rounded-md p-1 text-faint transition hover:bg-raised hover:text-ink md:block" aria-label="Chiudi">
             <X size={18} />
           </button>
         </div>
