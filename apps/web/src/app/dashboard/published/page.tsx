@@ -4,6 +4,7 @@ import { PollingRefresher } from "@/components/polling-refresher";
 import { MarkYoutubeDeletedButton } from "@/components/mark-youtube-deleted-button";
 import { EmptyState, PageHeader, Stat, formatDuration } from "@/components/ui";
 import { getPresignedDownloadUrl } from "@/lib/storage/r2";
+import { feedRisk } from "@clipforge/shared";
 
 // Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
 // cachati anche col polling attivo.
@@ -19,6 +20,8 @@ interface ClipInfo {
 interface PublishJobRow {
   id: string;
   clip_id: string;
+  title: string;
+  description: string;
   status: string;
   youtube_url: string | null;
   publish_at: string | null;
@@ -78,6 +81,7 @@ export default async function PublishedPage() {
   const totalViews = published.reduce((sum, j) => sum + (j.view_count ?? 0), 0);
   const totalLikes = published.reduce((sum, j) => sum + (j.like_count ?? 0), 0);
   const maxViews = Math.max(1, ...published.map((j) => j.view_count ?? 0));
+  const shortsSummary = summarizeShorts(published, now);
 
   // Le statistiche vengono aggiornate da un job periodico del worker (ogni ~20 minuti), non
   // in tempo reale ad ogni apertura pagina: qui basta un refresh ogni tot per vederle aggiornare
@@ -96,6 +100,8 @@ export default async function PublishedPage() {
         <Stat label="Visualizzazioni" value={formatCompact(totalViews)} />
         <Stat label="Like" value={formatCompact(totalLikes)} />
       </div>
+
+      {shortsSummary && <ShortsWall summary={shortsSummary} />}
 
       <section className="space-y-4">
         <h2 className="section-title flex items-center gap-2">
@@ -156,6 +162,7 @@ export default async function PublishedPage() {
                       </span>
                     </div>
                     <AnalyticsRow job={job} />
+                    {info.format === "short" && isBlocked(job, now) && <BlockedNote job={job} />}
                     <div className="h-1 max-w-xs overflow-hidden rounded-full bg-overlay">
                       <div className="h-full rounded-full bg-brand-gradient" style={{ width: `${((job.view_count ?? 0) / maxViews) * 100}%` }} />
                     </div>
@@ -218,4 +225,69 @@ function formatCount(value: number | null): string {
 
 function formatCompact(value: number): string {
   return new Intl.NumberFormat("it-IT", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+/** Uno Short uscito da più di 24 ore e sotto le 200 views: YouTube non l'ha messo nel feed (analisi del 2026-09-30). */
+function isBlocked(job: PublishJobRow, now: number): boolean {
+  const out = new Date(job.publish_at ?? job.completed_at ?? now).getTime();
+  return now - out > 24 * 3600 * 1000 && (job.view_count ?? 0) < 200;
+}
+
+interface ShortsSummary {
+  total: number;
+  over: number;
+  wall: number;
+  blocked: number;
+  stayedMedian: number | null;
+}
+
+/**
+ * Il "muro" degli Shorts (analisi del 2026-09-30): quasi tutti fanno ~1.000-1.300 views e si fermano
+ * al test del feed; passa oltre chi tiene più gente. Solo Shorts usciti da almeno 24 ore.
+ */
+function summarizeShorts(published: PublishJobRow[], now: number): ShortsSummary | null {
+  const shorts = published.filter((j) => clipInfo(j).format === "short" && now - new Date(j.publish_at ?? j.completed_at ?? now).getTime() > 24 * 3600 * 1000);
+  if (shorts.length === 0) return null;
+  const stayed = shorts
+    .filter((j) => j.analytics_views)
+    .map((j) => (100 * (j.engaged_views ?? 0)) / j.analytics_views!)
+    .sort((a, b) => a - b);
+  return {
+    total: shorts.length,
+    over: shorts.filter((j) => (j.view_count ?? 0) >= 1500).length,
+    wall: shorts.filter((j) => (j.view_count ?? 0) >= 200 && (j.view_count ?? 0) < 1500).length,
+    blocked: shorts.filter((j) => (j.view_count ?? 0) < 200).length,
+    stayedMedian: stayed.length ? Math.round(stayed[Math.floor(stayed.length / 2)]!) : null,
+  };
+}
+
+function ShortsWall({ summary }: { summary: ShortsSummary }) {
+  const pct = (n: number) => `${Math.round((100 * n) / summary.total)}%`;
+  return (
+    <section className="card space-y-4 p-5">
+      <div>
+        <h2 className="font-display text-base font-semibold text-ink">Shorts e il muro del feed</h2>
+        <p className="mt-1 text-xs text-muted">
+          YouTube fa vedere ogni Short a circa 1.000 persone; lo spinge oltre solo se tanti restano a guardarlo. Shorts usciti da più di 24 ore: {summary.total}.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="Oltre il muro (1.500+)" value={`${summary.over} · ${pct(summary.over)}`} />
+        <Stat label="Fermi al muro" value={`${summary.wall} · ${pct(summary.wall)}`} />
+        <Stat label="Bloccati (<200)" value={`${summary.blocked} · ${pct(summary.blocked)}`} />
+        <Stat label="Restano a guardare" value={summary.stayedMedian === null ? "—" : `${summary.stayedMedian}%`} />
+      </div>
+      <p className="text-xs text-faint">"Restano a guardare" è la mediana: quello che è andato oltre il muro ne teneva il 54%, la maggior parte sta intorno al 40%.</p>
+    </section>
+  );
+}
+
+function BlockedNote({ job }: { job: PublishJobRow }) {
+  const words = feedRisk(`${job.title ?? ""}
+${job.description ?? ""}`);
+  return (
+    <p className="text-xs text-red-300">
+      Bloccato dal feed: {words.length > 0 ? <>parole a rischio nel testo: <strong>{words.join(", ")}</strong></> : "nessuna parola a rischio nel testo, forse il contenuto o il copyright (controlla su YouTube Studio)"}.
+    </p>
+  );
 }
