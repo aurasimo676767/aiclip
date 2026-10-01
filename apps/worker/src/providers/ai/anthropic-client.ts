@@ -1,6 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { classifyModelTier, computeModelCostUsd } from "@clipforge/shared";
 import { logger } from "../../lib/logger.js";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { env } from "../../env.js";
 
 let client: Anthropic | null = null;
 
@@ -80,10 +84,28 @@ export async function createMessage(client: Anthropic, params: Anthropic.Message
 
   const started = Date.now();
   let batchId: string | undefined;
+  // Il batch inviato si ricorda su disco, per richiesta identica: se il worker riparte a metà (il VOD
+  // ricomincia da capo) si riprende lo stesso batch invece di pagarne un secondo.
+  const memoDir = path.join(env.WORKER_TMP_DIR, "batches");
+  const memoFile = path.join(memoDir, `${createHash("sha1").update(JSON.stringify(params)).digest("hex")}.txt`);
   try {
-    const batch = await client.beta.messages.batches.create({ requests: [{ custom_id: "r1", params: params as never }] });
-    batchId = batch.id;
-    let status = batch.processing_status;
+    let status: string | undefined;
+    const remembered = fs.existsSync(memoFile) ? fs.readFileSync(memoFile, "utf8").trim() : "";
+    if (remembered) {
+      const old = await client.beta.messages.batches.retrieve(remembered).catch(() => null);
+      if (old && (old.processing_status === "in_progress" || old.request_counts.succeeded > 0)) {
+        batchId = old.id;
+        status = old.processing_status;
+        logger.info("Batch ripreso dopo un riavvio (nessun doppio pagamento)", { label: opts.label, batchId });
+      }
+    }
+    if (!batchId) {
+      const batch = await client.beta.messages.batches.create({ requests: [{ custom_id: "r1", params: params as never }] });
+      batchId = batch.id;
+      status = batch.processing_status;
+      fs.mkdirSync(memoDir, { recursive: true });
+      fs.writeFileSync(memoFile, batchId);
+    }
     let wait = 15_000;
     while (status !== "ended") {
       if (Date.now() - started > BATCH_MAX_WAIT_MS) throw new Error("batch troppo lento");
@@ -93,6 +115,7 @@ export async function createMessage(client: Anthropic, params: Anthropic.Message
     }
     for await (const item of await client.beta.messages.batches.results(batchId)) {
       if (item.result.type === "succeeded") {
+        fs.rmSync(memoFile, { force: true });
         logger.info("Chiamata via batch completata (prezzo -50%)", { label: opts.label, model: params.model, minuti: ((Date.now() - started) / 60000).toFixed(1) });
         return item.result.message as unknown as Anthropic.Message;
       }
@@ -106,6 +129,7 @@ export async function createMessage(client: Anthropic, params: Anthropic.Message
       error: error instanceof Error ? error.message : String(error),
     });
     if (batchId) await client.beta.messages.batches.cancel(batchId).catch(() => undefined);
+    fs.rmSync(memoFile, { force: true });
     return client.messages.create(params);
   }
 }
