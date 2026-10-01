@@ -13,3 +13,15 @@ export function withShortsHashtags(text: string): string {
     .trim();
   return body ? `${body}\n\n${SHORTS_HASHTAGS.join(" ")}` : SHORTS_HASHTAGS.join(" ");
 }
+
+/**
+ * Per i video lunghi (simo, 2026-10-01: "tutti vai" alla proposta degli hashtag fissi anche lì): il
+ * testo resta com'è (crediti allo streamer, link) e in fondo si aggiungono gli hashtag fissi che
+ * mancano. Non toglie niente, a differenza di withShortsHashtags.
+ */
+export function withFixedHashtagsAppended(text: string): string {
+  const lower = text.toLowerCase();
+  const missing = SHORTS_HASHTAGS.filter((h) => !new RegExp(`${h}(?![\\p{L}\\p{N}_])`, "u").test(lower));
+  if (missing.length === 0) return text;
+  return text.trim() ? `${text.trimEnd()}\n\n${missing.join(" ")}` : missing.join(" ");
+}
