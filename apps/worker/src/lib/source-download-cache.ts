@@ -35,7 +35,11 @@ export async function getOrDownloadSourceFile(storageProvider: StorageProvider, 
 
   const localPath = cacheFilePath(storagePath);
   const downloadPromise = (async () => {
+    await pruneSourceCache(localPath).catch((err) => logger.warn("Pulizia cache sorgenti fallita", { error: err instanceof Error ? err.message : String(err) }));
     await storageProvider.downloadToFile(storagePath, localPath);
+    // Ultimo utilizzo = data del file: la pulizia butta prima quelli usati meno di recente.
+    const now = new Date();
+    await fsp.utimes(localPath, now, now).catch(() => undefined);
     return localPath;
   })().catch((err) => {
     // Se il download fallisce, non lasciamo la entry "avvelenata" in cache per sempre: un
@@ -46,6 +50,40 @@ export async function getOrDownloadSourceFile(storageProvider: StorageProvider, 
 
   inFlightDownloads.set(storagePath, downloadPromise);
   return downloadPromise;
+}
+
+/** Sorgenti in cache non usati da più di così si cancellano (si riscaricano da R2 se servono). */
+const CACHE_MAX_AGE_MS = 3 * 24 * 3600 * 1000;
+/** Oltre questo totale si cancellano i meno usati di recente (un VOD è 15-25 GB, il disco del PC è piccolo). */
+const CACHE_MAX_BYTES = 50 * 1024 ** 3;
+
+/**
+ * Tiene la cache dei sorgenti sotto controllo: il 2026-10-01 era arrivata a 86 GB (VOD da 15-25 GB
+ * mai cancellati) su un SSD che rallenta tutto il PC quando è pieno. Cancella i file non usati da 3
+ * giorni e, se serve, i meno usati di recente fino a stare sotto 50 GB. Mai quello che sta per essere
+ * usato né quelli in download.
+ */
+async function pruneSourceCache(keepPath: string): Promise<void> {
+  const dir = path.join(env.WORKER_TMP_DIR, "source-cache");
+  const names = await fsp.readdir(dir).catch(() => [] as string[]);
+  const busy = new Set([keepPath, ...[...inFlightDownloads.keys()].map(cacheFilePath)]);
+  const files: Array<{ p: string; size: number; mtime: number }> = [];
+  for (const name of names) {
+    if (name.endsWith(".complete") || name.startsWith("redownload-")) continue;
+    const p = path.join(dir, name);
+    if (busy.has(p)) continue;
+    const st = await fsp.stat(p).catch(() => null);
+    if (st?.isFile()) files.push({ p, size: st.size, mtime: st.mtimeMs });
+  }
+  files.sort((a, b) => a.mtime - b.mtime);
+  let total = files.reduce((t, f) => t + f.size, 0);
+  for (const f of files) {
+    if (Date.now() - f.mtime < CACHE_MAX_AGE_MS && total <= CACHE_MAX_BYTES) break;
+    await fsp.rm(f.p, { force: true }).catch(() => undefined);
+    await fsp.rm(`${f.p}.complete`, { force: true }).catch(() => undefined);
+    total -= f.size;
+    logger.info("Cache sorgenti: cancellato un file vecchio", { file: path.basename(f.p), gb: (f.size / 1024 ** 3).toFixed(1) });
+  }
 }
 
 /**
