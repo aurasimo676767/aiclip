@@ -58,6 +58,13 @@ function ClipDetail({ clip, youtubeConnected, onClose }: { clip: ClipViewModel; 
   const working = clip.status === "QUEUED" || clip.status === "RENDERING";
   const canPublish = youtubeConnected && clip.status === "COMPLETED" && (clip.youtubePublishStatus === null || clip.youtubeCancelledAt !== null || clip.youtubePublishStatus === "FAILED");
 
+  // Da telefono il pannello aperto (Pubblica, Modifica, Taglia...) sta sotto la copertina, fuori
+  // schermo: ci si scorre da soli, altrimenti sembrava che il tasto non facesse niente.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (panel !== "info") panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [panel]);
+
   // Il pannello di pubblicazione non ha senso se nel frattempo la clip è stata pubblicata.
   useEffect(() => {
     if (panel === "publish" && !canPublish) setPanel("info");
@@ -281,7 +288,7 @@ ${clip.publishDescription}`} />}
 
         {clip.status === "COMPLETED" && <CoverGenerator clipId={clip.id} isShort={isShort} />}
 
-        <div className="border-t border-line pt-5">
+        <div ref={panelRef} className="scroll-mt-14 border-t border-line pt-5">
           {panel === "info" && <ClipInfo clip={clip} />}
           {panel === "edit" && <EditPanel clip={clip} onDone={(msg) => { setPanel("info"); setNotice(msg); }} onCancel={() => setPanel("info")} />}
           {panel === "trim" && (
