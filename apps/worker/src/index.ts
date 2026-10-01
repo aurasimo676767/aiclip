@@ -15,6 +15,7 @@ import { processVoiceoverJob } from "./pipeline/process-voiceover-job.js";
 import { processThumbnailJob } from "./pipeline/process-thumbnail-job.js";
 import { refreshYoutubeStats } from "./pipeline/refresh-youtube-stats.js";
 import { alertStuckShorts } from "./pipeline/stuck-shorts-alert.js";
+import { requeueFinishedLives } from "./pipeline/live-vod-wait.js";
 import { pauseControlLoop } from "./pipeline/pause-control-loop.js";
 import { isWorkerPaused } from "./lib/pause-control.js";
 import { processSourceDeleteRequests } from "./lib/cleanup-source.js";
@@ -161,6 +162,7 @@ async function statsRefreshLoop(): Promise<void> {
     try {
       await refreshYoutubeStats();
       await alertStuckShorts().catch((err) => logger.warn("Avviso Shorts bloccati fallito", { error: err instanceof Error ? err.message : String(err) }));
+      await requeueFinishedLives().catch((err) => logger.warn("Controllo fine live fallito", { error: err instanceof Error ? err.message : String(err) }));
     } catch (err) {
       logger.error("Errore nel loop di refresh statistiche YouTube", { error: err instanceof Error ? err.message : String(err) });
     }

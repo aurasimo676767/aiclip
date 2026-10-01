@@ -28,6 +28,7 @@ import { supabase } from "../lib/supabase.js";
 import { storageProvider, transcriptionProvider } from "../lib/providers.js";
 import { extractAudio } from "./extract-audio.js";
 import { downloadYoutubeVideo } from "./download-youtube.js";
+import { isTwitchVodLive, markWaitingForLiveEnd } from "./live-vod-wait.js";
 import { ensureEnoughDiskSpaceForDownload } from "../lib/disk-space.js";
 import { detectClipCandidates } from "../providers/ai/candidates.js";
 import { rankAndBuildEdl } from "../providers/ai/ranking.js";
@@ -137,6 +138,12 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
         // Percorso "URL esterno" (YouTube o VOD Twitch, yt-dlp supporta entrambi senza distinzioni
         // di codice): il worker scarica il video e lo carica su Storage lui stesso, così il resto
         // della pipeline (estrazione audio, render) resta identico indipendentemente dalla sorgente.
+        // VOD di Twitch con la live ancora in corso: si aspetta che finisca invece di scaricarlo
+        // alla velocità della diretta (vedi live-vod-wait.ts).
+        if (await isTwitchVodLive(video.source_url)) {
+          await markWaitingForLiveEnd(video.id, video.project_id);
+          return;
+        }
         await updateVideoStatus(video.id, "DOWNLOADING");
         if (video.duration_seconds) {
           await ensureEnoughDiskSpaceForDownload(env.WORKER_TMP_DIR, video.duration_seconds);
