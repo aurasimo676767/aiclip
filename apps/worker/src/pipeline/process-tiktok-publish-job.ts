@@ -5,7 +5,7 @@ import { env } from "../env.js";
 import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
-import { publishTiktokViaZernio } from "../providers/zernio.js";
+import { publishTiktokViaZernio, waitZernioPost } from "../providers/zernio.js";
 import { censorText, withShortsHashtags } from "@clipforge/shared";
 
 /**
@@ -83,14 +83,30 @@ export async function processTiktokPublishJob(job: TiktokPublishJobRow): Promise
 
     // Con Zernio (app TikTok già approvata) si passa il link del video e pubblicano loro.
     if (env.ZERNIO_API_KEY) {
-      const videoUrl = await storageProvider.getSignedUrl(clip.output_video_path, 6 * 3600);
+      // Ripresa dopo un riavvio del worker: il post su Zernio c'è già (id salvato), si controlla quello
+      // invece di crearne un secondo — prima così su TikTok uscivano doppioni.
+      if (job.publish_id && !job.publish_id.startsWith("v_pub")) {
+        const { postId, url } = await waitZernioPost(env.ZERNIO_API_KEY, job.publish_id);
+        await setStatus(job.id, { status: "COMPLETED", tiktok_post_id: url, completed_at: new Date().toISOString() });
+        logger.info("TikTok (Zernio): ripreso dopo un riavvio, nessun doppione", { jobId: job.id, postId, url });
+        return;
+      }
+      // Zernio tiene il link e scarica il video all'orario di pubblicazione: il link deve durare fino
+      // ad allora (+1 giorno di margine). R2 firma al massimo per 7 giorni.
+      const untilPublish = job.publish_at ? Math.max(0, (new Date(job.publish_at).getTime() - Date.now()) / 1000) : 0;
+      const linkSeconds = Math.min(7 * 24 * 3600, Math.max(6 * 3600, Math.ceil(untilPublish) + 24 * 3600));
+      const videoUrl = await storageProvider.getSignedUrl(clip.output_video_path, linkSeconds);
       const coverPath = (clip as { cover_path?: string | null }).cover_path;
-      const coverUrl = coverPath ? await storageProvider.getSignedUrl(coverPath, 6 * 3600) : null;
-      const { postId, url } = await publishTiktokViaZernio(env.ZERNIO_API_KEY, job, videoUrl, coverUrl);
+      const coverUrl = coverPath ? await storageProvider.getSignedUrl(coverPath, linkSeconds) : null;
+      const { postId, url } = await publishTiktokViaZernio(env.ZERNIO_API_KEY, job, videoUrl, coverUrl, (id) => setStatus(job.id, { publish_id: id }));
       await setStatus(job.id, { status: "COMPLETED", publish_id: postId, tiktok_post_id: url, completed_at: new Date().toISOString() });
       logger.info("TikTok (Zernio): pubblicato", { jobId: job.id, postId, url });
       return;
     }
+
+    // Via diretta: se il caricamento era già partito prima di un riavvio, ricaricare creerebbe un
+    // secondo video. Meglio fermarsi e farlo controllare a simo.
+    if (job.publish_id) throw new Error("Pubblicazione interrotta a metà (riavvio del worker): controlla il profilo TikTok prima di riprovare, per non pubblicarlo due volte");
 
     const token = await accessToken(job.user_id);
 
