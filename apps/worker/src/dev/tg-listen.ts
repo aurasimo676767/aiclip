@@ -16,7 +16,7 @@ await fsp.mkdir(inbox, { recursive: true });
 const api = (method: string) => `https://api.telegram.org/bot${token}/${method}`;
 
 type Photo = { file_id: string; width: number; height: number };
-type Update = { update_id: number; message?: { chat: { id: number }; text?: string; caption?: string; photo?: Photo[]; document?: { file_id: string; mime_type?: string }; video?: { file_id: string; file_size?: number }; video_note?: { file_id: string }; animation?: { file_id: string }; voice?: { file_id: string }; reply_to_message?: { text?: string; caption?: string; audio?: { title?: string }; video?: unknown; photo?: unknown } } };
+type Update = { update_id: number; message?: { chat: { id: number }; text?: string; caption?: string; photo?: Photo[]; document?: { file_id: string; mime_type?: string; file_name?: string }; audio?: { file_id: string }; video?: { file_id: string; file_size?: number }; video_note?: { file_id: string }; animation?: { file_id: string }; voice?: { file_id: string }; reply_to_message?: { text?: string; caption?: string; audio?: { title?: string }; video?: unknown; photo?: unknown } } };
 
 async function saveFile(fileId: string, name: string): Promise<string> {
   const info = (await (await fetch(`${api("getFile")}?file_id=${fileId}`)).json()) as { result?: { file_path?: string } };
@@ -51,7 +51,8 @@ while (true) {
       } else {
         // Video (anche TikTok salvati e inoltrati), video tondi, gif e vocali: si salvano per
         // guardarli (fotogrammi + trascrizione). Il bot scarica file fino a 20 MB.
-        const media = m.video ?? m.video_note ?? m.animation ?? m.voice ?? (m.document?.mime_type?.startsWith("video/") ? m.document : undefined);
+        // Qualsiasi altro file (pdf, zip, audio...): si salva col suo nome per passarlo dal telefono al PC.
+        const media = m.video ?? m.video_note ?? m.animation ?? m.voice ?? m.audio ?? m.document;
         if (media) saved = await saveFile(media.file_id, `${u.update_id}${caption ? "-" + caption : ""}`).catch((e) => `ERRORE: ${e instanceof Error ? e.message : e} (oltre 20 MB?)`);
       }
       const text = (m.text ?? m.caption ?? "").replace(/\s+/g, " ");
