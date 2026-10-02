@@ -1,3 +1,5 @@
+import path from "node:path";
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { isWorkerPaused } from "./pause-control.js";
 
@@ -46,6 +48,13 @@ export function runYtDlp(args: string[], options: { inactivityTimeoutMs?: number
               resetTimer();
               return;
             }
+            // Alla fine di un VOD lungo yt-dlp unisce migliaia di pezzi in un file da 15+ GB senza
+            // scrivere niente per minuti (2026-09-30 e 2026-10-02: ucciso proprio lì, a download
+            // finito). Se nella cartella di destinazione un file è cambiato da poco, sta lavorando.
+            if (outputDirRecentlyWritten(args, inactivityTimeoutMs)) {
+              resetTimer();
+              return;
+            }
             timedOut = true;
             child.kill("SIGKILL");
           });
@@ -80,4 +89,23 @@ export function runYtDlp(args: string[], options: { inactivityTimeoutMs?: number
       resolve({ stdout, stderr });
     });
   });
+}
+
+/** true se nella cartella di "-o" un file è stato scritto negli ultimi `withinMs` millisecondi. */
+function outputDirRecentlyWritten(args: string[], withinMs: number): boolean {
+  const i = args.indexOf("-o");
+  if (i < 0 || !args[i + 1]) return false;
+  const dir = path.dirname(args[i + 1]!);
+  try {
+    const now = Date.now();
+    return fs.readdirSync(dir).some((name) => {
+      try {
+        return now - fs.statSync(path.join(dir, name)).mtimeMs < withinMs;
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
 }
