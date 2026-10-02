@@ -83,6 +83,28 @@ export interface HighlightsInput {
 /** Oltre questa quota del video tenuta, secondo giro dell'AI per accorciare fino a TIGHTEN_TARGET. */
 const TIGHTEN_ABOVE = 0.45;
 const TIGHTEN_TARGET = 0.4;
+/** Lunghezza dei pezzi che il secondo giro giudica uno per uno (i tratti più lunghi si spezzano). */
+const TIGHTEN_PIECE_SECONDS = 90;
+
+/** Spezza i tratti più lunghi di `maxSeconds` in pezzi di circa quella lunghezza, tagliando tra una frase e l'altra. */
+function splitLongRanges(ranges: Array<{ start: number; end: number }>, segments: Array<{ start: number; end: number }>, maxSeconds: number): Array<{ start: number; end: number }> {
+  const out: Array<{ start: number; end: number }> = [];
+  for (const r of ranges) {
+    let start = r.start;
+    while (r.end - start > maxSeconds * 1.5) {
+      const ideal = start + maxSeconds;
+      // Il confine di frase più vicino al punto ideale (fine di una frase dentro il tratto).
+      const cut = segments
+        .map((seg) => seg.end)
+        .filter((t) => t > start + maxSeconds * 0.5 && t < r.end - maxSeconds * 0.5)
+        .reduce((best, t) => (Math.abs(t - ideal) < Math.abs(best - ideal) ? t : best), ideal);
+      out.push({ start, end: cut });
+      start = cut;
+    }
+    out.push({ start, end: r.end });
+  }
+  return out;
+}
 /** Sul cambio di gioco: se il pezzo tenuto prima finisce al massimo così tanto prima, lo si allunga fino al cambio. */
 const TOPIC_EXTEND_SECONDS = 90;
 /** Primi piani dell'AI: durata (sclero: tutto lo sclero, fino a 8 s) e distanza minima fra due. */
@@ -199,8 +221,11 @@ export async function planLongformEdit(params: {
             // La quota si misura sulla parte in tema: tolto un altro gioco, il resto non va accorciato per compensare.
             onTopic = duration - topic.removedSeconds;
           }
-          if (seconds(chosen) > onTopic * TIGHTEN_ABOVE && chosen.length > 2) {
-            const pieces = chosen.map((r) => ({
+          if (seconds(chosen) > onTopic * TIGHTEN_ABOVE) {
+            // Pezzi lunghi spezzati sui confini delle frasi: se l'AI tiene tratti attaccati (Family
+            // Feud, 2026-10-02: 35 tratti diventati 1-2 blocchi da un'ora) il secondo giro non aveva
+            // niente da scegliere e non partiva nemmeno.
+            const pieces = splitLongRanges(chosen, segments, TIGHTEN_PIECE_SECONDS).map((r) => ({
               ...r,
               text: segments.filter((seg) => seg.end > r.start && seg.start < r.end).map((seg) => seg.text).join(" "),
             }));
