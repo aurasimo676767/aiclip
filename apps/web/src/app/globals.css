@@ -8,6 +8,31 @@
 
 body {
   @apply bg-canvas text-ink;
+  /* Un filo di luce calda dall'alto (giallo sottotitolo) invece del nero piatto. */
+  background-image: radial-gradient(1200px 520px at 50% -180px, rgba(255, 212, 0, 0.06), transparent 70%);
+  background-attachment: fixed;
+}
+
+/* Grana leggera sopra tutto: toglie l'effetto "piatto digitale". Non intercetta i clic. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Titoli più compatti e senza parole orfane; numeri in colonna. */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
 }
 
 /* Da telefono la pagina non deve mai scorrere di lato (simo, 2026-09-30: "non si può andare di lato,
@@ -51,7 +76,8 @@ body {
 @layer components {
   /* Pulsanti — base + varianti. Usare sempre una variante insieme a .btn. */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition duration-150
+      active:scale-[0.97]
       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas
       disabled:pointer-events-none disabled:opacity-50;
   }

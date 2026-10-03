@@ -38,7 +38,7 @@ export function ClipCard({ clip, rank, selectable, selected, selectionActive, on
     >
       <button
         onClick={onOpen}
-        className={`relative w-full overflow-hidden rounded-xl border bg-raised text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
+        className={`relative w-full overflow-hidden rounded-xl border bg-raised text-left transition duration-200 ease-out will-change-transform group-hover:-translate-y-0.5 group-hover:shadow-[0_18px_40px_-20px_rgba(255,212,0,0.25)] active:translate-y-0 active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
           isShort ? "aspect-[9/16]" : "aspect-video"
         } ${selected ? "border-brand-400 ring-2 ring-brand-400/50" : "border-line group-hover:border-line-strong"}`}
       >

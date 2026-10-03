@@ -27,11 +27,13 @@ export function EmptyState({ icon, title, description, action }: { icon?: ReactN
 }
 
 /** Colore di un punteggio 0-100: stessa scala ovunque nel sito. */
+// Solo i colori del sito (restyling 2026-10-03): il verde lime e lo smeraldo dei punteggi erano un
+// quarto e quinto accento che litigavano col giallo. Giallo = i migliori, bianco = buoni, grigio = medi.
 export function scoreTone(score: number): { text: string; ring: string; bg: string } {
-  if (score >= 85) return { text: "text-emerald-300", ring: "#34d399", bg: "bg-emerald-400/15" };
-  if (score >= 72) return { text: "text-lime-300", ring: "#a3e635", bg: "bg-lime-400/15" };
-  if (score >= 60) return { text: "text-amber-300", ring: "#fbbf24", bg: "bg-amber-400/15" };
-  return { text: "text-zinc-300", ring: "#71717a", bg: "bg-zinc-500/15" };
+  if (score >= 82) return { text: "text-brand-300", ring: "#ffd400", bg: "bg-brand-400/15" };
+  if (score >= 70) return { text: "text-ink", ring: "#e9e5ef", bg: "bg-white/10" };
+  if (score >= 60) return { text: "text-muted", ring: "#8d8699", bg: "bg-white/5" };
+  return { text: "text-faint", ring: "#5a5466", bg: "bg-white/5" };
 }
 
 /** Punteggio complessivo come anello, stile "virality score". */
