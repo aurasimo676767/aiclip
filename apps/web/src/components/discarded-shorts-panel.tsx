@@ -47,7 +47,7 @@ export function DiscardedShortsPanel({ videoId, items }: { videoId: string; item
             <li key={`${item.start}-${item.title}`} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0 space-y-1">
                 <p className="break-words text-sm font-medium text-ink">{item.title}</p>
-                <p className="text-xs text-amber-300">{item.reason}</p>
+                <p className="text-xs text-red-200/90">{item.reason}</p>
                 {item.aiReason && <p className="text-xs text-muted">{item.aiReason}</p>}
                 <p className="text-xs tabular-nums text-faint">
                   da {formatDuration(item.start)} · {formatDuration(item.duration)} · voto {item.score}

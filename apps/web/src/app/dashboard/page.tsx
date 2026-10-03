@@ -1,9 +1,6 @@
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { fetchProjectSummaries } from "@/lib/data/projects";
-import { ProjectList } from "@/components/project-list";
-import { CreateProjectPanel } from "@/components/create-project-panel";
+import { HomeView } from "@/components/views/home-view";
 import { PollingRefresher } from "@/components/polling-refresher";
 import { isProcessingStatus } from "@/components/status-badge";
 
@@ -24,22 +21,9 @@ export default async function HomePage() {
   const anyProcessing = summaries.some((s) => isProcessingStatus(s.project.status));
 
   return (
-    <div className="mx-auto max-w-6xl space-y-10">
+    <>
       <PollingRefresher active={anyProcessing} />
-      <CreateProjectPanel />
-
-      <section className="space-y-4">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <h2 className="font-display text-xl font-semibold text-ink">Progetti recenti</h2>
-            <p className="text-sm text-muted">Gli ultimi {RECENT_PROJECTS_LIMIT}.</p>
-          </div>
-          <Link href="/dashboard/completed" className="btn btn-ghost btn-sm">
-            Tutti i completati <ArrowRight size={14} />
-          </Link>
-        </div>
-        <ProjectList summaries={summaries} emptyMessage="Incolla un link YouTube qui sopra per creare il primo progetto." />
-      </section>
-    </div>
+      <HomeView summaries={summaries} limit={RECENT_PROJECTS_LIMIT} />
+    </>
   );
 }

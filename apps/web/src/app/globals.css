@@ -95,7 +95,7 @@ body {
       disabled:bg-raised disabled:text-faint disabled:opacity-100 disabled:shadow-none;
   }
   .btn-secondary {
-    @apply border border-line-strong bg-raised text-ink hover:border-faint hover:bg-overlay;
+    @apply border border-white/10 bg-white/[0.05] text-ink hover:border-white/20 hover:bg-white/10;
   }
   .btn-ghost {
     @apply font-medium text-muted hover:bg-raised hover:text-ink;
@@ -105,14 +105,14 @@ body {
   }
 
   .card {
-    @apply rounded-2xl border border-line bg-surface shadow-card;
+    @apply rounded-2xl border border-white/[0.06] bg-surface/70 shadow-card;
   }
   .card-hover {
-    @apply transition hover:border-line-strong hover:bg-raised;
+    @apply transition hover:border-white/[0.12] hover:bg-raised;
   }
 
   .input {
-    @apply w-full rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-ink placeholder:text-faint transition
+    @apply w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-ink placeholder:text-faint transition
       focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-400/25 disabled:opacity-60;
   }
   .label {
@@ -120,7 +120,7 @@ body {
   }
 
   .chip {
-    @apply inline-flex items-center gap-1 rounded-full border border-line bg-raised px-2.5 py-0.5 text-xs font-medium text-muted;
+    @apply inline-flex items-center gap-1 rounded-full bg-white/[0.06] px-2.5 py-0.5 text-xs font-medium text-muted;
   }
 
   .section-title {

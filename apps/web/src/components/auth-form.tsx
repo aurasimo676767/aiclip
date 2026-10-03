@@ -90,7 +90,7 @@ export function AuthForm({ mode }: AuthFormProps) {
       </div>
 
       {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</p>}
-      {infoMessage && <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{infoMessage}</p>}
+      {infoMessage && <p className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-ink">{infoMessage}</p>}
 
       <button
         type="submit"

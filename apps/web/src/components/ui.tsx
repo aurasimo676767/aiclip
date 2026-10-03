@@ -5,7 +5,9 @@ export function PageHeader({ title, description, actions }: { title: ReactNode; 
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="font-display text-2xl font-semibold tracking-tight text-ink sm:text-[28px]">{title}</h1>
+        <h1 className="text-[1.7rem] font-extrabold leading-tight tracking-tight text-white sm:text-[2rem]" style={{ fontStretch: "110%" }}>
+          {title}
+        </h1>
         {description && <p className="mt-1 text-sm text-muted">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -15,7 +17,7 @@ export function PageHeader({ title, description, actions }: { title: ReactNode; 
 
 export function EmptyState({ icon, title, description, action }: { icon?: ReactNode; title: string; description?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-line-strong px-6 py-14 text-center">
+    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center">
       {icon && <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-raised text-muted">{icon}</div>}
       <div>
         <p className="font-medium text-ink">{title}</p>
@@ -36,32 +38,25 @@ export function scoreTone(score: number): { text: string; ring: string; bg: stri
   return { text: "text-faint", ring: "#5a5466", bg: "bg-white/5" };
 }
 
-/** Punteggio complessivo come anello, stile "virality score". */
+/**
+ * Punteggio complessivo come un pezzo di sottotitolo: numero pesante e largo su un tassello. I
+ * migliori (giallo pieno, col bordo nero sotto come le scritte degli Shorts) si riconoscono a colpo
+ * d'occhio in una griglia di copertine; gli altri restano scuri e non rubano la scena all'immagine.
+ * Prima era un anello di progresso: con nove copertine diventavano nove cerchi che si somigliavano.
+ */
 export function ScoreRing({ score, size = 44 }: { score: number; size?: number }) {
-  const tone = scoreTone(score);
-  const stroke = Math.max(3, size / 12);
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
+  const top = score >= 82;
+  const good = score >= 70;
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }} title={`Punteggio ${score}/100`}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="rgba(0,0,0,0.55)" stroke="rgba(255,255,255,0.12)" strokeWidth={stroke} />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={tone.ring}
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - Math.min(100, Math.max(0, score)) / 100)}
-        />
-      </svg>
-      <span className={`absolute inset-0 flex items-center justify-center font-display font-bold ${tone.text}`} style={{ fontSize: size * 0.34 }}>
-        {score}
-      </span>
-    </div>
+    <span
+      title={`Punteggio ${score}/100`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-md font-black tabular-nums leading-none ${
+        top ? "bg-brand-400 text-on-brand shadow-slab" : good ? "bg-black/70 text-white ring-1 ring-white/15 backdrop-blur" : "bg-black/60 text-white/60 backdrop-blur"
+      }`}
+      style={{ fontSize: Math.round(size * 0.4), minWidth: Math.round(size * 0.92), height: Math.round(size * 0.66), paddingInline: Math.round(size * 0.14), fontStretch: "118%" }}
+    >
+      {score}
+    </span>
   );
 }
 
@@ -79,7 +74,7 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
 export function Alert({ tone = "error", children }: { tone?: "error" | "success" | "info"; children: ReactNode }) {
   const styles = {
     error: "border-red-500/30 bg-red-500/10 text-red-200",
-    success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+    success: "border-white/10 bg-white/[0.04] text-ink",
     info: "border-brand-400/30 bg-brand-500/10 text-brand-100",
   }[tone];
   return <div className={`rounded-xl border px-4 py-3 text-sm ${styles}`}>{children}</div>;

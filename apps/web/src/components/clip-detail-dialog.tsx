@@ -251,7 +251,7 @@ ${clip.publishDescription}`} />}
         </div>
 
         {error && <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">{error}</p>}
-        {notice && <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">{notice}</p>}
+        {notice && <p className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-ink">{notice}</p>}
         {clip.errorMessage && clip.status === "FAILED" && (
           <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">Errore del render: {clip.errorMessage}</p>
         )}
@@ -270,7 +270,7 @@ ${clip.publishDescription}`} />}
               clip.tiktokStatus === "FAILED"
                 ? "border-red-500/30 bg-red-500/10 text-red-200"
                 : clip.tiktokStatus === "COMPLETED"
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                  ? "border-white/10 bg-white/[0.04] text-ink"
                   : "border-line bg-raised text-muted"
             }`}
           >
@@ -486,7 +486,7 @@ function FeedRiskWarning({ text }: { text: string }) {
   const words = feedRisk(text);
   if (words.length === 0) return null;
   return (
-    <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-300">
+    <p className="mt-2 rounded-md border border-hot/40 bg-hot/10 px-2.5 py-1.5 text-xs text-red-200">
       YouTube probabilmente non lo farà girare per {words.length === 1 ? "questa parola" : "queste parole"} nel titolo o nella descrizione:{" "}
       <strong>{words.join(", ")}</strong>. Anche scritte con numeri o asterischi vengono riconosciute: meglio toglierle.
     </p>

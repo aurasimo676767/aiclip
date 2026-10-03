@@ -162,11 +162,11 @@ export function ClipList({ clips, youtubeConnected, compact = false }: { clips: 
               <button
                 key={f.id}
                 onClick={() => setFilter(f.id)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                  filter === f.id ? "border-brand-400/60 bg-brand-500/15 text-brand-100" : "border-line bg-raised text-muted hover:text-ink"
+                className={`rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition active:scale-95 ${
+                  filter === f.id ? "bg-brand-400 text-on-brand" : "bg-white/[0.06] text-muted hover:bg-white/10 hover:text-ink"
                 }`}
               >
-                {f.label} <span className="ml-0.5 text-faint">{count}</span>
+                {f.label} <span className={`ml-0.5 tabular-nums ${filter === f.id ? "text-on-brand/60" : "text-faint"}`}>{count}</span>
               </button>
             );
           })}
@@ -184,7 +184,7 @@ export function ClipList({ clips, youtubeConnected, compact = false }: { clips: 
       {visible.length === 0 ? (
         <EmptyState title="Nessuna clip in questa vista" description="Cambia filtro per vedere le altre." />
       ) : (
-        <div className={`grid grid-flow-row-dense gap-4 ${compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"}`}>
+        <div className={`grid grid-flow-row-dense gap-x-4 gap-y-6 ${compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"}`}>
           {visible.map((clip) => (
             <ClipCard
               key={clip.id}
@@ -202,7 +202,7 @@ export function ClipList({ clips, youtubeConnected, compact = false }: { clips: 
 
       {/* Barra azioni della selezione, fissa in basso */}
       {selected.size > 0 && (
-        <div className="sticky bottom-4 z-30 mx-auto flex w-fit max-w-full flex-wrap items-center gap-2 rounded-2xl border border-line-strong bg-raised/95 p-2 pl-4 shadow-2xl backdrop-blur animate-fade-in">
+        <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-30 md:bottom-4 mx-auto flex w-fit max-w-full flex-wrap items-center gap-2 rounded-2xl border border-line-strong bg-raised/95 p-2 pl-4 shadow-2xl backdrop-blur animate-fade-in">
           <span className="text-sm text-muted">
             <span className="font-semibold text-ink">{selected.size}</span> selezionate
           </span>

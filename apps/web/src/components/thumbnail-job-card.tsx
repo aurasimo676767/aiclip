@@ -79,8 +79,8 @@ function StatusPill({ status }: { status: string }) {
   };
   const color: Record<string, string> = {
     PENDING: "bg-zinc-700 text-ink",
-    PROCESSING: "bg-amber-500/15 text-amber-300",
-    COMPLETED: "bg-emerald-500/15 text-emerald-300",
+    PROCESSING: "bg-brand-400/15 text-brand-200",
+    COMPLETED: "bg-white/10 text-ink",
     FAILED: "bg-red-500/15 text-red-300",
   };
   return (

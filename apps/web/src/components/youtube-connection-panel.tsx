@@ -27,7 +27,7 @@ export function YoutubeConnectionPanel({ channelTitle }: { channelTitle: string 
     return (
       <div className="space-y-2">
         <p className="flex items-center gap-2 text-sm text-muted">
-          <span className="h-2 w-2 rounded-full bg-emerald-400" />
+          <span className="h-2 w-2 rounded-full bg-brand-400" />
           Connesso come <span className="font-medium text-ink">{channelTitle}</span>
         </p>
         {error && <p className="text-sm text-red-400">{error}</p>}

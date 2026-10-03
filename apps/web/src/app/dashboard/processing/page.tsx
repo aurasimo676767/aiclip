@@ -1,7 +1,8 @@
 import { requireUser } from "@/lib/auth";
 import { fetchProjectSummaries } from "@/lib/data/projects";
-import { ProjectList } from "@/components/project-list";
-import { PageHeader } from "@/components/ui";
+import { Loader } from "lucide-react";
+import { WorkingRow } from "@/components/project-list";
+import { EmptyState, PageHeader } from "@/components/ui";
 import { PollingRefresher } from "@/components/polling-refresher";
 
 // Vedi commento in dashboard/batch/page.tsx: senza questo, su Vercel i dati possono restare
@@ -24,7 +25,15 @@ export default async function ProcessingPage() {
     <div className="mx-auto max-w-6xl space-y-6">
       <PollingRefresher active={summaries.length > 0} />
       <PageHeader title="In lavorazione" description="Video che il worker sta scaricando, trascrivendo o analizzando." />
-      <ProjectList summaries={summaries} emptyMessage="Nessun progetto in elaborazione al momento." />
+      {summaries.length === 0 ? (
+        <EmptyState icon={<Loader size={20} />} title="Il worker è libero" description="Nessun progetto in elaborazione al momento." />
+      ) : (
+        <div className="divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/[0.06] bg-surface/60">
+          {summaries.map((s) => (
+            <WorkingRow key={s.project.id} summary={s} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

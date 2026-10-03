@@ -49,8 +49,8 @@ export function PublishStatus({ clipId, status, youtubeUrl, youtubeError, youtub
   if (status === "COMPLETED" && youtubeUrl) {
     const scheduledInFuture = youtubePublishAt && new Date(youtubePublishAt).getTime() > Date.now();
     return (
-      <div className="space-y-2 rounded-xl border border-emerald-400/25 bg-emerald-400/5 p-3">
-        <a href={youtubeUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-300 hover:underline">
+      <div className="space-y-2 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+        <a href={youtubeUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink underline-offset-4 hover:underline">
           {scheduledInFuture ? "Caricato, in attesa di pubblicazione" : "Pubblicato su YouTube"} <ExternalLink size={13} />
         </a>
         {scheduledInFuture && (
@@ -71,7 +71,7 @@ export function PublishStatus({ clipId, status, youtubeUrl, youtubeError, youtub
 
   if (status === "PENDING" || status === "UPLOADING") {
     return (
-      <p className="inline-flex items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-400/5 px-3 py-2 text-sm text-amber-200">
+      <p className="inline-flex items-center gap-2 rounded-xl border border-brand-400/25 bg-brand-400/5 px-3 py-2 text-sm text-brand-200">
         <Loader2 size={14} className="animate-spin" /> Caricamento su YouTube in corso…
       </p>
     );

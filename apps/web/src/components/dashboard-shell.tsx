@@ -57,6 +57,63 @@ const NAV_GROUPS: Array<{ title?: string; items: NavItem[] }> = [
   },
 ];
 
+/**
+ * Barra in basso come un'app (simo usa il sito soprattutto dal telefono): le pagine di tutti i
+ * giorni a un tocco col pollice, il "+" giallo al centro per un nuovo progetto, il resto in "Altro".
+ * Prima c'era solo il menu a panino in alto, due tocchi e mano spostata per qualsiasi cosa.
+ */
+function MobileTabBar({ pathname, onMore }: { pathname: string; onMore: () => void }) {
+  const tabs: Array<NavItem & { short: string }> = [
+    { href: "/dashboard", label: "Home", short: "Home", icon: Home, exact: true },
+    { href: "/dashboard/processing", label: "In lavorazione", short: "In corso", icon: Loader },
+  ];
+  const right: Array<NavItem & { short: string }> = [{ href: "/dashboard/published", label: "Pubblicati", short: "Pubblicati", icon: MonitorPlay }];
+  // "Altro" è acceso sulle pagine che stanno solo nel menu (Completati, Feed, Voice over, Facce, Opzioni...).
+  const moreActive = ["/dashboard/completed", "/dashboard/feed", "/dashboard/whop", "/dashboard/faces", "/dashboard/settings", "/dashboard/thumbnails", "/dashboard/batch", "/dashboard/credits"].some((h) => pathname.startsWith(h));
+  const tab = (item: NavItem & { short: string }) => {
+    const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
+    const Icon = item.icon;
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        aria-label={item.label}
+        className={`relative flex flex-col items-center justify-center gap-1 pb-1 pt-2 text-[11px] font-semibold transition active:scale-95 ${active ? "text-brand-300" : "text-faint"}`}
+      >
+        <span className={`absolute top-0 h-[3px] w-6 rounded-b-full bg-brand-400 transition-opacity ${active ? "opacity-100" : "opacity-0"}`} />
+        <Icon size={21} strokeWidth={active ? 2.4 : 1.9} />
+        {item.short}
+      </Link>
+    );
+  };
+  return (
+    <nav
+      aria-label="Navigazione"
+      className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-white/5 bg-canvas/85 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
+    >
+      {tabs.map(tab)}
+      <div className="flex items-center justify-center">
+        <Link
+          href="/dashboard#nuovo"
+          aria-label="Nuovo progetto"
+          className="-mt-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-400 text-on-brand shadow-slab ring-4 ring-canvas transition active:translate-y-[2px] active:shadow-none"
+        >
+          <Plus size={26} strokeWidth={2.8} />
+        </Link>
+      </div>
+      {right.map(tab)}
+      <button
+        onClick={onMore}
+        className={`relative flex flex-col items-center justify-center gap-1 pb-1 pt-2 text-[11px] font-semibold transition active:scale-95 ${moreActive ? "text-brand-300" : "text-faint"}`}
+      >
+        <span className={`absolute top-0 h-[3px] w-6 rounded-b-full bg-brand-400 transition-opacity ${moreActive ? "opacity-100" : "opacity-0"}`} />
+        <Menu size={21} strokeWidth={moreActive ? 2.4 : 1.9} />
+        Altro
+      </button>
+    </nav>
+  );
+}
+
 const COLLAPSED_STORAGE_KEY = "clipforge:sidebar-collapsed";
 
 export function DashboardShell({ email, children }: { email: string; children: React.ReactNode }) {
@@ -113,7 +170,7 @@ export function DashboardShell({ email, children }: { email: string; children: R
                   href={item.href}
                   title={iconOnly ? item.label : undefined}
                   className={`group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    isActive ? "bg-raised text-ink" : "text-muted hover:bg-raised/60 hover:text-ink"
+                    isActive ? "bg-white/[0.06] text-white" : "text-muted hover:bg-white/[0.04] hover:text-ink"
                   } ${iconOnly ? "justify-center px-0" : ""}`}
                 >
                   {isActive && <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-400" />}
@@ -157,7 +214,7 @@ export function DashboardShell({ email, children }: { email: string; children: R
     <div className="flex min-h-screen">
       {/* Sidebar desktop: espansa o ridotta a sole icone */}
       <aside
-        className={`sticky top-0 hidden h-screen shrink-0 flex-col justify-between border-r border-line bg-surface/70 p-3 backdrop-blur transition-[width] duration-200 md:flex ${
+        className={`sticky top-0 z-20 hidden h-screen shrink-0 flex-col justify-between border-r border-white/[0.05] bg-canvas p-3 transition-[width] duration-200 md:flex ${
           collapsed ? "w-[68px]" : "w-60"
         }`}
       >
@@ -201,14 +258,13 @@ export function DashboardShell({ email, children }: { email: string; children: R
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Barra superiore mobile */}
-        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-canvas/80 px-4 py-3 backdrop-blur md:hidden">
-          <button onClick={() => setMobileOpen(true)} aria-label="Apri menu" className="rounded-md p-1.5 text-muted transition hover:bg-raised hover:text-ink">
-            <Menu size={20} />
-          </button>
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/5 bg-canvas/75 px-4 py-2.5 backdrop-blur-xl md:hidden">
           <Logo />
         </header>
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 md:px-10 md:py-10">{children}</main>
+        {/* Sul telefono la barra in basso copre gli ultimi ~80px: il contenuto finisce sopra. */}
+        <main className="min-w-0 flex-1 px-4 pb-28 pt-5 sm:px-6 md:px-10 md:py-10">{children}</main>
+        <MobileTabBar pathname={pathname} onMore={() => setMobileOpen(true)} />
       </div>
     </div>
     </TooltipProvider>

@@ -108,7 +108,7 @@ export function PublishSchedulePanel({
         >
           {saving ? "Salvo…" : "Salva orari"}
         </button>
-        {saved && <span className="text-xs text-emerald-400">Salvato.</span>}
+        {saved && <span className="text-xs text-brand-300">Salvato.</span>}
         {error && <span className="text-xs text-red-400">{error}</span>}
       </div>
     </div>

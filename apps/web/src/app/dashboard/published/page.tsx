@@ -105,7 +105,7 @@ export default async function PublishedPage() {
 
       <section className="space-y-4">
         <h2 className="section-title flex items-center gap-2">
-          <CalendarClock size={16} className="text-amber-300" /> In uscita
+          <CalendarClock size={16} className="text-brand-300" /> In uscita
         </h2>
         {scheduled.length === 0 ? (
           <EmptyState title="Nessun video in programmazione" description="Seleziona delle clip pronte in un progetto e premi Programma." />
@@ -118,7 +118,7 @@ export default async function PublishedPage() {
                   <Thumb url={thumbs.get(job.id) ?? null} format={info.format} />
                   <div className="min-w-0 flex-1">
                     <p className="line-clamp-2 text-sm font-medium text-ink">{info.title}</p>
-                    <p className="mt-1 text-xs text-amber-200">
+                    <p className="mt-1 text-xs font-semibold text-brand-200">
                       {new Date(job.publish_at!).toLocaleString("it-IT", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
                     </p>
                   </div>
@@ -185,12 +185,12 @@ export default async function PublishedPage() {
  */
 function AnalyticsRow({ job }: { job: PublishJobRow }) {
   if (job.analytics_error && !job.analytics_updated_at) {
-    return <p className="text-xs text-amber-300">{job.analytics_error}</p>;
+    return <p className="text-xs text-red-300">{job.analytics_error}</p>;
   }
   if (!job.analytics_updated_at) return null;
   const stayed = job.analytics_views ? Math.round(((job.engaged_views ?? 0) / job.analytics_views) * 100) : null;
   // Soglie indicative per gli Shorts: sotto il 50% YouTube non lo spinge oltre il primo pubblico.
-  const tone = stayed === null ? "text-muted" : stayed >= 65 ? "text-emerald-300" : stayed >= 50 ? "text-amber-300" : "text-red-300";
+  const tone = stayed === null ? "text-muted" : stayed >= 65 ? "text-brand-300" : stayed >= 50 ? "text-ink" : "text-red-300";
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
       <span title="Quanti hanno continuato a guardare invece di scorrere via (engaged / visualizzazioni)">

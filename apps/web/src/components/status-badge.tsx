@@ -1,10 +1,12 @@
 type Tone = "neutral" | "working" | "success" | "error";
 
+// Solo i colori del sito: giallo = sta lavorando, bianco = fatto, rosso urla = errore. Il verde e
+// l'ambra di prima erano altri due accenti in una pagina che ne ha già uno.
 const TONE_STYLES: Record<Tone, { badge: string; dot: string }> = {
-  neutral: { badge: "border-line-strong bg-raised text-muted", dot: "bg-faint" },
-  working: { badge: "border-amber-400/30 bg-amber-400/10 text-amber-200", dot: "bg-amber-400 animate-pulse" },
-  success: { badge: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200", dot: "bg-emerald-400" },
-  error: { badge: "border-hot/40 bg-hot/10 text-red-200", dot: "bg-hot" },
+  neutral: { badge: "border-white/10 bg-black/40 text-muted", dot: "bg-faint" },
+  working: { badge: "border-brand-400/30 bg-brand-400/10 text-brand-200", dot: "bg-brand-400 animate-live-pulse" },
+  success: { badge: "border-white/15 bg-black/40 text-ink", dot: "bg-ink" },
+  error: { badge: "border-hot/50 bg-hot/15 text-red-100", dot: "bg-hot" },
 };
 
 const STATUS: Record<string, { label: string; tone: Tone }> = {

@@ -52,3 +52,4 @@ apps/worker/models/BiRefNet*.onnx
 apps/worker/assets/cover-style/
 apps/worker/assets/emoji-cache/
 apps/worker/assets/sfx/
+apps/web/public/dev-preview/

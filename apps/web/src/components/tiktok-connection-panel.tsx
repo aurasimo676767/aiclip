@@ -32,7 +32,7 @@ export function TiktokConnectionPanel({ displayName, avatarUrl }: { displayName:
             // eslint-disable-next-line @next/next/no-img-element
             <img src={avatarUrl} alt="" className="h-6 w-6 rounded-full" />
           ) : (
-            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            <span className="h-2 w-2 rounded-full bg-brand-400" />
           )}
           Connesso come <span className="font-medium text-ink">{displayName || "account TikTok"}</span>
         </p>

@@ -34,7 +34,7 @@ export function YoutubeImportForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
-      <div className="flex flex-col gap-2 rounded-2xl border border-line-strong bg-canvas p-2 transition focus-within:border-brand-400 focus-within:ring-4 focus-within:ring-brand-500/15 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-canvas/85 p-2 backdrop-blur transition focus-within:border-brand-400 focus-within:ring-4 focus-within:ring-brand-500/15 sm:flex-row sm:items-center">
         <div className="flex flex-1 items-center gap-3 px-3">
           <Link2 size={18} className="shrink-0 text-faint" />
           <input

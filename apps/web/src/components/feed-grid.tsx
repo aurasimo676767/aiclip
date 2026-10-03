@@ -84,7 +84,7 @@ function Grid({ items, generatingId, onGenerate }: { items: FeedItem[]; generati
             )}
             {item.badge && <span className="absolute bottom-2 right-2 rounded-md bg-black/75 px-1.5 py-0.5 text-[11px] font-medium text-white">{item.badge}</span>}
             {item.alreadyImported && (
-              <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-md bg-emerald-500/85 px-1.5 py-0.5 text-[11px] font-medium text-white">
+              <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-md bg-white/90 px-1.5 py-0.5 text-[11px] font-bold text-black">
                 <Check size={11} /> Generato
               </span>
             )}

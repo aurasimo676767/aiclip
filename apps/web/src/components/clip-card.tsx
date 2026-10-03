@@ -38,13 +38,13 @@ export function ClipCard({ clip, rank, selectable, selected, selectionActive, on
     >
       <button
         onClick={onOpen}
-        className={`relative w-full overflow-hidden rounded-xl border bg-raised text-left transition duration-200 ease-out will-change-transform group-hover:-translate-y-0.5 group-hover:shadow-[0_18px_40px_-20px_rgba(255,212,0,0.25)] active:translate-y-0 active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
+        className={`relative w-full overflow-hidden rounded-2xl bg-raised text-left transition duration-300 ease-out will-change-transform group-hover:-translate-y-1 group-hover:shadow-[0_24px_48px_-24px_rgba(0,0,0,0.9)] active:translate-y-0 active:scale-[0.985] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
           isShort ? "aspect-[9/16]" : "aspect-video"
-        } ${selected ? "border-brand-400 ring-2 ring-brand-400/50" : "border-line group-hover:border-line-strong"}`}
+        } ${selected ? "ring-[3px] ring-brand-400" : "ring-1 ring-white/[0.07] group-hover:ring-white/20"}`}
       >
         {clip.thumbnailUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={clip.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+          <img src={clip.thumbnailUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover transition duration-500 ease-out group-hover:scale-[1.04]" />
         ) : (
           <div className="absolute inset-0 flex items-center bg-overlay px-3 pb-8 pt-12">
             <p className="line-clamp-5 font-display text-sm font-semibold leading-snug text-white/85">&ldquo;{clip.hook}&rdquo;</p>
@@ -65,16 +65,16 @@ export function ClipCard({ clip, rank, selectable, selected, selectionActive, on
           />
         )}
 
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/70" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/45 via-transparent via-40% to-black/75" />
 
-        <div className="absolute right-2 top-2">
+        <div className="absolute right-2.5 top-2.5">
           <ScoreRing score={score} size={isShort ? 38 : 42} />
         </div>
-        <span className="absolute left-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 font-display text-xs font-bold text-white/90 backdrop-blur">#{rank}</span>
+        <span className="absolute left-2.5 top-2.5 text-sm font-black tabular-nums text-white/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" style={{ fontStretch: "118%" }}>#{rank}</span>
 
-        <div className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2">
+        <div className="absolute inset-x-2.5 bottom-2.5 flex items-center justify-between gap-2">
           {working ? (
-            <span className="inline-flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-amber-200 backdrop-blur">
+            <span className="inline-flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-brand-200 backdrop-blur">
               <Loader2 size={11} className="animate-spin" /> {clip.status === "QUEUED" ? "In coda" : "Rendering"}
             </span>
           ) : clip.status === "FAILED" ? (
@@ -109,7 +109,7 @@ export function ClipCard({ clip, rank, selectable, selected, selectionActive, on
       )}
 
       <button onClick={onOpen} className="text-left">
-        <h3 className="line-clamp-2 text-sm font-medium leading-snug text-ink transition group-hover:text-white">{clip.title}</h3>
+        <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-ink transition group-hover:text-white">{clip.title}</h3>
       </button>
       {isShort && <PublishChips clip={clip} />}
       {!isShort && <EditToggle clipId={clip.id} enabled={clip.longformEdit} />}
@@ -175,14 +175,14 @@ ${clip.publishDescription}`).length > 0;
       : clip.tiktokStatus === "FAILED"
         ? { label: "TikTok non uscito", cls: "bg-red-500/15 text-red-300" }
         : clip.tiktokStatus
-          ? { label: "TikTok in corso", cls: "bg-amber-500/15 text-amber-200" }
+          ? { label: "TikTok in corso", cls: "bg-brand-400/15 text-brand-200" }
           : null;
   if (!risky && !tiktok) return null;
   return (
     <div className="flex flex-wrap gap-1.5 text-[11px] font-medium">
       {tiktok && <span className={`rounded-md px-1.5 py-0.5 ${tiktok.cls}`}>{tiktok.label}</span>}
       {risky && (
-        <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-amber-200" title="Parole che YouTube non fa girare: apri la clip per vederle">
+        <span className="inline-flex items-center gap-1 rounded-md bg-hot/15 px-1.5 py-0.5 text-red-200" title="Parole che YouTube non fa girare: apri la clip per vederle">
           <AlertTriangle size={11} /> Titolo a rischio
         </span>
       )}

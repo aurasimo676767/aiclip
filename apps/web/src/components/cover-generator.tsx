@@ -168,7 +168,7 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
             className={`rounded-lg border border-line ${isShort ? "aspect-[9/16] w-40" : "aspect-video w-full max-w-sm"} object-cover`}
           />
           {applied ? (
-            <p className="flex items-center gap-1.5 text-xs text-emerald-300">
+            <p className="flex items-center gap-1.5 text-xs text-brand-300">
               <Check size={14} />
               {job.youtubeSet ? "Caricata su YouTube." : "Approvata: verrà messa sul video appena lo pubblichi."}
             </p>

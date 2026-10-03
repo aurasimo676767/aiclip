@@ -153,7 +153,7 @@ export function TiktokPublishPanel({
       </div>
 
       {tooLong && (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+        <p className="rounded-lg border border-hot/40 bg-hot/10 px-3 py-2 text-xs text-red-200">
           Questo video dura {Math.round(durationSeconds)} s: il tuo account TikTok accetta al massimo {info.max_video_post_duration_sec} s.
         </p>
       )}
@@ -190,7 +190,7 @@ export function TiktokPublishPanel({
           <div className="space-y-1.5 pl-6">
             {check("Il tuo brand", brandOrganic, setBrandOrganic)}
             {check("Contenuto sponsorizzato (per un altro brand)", brandContent, setBrandContent, privacy === "SELF_ONLY", privacy === "SELF_ONLY" ? "non può essere privato" : undefined)}
-            {commercialIncomplete && <p className="text-xs text-amber-300">Scegli almeno una delle due opzioni.</p>}
+            {commercialIncomplete && <p className="text-xs text-red-300">Scegli almeno una delle due opzioni.</p>}
             {(brandOrganic || brandContent) && (
               <p className="text-xs text-muted">
                 Il video sarà etichettato come {brandContent ? "“Partnership retribuita”" : "“Contenuto promozionale”"}.
@@ -214,7 +214,7 @@ export function TiktokPublishPanel({
               <input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className="input py-1.5" />
             )}
           </div>
-          {when === "later" && scheduleInvalid && <p className="text-xs text-amber-300">Scegli un orario almeno fra 5 minuti.</p>}
+          {when === "later" && scheduleInvalid && <p className="text-xs text-red-300">Scegli un orario almeno fra 5 minuti.</p>}
         </div>
       )}
 

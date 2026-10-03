@@ -66,7 +66,7 @@ export function WorkerPauseControl({ compact = false }: { compact?: boolean }) {
         disabled={submitting}
         title={title}
         className={`flex w-full items-center justify-center rounded-lg py-2 transition disabled:opacity-50 ${
-          paused ? "bg-amber-500/15 text-amber-300" : "text-faint hover:bg-raised/60 hover:text-ink"
+          paused ? "bg-hot/15 text-red-200" : "text-faint hover:bg-raised/60 hover:text-ink"
         }`}
       >
         {paused ? <Play size={18} /> : <Pause size={18} />}
@@ -81,12 +81,12 @@ export function WorkerPauseControl({ compact = false }: { compact?: boolean }) {
         disabled={submitting}
         title={title}
         className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm transition disabled:opacity-50 ${
-          paused ? "border-amber-500/40 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15" : "border-line bg-raised/50 text-muted hover:border-line-strong hover:text-ink"
+          paused ? "border-hot/40 bg-hot/10 text-red-100 hover:bg-hot/15" : "border-line bg-raised/50 text-muted hover:border-line-strong hover:text-ink"
         }`}
       >
         <span className="relative flex h-2 w-2">
-          {!paused && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/60" />}
-          <span className={`relative inline-flex h-2 w-2 rounded-full ${paused ? "bg-amber-400" : "bg-emerald-400"}`} />
+          {!paused && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400/50" />}
+          <span className={`relative inline-flex h-2 w-2 rounded-full ${paused ? "bg-hot" : "bg-brand-400"}`} />
         </span>
         <span className="flex-1">
           <span className="block text-xs font-medium text-ink">{paused ? "Worker in pausa" : "Worker attivo"}</span>
