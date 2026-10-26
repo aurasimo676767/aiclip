@@ -5,7 +5,6 @@ import type { TranscriptSegment } from "@clipforge/shared";
 import { probeVideo } from "../lib/ffmpeg.js";
 import { supabase } from "../lib/supabase.js";
 import { env } from "../env.js";
-import { ReactionCamFaceTracker } from "../face-tracking/reaction-cam-face-tracker.js";
 import { planLongformEdit, renderEditedLongform, type HighlightsInput } from "../render/longform-auto-edit.js";
 
 /**
@@ -28,7 +27,7 @@ if (aiVideo) {
 }
 const probe = await probeVideo(source);
 const t0 = Date.now();
-const plan = await planLongformEdit({ sourceVideoPath: source, sourceWidth: probe.width!, sourceHeight: probe.height!, start, end, faceTracker: new ReactionCamFaceTracker(), highlights });
+const plan = await planLongformEdit({ sourceVideoPath: source, sourceWidth: probe.width!, sourceHeight: probe.height!, start, end, highlights });
 const fakeIntro = opt("intro");
 if (fakeIntro) plan.intro = fakeIntro.split(",").map((r) => { const [a, b] = r.split("-").map(Number); return { start: a!, end: b! }; });
 const t1 = Date.now();

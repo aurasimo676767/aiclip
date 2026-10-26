@@ -2,7 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
-import type { CropWindow, FaceTracker } from "../face-tracking/face-tracker.js";
+import type { CropWindow } from "../face-tracking/face-tracker.js";
 import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
 import type { TranscriptSegment } from "@clipforge/shared";
 import { LONGFORM_EDIT_MAX_SECONDS, LONGFORM_EDIT_TARGET_SECONDS } from "@clipforge/shared";
@@ -11,6 +11,7 @@ import { PhraseLocator, type LocatedPhrase } from "./intro-moments.js";
 import { allowedRanges, type GameSegment } from "../providers/ai/game-timeline.js";
 import type { HighlightsPlan } from "../providers/ai/longform-highlights.js";
 import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
+import { findSpeakingWebcam } from "../face-tracking/closeup-cams.js";
 
 /**
  * Montaggio automatico di un video long-form (opzionale, spento di default: vedi clips.longform_edit).
@@ -19,9 +20,11 @@ import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
  *   abituale del video per qualche secondo. Una pausa normale o un momento di gioco silenzioso ma
  *   con l'audio del gioco acceso NON si tagliano: in un video lungo tagliare ogni pausa lo rende
  *   frenetico, e chi gioca concentrato in silenzio è comunque contenuto.
- * - STACCO SULLA FACCIA quando urlano: per un secondo e mezzo la webcam riempie lo schermo, poi si
- *   torna al gioco. La webcam è piccola nella live, quindi ingrandita è morbida (stile "meme",
- *   scelto da simo): un filtro di nitidezza la aiuta.
+ * - PRIMO PIANO quando qualcuno reagisce forte: per un paio di secondi l'inquadratura stringe sulla
+ *   webcam di chi parla, poi si torna al gioco. La webcam si vede INTERA e ai lati resta quello che
+ *   c'è davvero attorno (gioco, schermo), come una telecamera che stringe: niente sfondi finti (simo,
+ *   2026-10-26: "almeno non risulta IA"). La webcam è piccola nella live, quindi ingrandita è morbida
+ *   (stile "meme", scelto da simo): un filtro di nitidezza la aiuta.
  *
  * Tutto in UNA passata ffmpeg senza split in pezzi (su un video di un'ora, dividere in centinaia di
  * rami con trim+concat terrebbe in memoria l'intero video): i tagli sono un select sulle finestre da
@@ -43,12 +46,8 @@ const PUNCH_SECONDS = 1.6;
 const MIN_PUNCH_SPACING_SECONDS = 45;
 /** Da quanto prima dell'urlo guardare chi parla (il tracker ha bisogno di qualche secondo). */
 const CAM_LOOK_BEFORE_SECONDS = 1.5;
-/**
- * Quanto del riquadro webcam trovato tenere: il riquadro del tracker sborda spesso di qualche pixel
- * sul gioco attorno (a tutto schermo diventava una striscia blu sul bordo), e stringere sul centro
- * dà anche più effetto "zoom in faccia".
- */
-const CAM_TIGHTEN = 0.84;
+/** Aria attorno alla webcam nel primo piano: senza, il bordo dell'inserto coincide col bordo dello schermo e sembra un ritaglio. */
+const CAM_ZOOM_MARGIN = 1.04;
 
 export interface TimeRange {
   start: number;
@@ -108,9 +107,16 @@ function splitLongRanges(ranges: Array<{ start: number; end: number }>, segments
 }
 /** Sul cambio di gioco: se il pezzo tenuto prima finisce al massimo così tanto prima, lo si allunga fino al cambio. */
 const TOPIC_EXTEND_SECONDS = 90;
-/** Primi piani dell'AI: durata (sclero: tutto lo sclero, fino a 8 s) e distanza minima fra due. */
-const CLOSEUP_LIMITS = { sclero: { min: 2, max: 8 }, frase: { min: 1.5, max: 6 } } as const;
-const CLOSEUP_SPACING_SECONDS = 8;
+/**
+ * Primi piani dell'AI (simo, 2026-10-26: "zoom senza senso" su frasi normali): solo reazioni forti,
+ * fra 1,5 e 4 s, ben distanziati. Niente controllo sul volume: misurato sul VOD di Blur, sopra
+ * l'audio del gioco "Ma coglione sei una merda umana" arrivava a +5,8 dB sul livello abituale e
+ * "È il riscaldamento questo", detta piatta, a +7,7 dB. Decide l'AI sul testo (vedi
+ * longform-highlights.ts); chi va inquadrato lo decide il modello chi-parla.
+ */
+const CLOSEUP_MIN_SECONDS = 1.5;
+const CLOSEUP_MAX_SECONDS = 4;
+const CLOSEUP_SPACING_SECONDS = 20;
 
 /** Tratto minimo tenuto e distanza sotto cui due tratti si uniscono (secondi). */
 const MIN_KEEP_SECONDS = 5;
@@ -129,7 +135,6 @@ export async function planLongformEdit(params: {
   sourceHeight: number;
   start: number;
   end: number;
-  faceTracker: FaceTracker;
   highlights?: HighlightsInput;
 }): Promise<LongformEditPlan> {
   const duration = params.end - params.start;
@@ -290,20 +295,27 @@ export async function planLongformEdit(params: {
   }
   chosen.sort((a, b) => a.start - b.start);
 
-  // La webcam si cerca PER OGNI urlo, nei secondi dell'urlo: con più webcam (giochi di gruppo in
-  // call) il tracker degli Shorts sceglie quella di chi sta parlando in quel momento. Con una sola
-  // webcam fissa sarebbe bastata una ricerca, ma usando sempre la prima trovata lo stacco finiva
-  // sulla faccia sbagliata (visto su skribbl con 5 webcam, 2026-09-25). Se in quel momento la scena
-  // non ha una webcam (gioco a schermo intero), quello stacco salta.
+  // Per ogni primo piano: le webcam di quel momento e chi parla proprio lì (vedi closeup-cams.ts).
+  // Usando sempre la prima webcam trovata lo stacco finiva sulla faccia sbagliata (skribbl con 5
+  // webcam, 2026-09-25); col layout degli Shorts finiva sul proprietario o su riquadri con dentro
+  // mezzo gioco (Switch Sports, 2026-10-26). Se non si capisce chi parla, quel primo piano salta:
+  // meglio nessuno che uno sbagliato.
+  const fail = (what: string) => (error: unknown) => {
+    logger.warn(what, { error: error instanceof Error ? error.message : String(error) });
+    return null;
+  };
   const withCam: Array<TimeRange & { cam: CropWindow }> = [];
   for (const p of chosen) {
-    const cam = await findCamCrop({ ...params, from: params.start + p.start - CAM_LOOK_BEFORE_SECONDS, at: CAM_LOOK_BEFORE_SECONDS + 0.5 }).catch(
-      (error) => {
-        logger.warn("Ricerca webcam fallita per uno stacco", { error: error instanceof Error ? error.message : String(error) });
-        return null;
-      },
-    );
-    if (cam) withCam.push({ ...p, cam });
+    const found = await findSpeakingWebcam({
+      videoPath: params.sourceVideoPath,
+      width: params.sourceWidth,
+      height: params.sourceHeight,
+      from: params.start + Math.max(0, p.start - CAM_LOOK_BEFORE_SECONDS),
+      to: params.start + p.end + 0.5,
+      focusFrom: params.start + p.start,
+      focusTo: params.start + p.end,
+    }).catch(fail("Ricerca di chi parla fallita per un primo piano"));
+    if (found) withCam.push({ ...p, cam: zoomWindow(found.rect, params.sourceWidth, params.sourceHeight) });
   }
 
   const toOutput = (t: number) => {
@@ -541,49 +553,27 @@ function median(values: number[]): number {
 }
 
 /**
- * Ritaglio 16:9 della webcam, cercata col tracker degli Shorts in una finestra di 12 secondi. Se la
- * webcam è più "quadrata" del 16:9 si tagliano sopra e sotto (mai allargare: si prenderebbe il
- * gioco attorno), centrando sul riquadro trovato.
+ * La finestra 16:9 più stretta che contiene TUTTA la webcam (con un filo d'aria), centrata su di lei
+ * e spostata solo quanto serve a restare dentro lo schermo. Una webcam più "quadrata" del 16:9 lascia
+ * ai lati il gioco o lo schermo che le sta davvero accanto (simo, 2026-10-26: niente riempimento
+ * sfocato, "almeno non risulta IA"); prima si tagliavano sopra e sotto e le teste uscivano.
  */
-async function findCamCrop(params: {
-  sourceVideoPath: string;
-  sourceWidth: number;
-  sourceHeight: number;
-  faceTracker: FaceTracker;
-  /** Inizio della finestra analizzata (secondi nel sorgente). */
-  from: number;
-  /** Istante dell'urlo, in secondi dall'inizio della finestra: vince la webcam attiva lì. */
-  at: number;
-}): Promise<CropWindow | null> {
-  const from = Math.max(0, params.from);
-  const layout = await params.faceTracker.computeLayout({
-    sourceVideoPath: params.sourceVideoPath,
-    sourceWidth: params.sourceWidth,
-    sourceHeight: params.sourceHeight,
-    startSeconds: from,
-    endSeconds: from + params.at + PUNCH_SECONDS,
-    sceneCuts: false,
-  });
-  let cam: CropWindow | undefined;
-  if (layout.type === "split_vertical") {
-    cam = (layout.topCrops.find((c) => params.at >= c.startSeconds && params.at < c.endSeconds) ?? layout.topCrops[0])?.crop;
-  } else {
-    const scene = layout.scenes.find((s) => params.at >= s.startSeconds && params.at < s.endSeconds);
-    if (scene?.composition.kind === "split") cam = scene.composition.cam;
-  }
-  if (!cam) return null;
-
-  let width = cam.width * CAM_TIGHTEN;
+export function zoomWindow(cam: CropWindow, sourceWidth: number, sourceHeight: number): CropWindow {
+  let width = Math.max(cam.width, (cam.height * 16) / 9) * CAM_ZOOM_MARGIN;
   let height = (width * 9) / 16;
-  if (height > cam.height * CAM_TIGHTEN) {
-    height = cam.height * CAM_TIGHTEN;
+  if (width > sourceWidth) {
+    width = sourceWidth;
+    height = (width * 9) / 16;
+  }
+  if (height > sourceHeight) {
+    height = sourceHeight;
     width = (height * 16) / 9;
   }
   const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
   width = even(width);
   height = even(height);
-  const x = Math.round(Math.min(params.sourceWidth - width, Math.max(0, cam.x + cam.width / 2 - width / 2)));
-  const y = Math.round(Math.min(params.sourceHeight - height, Math.max(0, cam.y + cam.height / 2 - height / 2)));
+  const x = Math.round(Math.min(sourceWidth - width, Math.max(0, cam.x + cam.width / 2 - width / 2)));
+  const y = Math.round(Math.min(sourceHeight - height, Math.max(0, cam.y + cam.height / 2 - height / 2)));
   return { x, y, width, height };
 }
 
@@ -638,9 +628,12 @@ async function applyTopicChanges(
 }
 
 /**
- * Primi piani dell'AI (simo, 2026-09-28): negli sclero veri, per TUTTO lo sclero ("nei momenti dove
- * proprio si incazzano"), e su chi dice una frase forte. Prima gli stacchi andavano dove l'audio era
- * più forte per 1,6 s: prendevano anche spari e musica. Ogni primo piano resta dentro un tratto tenuto.
+ * Primi piani dell'AI: l'AI li sceglie dal testo (solo reazioni forti), qui si controlla che la
+ * reazione si SENTA e si mette il primo piano sulla parte forte. Prima partivano 0,3 s prima della
+ * frase e duravano tutta la frase: cadevano sulla premessa, e su frasi dette a voce normale ("Oh Davi
+ * fai bravo eh", "Ma come cazzo si gioca?") che simo ha trovato senza senso (2026-10-26). Il volume
+ * da solo non basta a sceglierli (musica della lobby, spari): serve a confermare la scelta dell'AI.
+ * Ogni primo piano resta dentro un tratto tenuto.
  */
 async function locateCloseups(
   closeups: HighlightsPlan["closeups"],
@@ -650,11 +643,11 @@ async function locateCloseups(
 ): Promise<TimeRange[]> {
   const out: TimeRange[] = [];
   for (const c of closeups) {
+    if (c.kind !== "sclero") continue;
     const f = await locator.locate(c);
     if (!f) continue;
-    const limits = CLOSEUP_LIMITS[c.kind];
     const start = Math.max(0, f.start - 0.3);
-    let end = Math.min(duration, Math.max(start + limits.min, Math.min(f.end + 0.5, start + limits.max)));
+    let end = Math.min(duration, Math.max(start + CLOSEUP_MIN_SECONDS, Math.min(f.end + 0.4, start + CLOSEUP_MAX_SECONDS)));
     const k = keep.find((r) => start >= r.start && start < r.end);
     if (!k) continue;
     end = Math.min(end, k.end);

@@ -28,7 +28,7 @@ export interface HighlightsPlan {
   intro: Array<HighlightsRange & { quote: string }>;
   /** Pezzi in cui passano a un altro argomento, con le parole esatte di quando se ne vanno e di quando tornano. */
   topicChanges: Array<{ leaveAt: number; leaveQuote: string; returnAt: number; returnQuote: string }>;
-  /** Primi piani sulla webcam: sclero (bestemmie, insulti) o frase forte, con le parole esatte. */
+  /** Primi piani sulla webcam: solo reazioni forti ("sclero"), con le parole esatte. "frase" resta solo per leggere i piani vecchi e si scarta. */
   closeups: Array<HighlightsRange & { quote: string; kind: "sclero" | "frase" }>;
 }
 
@@ -55,10 +55,11 @@ Proponi 4 momenti candidati (ne verranno usati 2) per l'intro: le REAZIONI più 
 - Per ognuno copia in "quote" le parole ESATTE della reazione (3-8 parole consecutive della trascrizione), così si trova il punto preciso; start/end sono i tempi della riga in cui sta.
 
 PRIMI PIANI SULLA WEBCAM
-Sono lo zoom sulla faccia di chi parla, come negli edit degli YouTuber: danno ritmo al video (simo, 2026-10-25: "con tutti i zoom sulle webcam nei momenti divertenti, sulle affermazioni... deve essere figo"). Mettine tanti: circa uno ogni 30-60 secondi di video montato, SOLO dentro i tratti che tieni, sui momenti che lo meritano:
-- "sclero": quando si incazzano DAVVERO (bestemmie a raffica, insulti urlati, rage) o esplodono a ridere. Non ogni bestemmia: bestemmiano sempre, scegli i picchi. Nelle "quote" metti le parole dall'INIZIO alla FINE dello sclero, il primo piano dura tutto lo sclero.
-- "frase": una frase forte o divertente detta da qualcuno (la battuta, la risposta cattiva, l'insulto geniale, un'affermazione assurda detta con convinzione, una presa in giro, una domanda stupida), per dare il primo piano a chi la dice.
-Per ognuno copia in "quote" le parole ESATTE (3-15 parole consecutive della trascrizione); start/end sono i tempi della riga.
+Sono lo stacco sulla webcam di chi REAGISCE, come negli edit degli YouTuber. SOLO sulle reazioni FORTI (simo, 2026-10-26: gli zoom su frasi normali "non hanno senso"):
+- quando si incazzano DAVVERO (bestemmie a raffica, insulti urlati, rage), urlano per qualcosa che è appena successo nel gioco ("NOOO", "MA COME", un punto perso, una vittoria), o esplodono a ridere. Non ogni bestemmia: bestemmiano sempre, scegli i picchi.
+- MAI su frasi dette a voce normale: battute, commenti, domande, prese in giro tranquille, spiegazioni, anche se lette sembrano divertenti. Se non è un urlo o una risata esplosa, non è un primo piano.
+Nessun numero minimo: meglio nessun primo piano che uno debole. Al massimo uno ogni 45 secondi circa di video montato, SOLO dentro i tratti che tieni.
+Per ognuno kind "sclero", e in "quote" copia le parole ESATTE della reazione (3-12 parole consecutive della trascrizione) dal suo inizio; start/end sono i tempi della riga.
 
 Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
@@ -111,14 +112,14 @@ const TOOL_SCHEMA: Anthropic.Tool = {
       },
       closeups: {
         type: "array",
-        description: "Primi piani sulla webcam di chi parla: sclero veri e frasi forti.",
+        description: "Primi piani sulla webcam di chi reagisce: SOLO reazioni forti (urla, rage, risate esplose). Può essere vuoto.",
         items: {
           type: "object",
           properties: {
             start: { type: "number", description: "Inizio della riga della trascrizione." },
             end: { type: "number" },
-            kind: { type: "string", enum: ["sclero", "frase"] },
-            quote: { type: "string", description: "Le parole esatte, dall'inizio alla fine dello sclero o della frase." },
+            kind: { type: "string", enum: ["sclero"] },
+            quote: { type: "string", description: "Le parole esatte della reazione, dal suo inizio." },
           },
           required: ["start", "end", "kind", "quote"],
         },

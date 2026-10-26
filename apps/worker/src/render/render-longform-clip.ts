@@ -1,6 +1,5 @@
 import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
-import type { FaceTracker } from "../face-tracking/face-tracker.js";
 import { planLongformEdit, renderEditedLongform, type HighlightsInput } from "./longform-auto-edit.js";
 
 // Target audio comune al segmento estratto — l'audio viene comunque ri-codificato per il
@@ -14,7 +13,7 @@ export interface RenderLongformClipParams {
   end: number;
   workDir: string;
   /** Montaggio automatico (clips.longform_edit): tempi morti tagliati e stacchi sulle urla. Serve il tracker per trovare le webcam. */
-  autoEdit?: { faceTracker: FaceTracker; highlights?: HighlightsInput };
+  autoEdit?: { highlights?: HighlightsInput };
   outputPath: string;
 }
 
@@ -47,7 +46,6 @@ export async function renderLongformClip(params: RenderLongformClipParams): Prom
       sourceHeight: sourceProbe.height,
       start,
       end,
-      faceTracker: params.autoEdit.faceTracker,
       highlights: params.autoEdit.highlights,
     });
     await renderEditedLongform({ sourceVideoPath, start, end, plan, workDir: params.workDir, outputPath });

@@ -101,7 +101,6 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
         outputPath,
         autoEdit: edited
           ? {
-              faceTracker,
               highlights: {
                 title: clipRow.title,
                 segments,
