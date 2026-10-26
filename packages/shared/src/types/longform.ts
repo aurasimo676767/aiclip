@@ -27,4 +27,6 @@ export interface RankedLongformClip {
   /** Usata come descrizione della pubblicazione YouTube, non solo come didascalia breve. */
   caption: string;
   badges: ClipBadge[];
+  /** Cosa c'è nel video secondo la mappa della live (assente nel percorso vecchio): le reaction non si montano mai. */
+  activityKind?: "game" | "tournament" | "reaction" | "talk";
 }

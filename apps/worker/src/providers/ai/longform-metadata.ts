@@ -206,6 +206,7 @@ export async function describePlannedVideos(
       hashtags: meta?.hashtags ?? [],
       caption: meta?.caption || v.topic.slice(0, 1000) || fallbackTitle,
       badges: meta?.badges ?? [],
+      activityKind: v.kind,
     };
   });
   return { clips, usage };

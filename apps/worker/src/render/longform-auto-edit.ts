@@ -11,7 +11,7 @@ import { allowedRanges, type GameSegment } from "../providers/ai/game-timeline.j
 import type { HighlightsPlan } from "../providers/ai/longform-highlights.js";
 import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
 import { findSpeakingWebcam, type StreamWebcam } from "../face-tracking/closeup-cams.js";
-import { describePhases, detectMatchPhases } from "../providers/ai/match-phases.js";
+import { describePhases, detectMatchPhases, gameShare } from "../providers/ai/match-phases.js";
 import { enforceMatchStructure } from "./match-structure.js";
 
 /**
@@ -125,6 +125,9 @@ const CLOSEUP_MIN_SECONDS = 1.5;
 const CLOSEUP_MAX_SECONDS = 4;
 const CLOSEUP_SPACING_SECONDS = 20;
 
+/** Sotto questa quota di tempo passato a giocare (partita, inizio, fine) le regole delle partite non valgono. */
+const MIN_GAME_SHARE = 0.25;
+
 /** Tratto minimo tenuto e distanza sotto cui due tratti si uniscono (secondi). */
 const MIN_KEEP_SECONDS = 5;
 const MERGE_GAP_SECONDS = 4;
@@ -180,18 +183,23 @@ export async function planLongformEdit(params: {
       .filter((seg) => !byScreen || byScreen.some((r) => seg.end > r.start && seg.start < r.end));
     const loudMoments = runsWhere(bins, (db) => db >= baseline + SCREAM_ABOVE_DB, MIN_SCREAM_SECONDS, 1).map((r) => r.start);
     const hl = params.highlights;
-    // Cosa c'è a schermo (partita, inizio, fine, menu...), solo nei tratti del gioco tenuto: serve al
-    // montaggio per tenere le partite e accorciare i menu (vedi match-phases.ts e match-structure.ts).
-    const phases = hl.phaseModel
-      ? await detectMatchPhases(
-          { sourceVideoPath: params.sourceVideoPath, start: params.start, end: params.end, ranges: byScreen ?? [{ start: 0, end: duration }] },
-          { apiKey: hl.apiKey, model: hl.phaseModel },
-        )
-      : null;
     // Reaction (dal titolo, o nessun gioco a schermo): l'intro mostra i momenti del VIDEO a cui
     // reagiscono, con la loro reazione (simo, 2026-09-28: "è una reaction, avrebbe gasato come clip
     // iniziale le clip del video a cui stanno reagendo").
     const isReaction = /reaction|reagisc|reazion/i.test(hl.title) || (!!games && !games.timeline.some((g) => g.kind === "gioco"));
+    // Cosa c'è a schermo (partita, inizio, fine, menu...), solo nei tratti del gioco tenuto: serve al
+    // montaggio per tenere le partite e accorciare i menu (vedi match-phases.ts e match-structure.ts).
+    // Mai nelle reaction né dove si gioca poco (Just Chatting): lì a schermo c'è il video o la webcam,
+    // "altro" per la mappa, e la regola sui menu brevi li taglierebbe a pezzi.
+    const screenPhases =
+      hl.phaseModel && !isReaction
+        ? await detectMatchPhases(
+            { sourceVideoPath: params.sourceVideoPath, start: params.start, end: params.end, ranges: byScreen ?? [{ start: 0, end: duration }] },
+            { apiKey: hl.apiKey, model: hl.phaseModel },
+          )
+        : null;
+    const phases = screenPhases && gameShare(screenPhases) >= MIN_GAME_SHARE ? screenPhases : null;
+    if (screenPhases && !phases) logger.info("Fasi a schermo: si gioca poco, montaggio senza regole delle partite", { giocato: gameShare(screenPhases).toFixed(2) });
     const notes = [
       byScreen
         ? `Le parti in cui fanno altro (altri giochi, chiacchiere) sono già state tolte guardando lo schermo: dove i tempi saltano c'era altro. Resta solo: ${games!.keep.join(", ")}. Non servono cambi di argomento (topicChanges vuoto).`

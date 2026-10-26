@@ -232,6 +232,13 @@ export function matchesFrom(phases: PhaseSegment[]): Match[] {
   return out;
 }
 
+/** Quota del tempo guardato in cui si gioca davvero (partita, inizio o fine): bassa nelle reaction e nel Just Chatting. */
+export function gameShare(phases: PhaseSegment[]): number {
+  const total = phases.reduce((sum, p) => sum + (p.end - p.start), 0);
+  const play = phases.filter((p) => p.phase === "partita" || p.phase === "inizio" || p.phase === "fine").reduce((sum, p) => sum + (p.end - p.start), 0);
+  return total > 0 ? play / total : 0;
+}
+
 /** La mappa in righe corte per il prompt del montaggio. */
 export function describePhases(phases: PhaseSegment[]): string {
   return phases.map((p) => `[${Math.round(p.start)}-${Math.round(p.end)}] ${p.phase}${p.game ? ` ${p.game}` : ""}`).join("\n");

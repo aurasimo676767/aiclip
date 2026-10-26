@@ -4,6 +4,7 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor } from "./anthropic-client.js";
 import { logger } from "../../lib/logger.js";
+import { withDiskCache } from "./response-cache.js";
 
 /**
  * Montaggio "da YouTuber" di un video long-form (chiesto da simo il 2026-09-28): il montaggio
@@ -173,7 +174,7 @@ const responseSchema = z.object({
  * Chiede all'AI il montaggio. `segments` e `loudMoments` sono in secondi dall'inizio del pezzo.
  * null se l'AI non risponde in modo usabile: il chiamante ripiega sul montaggio solo-silenzi.
  */
-export async function planHighlights(
+async function planHighlightsUncached(
   input: {
     title: string;
     durationSeconds: number;
@@ -284,7 +285,7 @@ const tightenSchema = z.object({
  * solo ciò che è debole ("se non ha più nulla da tagliare lasciamo così", 2026-09-28). Il primo pezzo
  * (la presentazione) e l'ultimo (il finale) restano. Ritorna i pezzi rimasti, o null se fallisce.
  */
-export async function tightenHighlights(
+async function tightenHighlightsUncached(
   input: {
     title: string;
     pieces: Array<HighlightsRange & { text: string }>;
@@ -331,4 +332,16 @@ export async function tightenHighlights(
     const tier = classifyModelTier(options.model) ?? "sonnet";
     if (usage.calls > 0) logger.info("Costo REALE misurato — accorcia montaggio", { model: options.model, ...usage, costUsd: computeModelCostUsd(tier, usage).toFixed(4) });
   }
+}
+
+/** Montaggio dell'AI, salvato su disco: rifare lo stesso render con gli stessi dati non lo ripaga (vedi response-cache.ts). */
+export function planHighlights(...args: Parameters<typeof planHighlightsUncached>): Promise<HighlightsPlan | null> {
+  const [input, options] = args;
+  return withDiskCache("montaggio", [options.model, SYSTEM_PROMPT, input], () => planHighlightsUncached(input, options));
+}
+
+/** Secondo giro, salvato su disco come il montaggio. */
+export function tightenHighlights(...args: Parameters<typeof tightenHighlightsUncached>): Promise<HighlightsRange[] | null> {
+  const [input, options] = args;
+  return withDiskCache("accorcia", [options.model, TIGHTEN_PROMPT, input], () => tightenHighlightsUncached(input, options));
 }

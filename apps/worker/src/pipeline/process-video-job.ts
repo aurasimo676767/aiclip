@@ -705,8 +705,9 @@ function buildLongformInsertRow(video: VideoRow, clip: RankedLongformClip): Clip
     format: "longform",
   });
   // Oltre i 50 minuti il video si monta da solo: un gioco da 3 ore non si pubblica intero (simo,
-  // 2026-10-25). Sotto, il montato resta da accendere a mano dal sito come prima.
-  return { ...row, longform_edit: clip.duration > LONGFORM_AUTO_EDIT_ABOVE_SECONDS };
+  // 2026-10-25). Sotto, il montato resta da accendere a mano dal sito come prima. Le reaction mai
+  // (simo, 2026-10-26: "nelle reaction non li voglio proprio montati").
+  return { ...row, longform_edit: clip.duration > LONGFORM_AUTO_EDIT_ABOVE_SECONDS && clip.activityKind !== "reaction" };
 }
 
 /** Audio mono 16 kHz PCM di un tratto del video (per cercare il respiro prima del gancio). */
