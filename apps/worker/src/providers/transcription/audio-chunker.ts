@@ -7,12 +7,12 @@ export interface AudioChunk {
 }
 
 /**
- * L'API Whisper di OpenAI accetta al massimo 25MB per file. Il worker estrae l'audio
- * a bitrate fisso (64kbit/s mono, vedi extract-audio.ts) quindi, se il file supera la
- * durata "sicura" per stare sotto quel limite, lo spezza in finestre di lunghezza fissa
- * prima di trascrivere, per poi ricomporre i timestamp con l'offset corretto.
+ * L'API Whisper di OpenAI accetta al massimo 25MB per file. Il worker estrae l'audio in FLAC mono
+ * 16 kHz (vedi extract-audio.ts), che pesa ~20-25 KB/s a seconda di quanto è rumoroso il gioco: se il
+ * file supera la durata "sicura" per stare sotto quel limite, lo spezza in finestre di lunghezza
+ * fissa prima di trascrivere, per poi ricomporre i timestamp con l'offset corretto.
  */
-const SAFE_CHUNK_SECONDS = 1200; // 20 minuti, ~9.6MB a 64kbit/s: ampio margine sotto i 25MB
+const SAFE_CHUNK_SECONDS = 600; // 10 minuti, ~12-15MB in FLAC: margine sotto i 25MB
 
 export async function splitAudioIntoChunks(audioFilePath: string, tmpDir: string): Promise<AudioChunk[]> {
   const probe = await probeVideo(audioFilePath);

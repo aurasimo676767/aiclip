@@ -122,9 +122,10 @@ export class PhraseLocator {
     if (cached) return cached.words.filter((w) => w.start >= from && w.start <= to);
 
     this.dir ??= await fsp.mkdtemp(path.join(os.tmpdir(), "phrases-"));
-    const audio = path.join(this.dir, `w-${this.windows.length}.mp3`);
+    // FLAC e non mp3: in mp3 a 16 kHz Whisper perdeva le frasi sopra i suoni del gioco (vedi extract-audio.ts).
+    const audio = path.join(this.dir, `w-${this.windows.length}.flac`);
     const duration = to - from;
-    await runFfmpeg(["-y", "-ss", (this.params.clipStart + from).toFixed(3), "-t", duration.toFixed(3), "-i", this.params.sourceVideoPath, "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-b:a", "48k", audio]);
+    await runFfmpeg(["-y", "-ss", (this.params.clipStart + from).toFixed(3), "-t", duration.toFixed(3), "-i", this.params.sourceVideoPath, "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-c:a", "flac", audio]);
     let raw: Word[];
     try {
       const local = new LocalFasterWhisperProvider(env.LOCAL_WHISPER_URL, this.dir);
