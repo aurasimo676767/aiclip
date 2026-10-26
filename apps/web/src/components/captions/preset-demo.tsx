@@ -15,7 +15,7 @@ const DEMO_WORDS: Array<[string, number, number, 0 | 1 | 2, boolean]> = [
   ["guarda", 1.6, 2.0, 0, false],
   ["qua!", 2.0, 2.6, 2, false],
 ];
-const DEMO_PERIOD = 3.1;
+export const DEMO_PERIOD = 3.1;
 const DEMO_ZOOM = 1.4;
 
 export function demoTrack(): CaptionTrack {

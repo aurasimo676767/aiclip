@@ -62,8 +62,7 @@ export const MIN_WORD_SECONDS = 0.18;
 const GROUP_BREAK_PAUSE_SECONDS = 0.6;
 const GROUP_MAX_SECONDS = 3;
 
-const FIXED_Y = { top: 0.2, center: 0.5, bottom: 0.73 } as const;
-/** Terzo basso: dove vanno i sottotitoli "auto" quando non c'è una giunzione webcam/gioco. */
+/** Terzo basso: dove vanno i sottotitoli quando non c'è una giunzione webcam/gioco. */
 export const LOWER_THIRD_Y = 0.73;
 
 export function displayWord(text: string, settings: CaptionSettings): string {
@@ -146,17 +145,15 @@ export function buildCaptionCues(track: CaptionTrack, settings: CaptionSettings)
 
     let entrance = true;
     for (const slice of slices) {
-      // Spezza ancora ai cambi d'inquadratura (solo "auto").
+      // Spezza ancora ai cambi d'inquadratura: la riga segue la giunzione webcam/gioco.
       const bounds = [slice.start];
-      if (settings.position === "auto") {
-        for (const a of track.anchors) {
-          if (a.start > slice.start + 0.05 && a.start < slice.end - 0.05 && Math.abs(anchorY(track, a.start) - anchorY(track, a.start - 0.01)) > 0.005) bounds.push(a.start);
-        }
+      for (const a of track.anchors) {
+        if (a.start > slice.start + 0.05 && a.start < slice.end - 0.05 && Math.abs(anchorY(track, a.start) - anchorY(track, a.start - 0.01)) > 0.005) bounds.push(a.start);
       }
       bounds.push(slice.end);
       for (let b = 0; b < bounds.length - 1; b++) {
         const start = bounds[b]!;
-        const y = settings.position === "auto" ? anchorY(track, start) : FIXED_Y[settings.position];
+        const y = anchorY(track, start);
         cues.push({ start, end: bounds[b + 1]!, y, words, activeIndex: slice.active, entrance, group: g });
         entrance = false;
       }

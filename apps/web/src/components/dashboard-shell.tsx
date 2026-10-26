@@ -170,8 +170,16 @@ function MoreSheet({ open, onClose, pathname, email, onSignOut }: { open: boolea
 
 const COLLAPSED_STORAGE_KEY = "clipforge:sidebar-collapsed";
 
-export function DashboardShell({ email, children }: { email: string; children: React.ReactNode }) {
+/**
+ * Pagine "a tutto schermo" sul telefono: l'editor dei sottotitoli ha bisogno di tutto lo spazio fra
+ * il video fermo in alto e il tasto Applica in basso, quindi lì la barra delle sezioni non c'è (si
+ * torna indietro con la freccia in cima). `focus` la forza (anteprime in /dev-preview).
+ */
+const FOCUS_ROUTE = /^\/dashboard\/clips\/[^/]+\/stile$/;
+
+export function DashboardShell({ email, children, focus = false }: { email: string; children: React.ReactNode; focus?: boolean }) {
   const pathname = usePathname();
+  const focused = focus || FOCUS_ROUTE.test(pathname);
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -292,8 +300,8 @@ export function DashboardShell({ email, children }: { email: string; children: R
           </header>
 
           {/* Sul telefono la barra in basso copre gli ultimi ~80px: il contenuto finisce sopra. */}
-          <main className="min-w-0 flex-1 px-4 pb-28 pt-5 sm:px-6 md:px-10 md:py-10">{children}</main>
-          <MobileTabBar pathname={pathname} onMore={() => setMoreOpen(true)} moreOpen={moreOpen} />
+          <main className={`min-w-0 flex-1 px-4 pt-5 sm:px-6 md:px-10 md:py-10 ${focused ? "pb-6" : "pb-28"}`}>{children}</main>
+          {!focused && <MobileTabBar pathname={pathname} onMore={() => setMoreOpen(true)} moreOpen={moreOpen} />}
           <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} pathname={pathname} email={email} onSignOut={handleSignOut} />
         </div>
       </div>

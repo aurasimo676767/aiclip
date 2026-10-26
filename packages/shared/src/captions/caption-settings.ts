@@ -56,8 +56,9 @@ export const captionSettingsSchema = z.object({
   box: z.object({ color: hex, opacity: z.number().min(0.2).max(1) }).nullable(),
   /** Parole a schermo insieme: 1 = una alla volta, 2-3 = poche, 5 = la frase. */
   wordsPerLine: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(5)]),
-  /** auto = dove non copre niente (giunzione webcam/gioco, terzo basso sui primi piani). */
-  position: z.enum(["auto", "top", "center", "bottom"]),
+  // Niente campo "posizione": la decide sempre il PC, dove è sempre stata (giunzione webcam/gioco,
+  // terzo basso con la webcam a schermo intero). Scelta di simo, 2026-10-26. I preset salvati prima
+  // col campo continuano a funzionare: zod lo scarta.
   animation: z.enum(["pop", "bounce", "fade", "none"]),
   progressBar: z.boolean(),
   headline: z.object({
@@ -95,7 +96,6 @@ export const CLASSIC_CAPTION_SETTINGS: CaptionSettings = {
   glow: 0,
   box: null,
   wordsPerLine: 1,
-  position: "auto",
   animation: "pop",
   progressBar: false,
   headline: NO_HEADLINE,

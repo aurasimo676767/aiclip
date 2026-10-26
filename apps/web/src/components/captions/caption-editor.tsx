@@ -17,8 +17,9 @@ import {
   type HeadlineStyle,
 } from "@clipforge/shared";
 import { CaptionOverlay } from "./caption-overlay";
-import { PresetDemo } from "./preset-demo";
-import { useElementWidth, useVideoTime } from "./use-captions-runtime";
+import { DEMO_PERIOD, PresetDemo, demoTrack } from "./preset-demo";
+import { useElementWidth, useLoopClock, useVideoTime } from "./use-captions-runtime";
+import { useReducedMotion } from "./use-reduced-motion";
 
 export interface CaptionEditorProps {
   clip: { id: string; title: string; projectId: string; status: string };
@@ -133,8 +134,8 @@ export function CaptionEditor(props: CaptionEditorProps) {
 
       {naming && <NamePresetSheet onClose={() => setNaming(false)} onSave={savePreset} />}
 
-      {/* Barra dell'azione principale: sempre a portata di pollice, sopra la barra di navigazione. */}
-      <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+76px)] z-30 mt-6 md:bottom-4">
+      {/* Barra dell'azione principale: sempre a portata di pollice (qui la barra delle sezioni non c'è). */}
+      <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+12px)] z-30 mt-6 md:bottom-4">
         <div className="card flex items-center gap-3 border-white/[0.08] bg-surface/90 p-3 shadow-pop backdrop-blur-xl">
           <div className="min-w-0 flex-1 text-xs">
             {error ? (
@@ -164,14 +165,21 @@ export function CaptionEditor(props: CaptionEditorProps) {
   );
 }
 
-/** Il video 9:16 con i sottotitoli dal vivo. Tocco = play/pausa, sotto la barra per scorrere. */
-function Stage({ preview, finalVideoUrl, poster, settings, initialTime }: CaptionEditorProps & { settings: CaptionSettings }) {
+/**
+ * Il video 9:16 con i sottotitoli dal vivo. Sul telefono resta fermo in alto mentre sotto scorrono i
+ * comandi: ogni ritocco si vede subito sul testo. A video fermo resta a schermo la parola più vicina.
+ * Per gli Shorts fatti prima degli stili (niente video pulito) mostra la frase d'esempio nello stile
+ * scelto, a grandezza vera, sopra la copertina sfocata; un tocco fa vedere lo Short com'è adesso.
+ */
+function Stage({ clip, preview, finalVideoUrl, poster, settings, initialTime }: CaptionEditorProps & { settings: CaptionSettings }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [boxRef, width] = useElementWidth<HTMLDivElement>();
   const time = useVideoTime(videoRef);
   const [playing, setPlaying] = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
   const duration = preview?.track.duration ?? 0;
   const src = preview?.videoUrl ?? finalVideoUrl;
+  const demo = !preview && !showCurrent;
 
   function toggle() {
     const v = videoRef.current;
@@ -181,65 +189,88 @@ function Stage({ preview, finalVideoUrl, poster, settings, initialTime }: Captio
   }
 
   return (
-    <div className="mx-auto w-full max-w-[min(380px,58vh*0.5625)] lg:sticky lg:top-6">
-      <div ref={boxRef} className="relative aspect-[9/16] w-full overflow-hidden rounded-3xl bg-black shadow-pop ring-1 ring-white/[0.08]">
-        {src ? (
-          <video
-            ref={videoRef}
-            src={src}
-            poster={poster ?? undefined}
-            playsInline
-            loop
-            preload="metadata"
-            className="h-full w-full object-cover"
-            onLoadedMetadata={(e) => {
-              if (initialTime) e.currentTarget.currentTime = initialTime;
+    <div className="sticky top-[51px] z-20 -mx-4 bg-canvas/90 px-4 pb-3 pt-2 backdrop-blur-xl sm:-mx-6 sm:px-6 md:top-0 md:-mx-10 md:px-10 lg:top-6 lg:mx-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
+      <div className="mx-auto w-full max-w-[min(380px,46dvh*0.5625)] lg:max-w-[min(380px,72vh*0.5625)]">
+        <div ref={boxRef} className="relative aspect-[9/16] w-full overflow-hidden rounded-3xl bg-black shadow-pop ring-1 ring-white/[0.08]">
+          {demo ? (
+            <StageDemo settings={settings} poster={poster} title={clip.title} width={width} />
+          ) : src ? (
+            <video
+              ref={videoRef}
+              src={src}
+              poster={poster ?? undefined}
+              playsInline
+              loop
+              preload="metadata"
+              className="h-full w-full object-cover"
+              onLoadedMetadata={(e) => {
+                if (initialTime) e.currentTarget.currentTime = initialTime;
+              }}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onClick={toggle}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted">Video non ancora pronto.</div>
+          )}
+          {preview && width > 0 && <CaptionOverlay track={preview.track} settings={settings} time={time} width={width} hold={!playing} />}
+          {demo && <span className={`${CHIP} pointer-events-none left-2.5 top-2.5`}>Esempio dello stile</span>}
+          {!preview && src && (
+            <button className={`${CHIP} bottom-3 left-3 active:scale-[0.96]`} onClick={() => setShowCurrent((v) => !v)}>
+              {demo ? "Guarda lo Short com'è" : "Torna all'esempio"}
+            </button>
+          )}
+          {/* In un angolo e non al centro: al centro coprirebbe proprio le parole che si stanno ritoccando. */}
+          {!demo && src && (
+            <button
+              onClick={toggle}
+              aria-label={playing ? "Pausa" : "Riproduci"}
+              className="absolute bottom-3 right-3 flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-md transition-transform duration-150 ease-out active:scale-[0.94]"
+            >
+              {playing ? <Pause size={17} fill="currentColor" /> : <Play size={17} className="translate-x-px" fill="currentColor" />}
+            </button>
+          )}
+        </div>
+        {preview ? (
+          <input
+            type="range"
+            min={0}
+            max={duration || 1}
+            step={0.05}
+            value={Math.min(time, duration)}
+            onChange={(e) => {
+              const v = videoRef.current;
+              if (v) v.currentTime = Number(e.target.value);
             }}
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onClick={toggle}
+            aria-label="Posizione nel video"
+            className="mt-2.5 w-full accent-brand-500"
           />
-        ) : (
-          <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted">Video non ancora pronto.</div>
-        )}
-        {preview && width > 0 && <CaptionOverlay track={preview.track} settings={settings} time={time} width={width} />}
-        {src && (
-          <button
-            onClick={toggle}
-            aria-label={playing ? "Pausa" : "Riproduci"}
-            className={`absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition-[opacity,transform] duration-200 ease-out ${
-              playing ? "pointer-events-none scale-90 opacity-0" : "opacity-100"
-            }`}
-          >
-            <Play size={26} className="translate-x-0.5" fill="currentColor" />
-          </button>
-        )}
-        {playing && (
-          <button onClick={toggle} aria-label="Pausa" className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md">
-            <Pause size={16} fill="currentColor" />
-          </button>
-        )}
+        ) : null}
       </div>
-      {preview ? (
-        <input
-          type="range"
-          min={0}
-          max={duration || 1}
-          step={0.05}
-          value={Math.min(time, duration)}
-          onChange={(e) => {
-            const v = videoRef.current;
-            if (v) v.currentTime = Number(e.target.value);
-          }}
-          aria-label="Posizione nel video"
-          className="mt-3 w-full accent-brand-500"
-        />
+    </div>
+  );
+}
+
+/** Etichette e pulsanti piccoli sopra il video: vetro scuro, leggibili su qualunque fotogramma. */
+const CHIP = "absolute rounded-full bg-black/60 px-2.5 py-1.5 text-[11px] font-medium leading-none text-white backdrop-blur-md transition-transform duration-150 ease-out";
+
+/** La frase d'esempio in loop nello stile scelto, alla grandezza vera dello Short, col titolo se acceso. */
+function StageDemo({ settings, poster, title, width }: { settings: CaptionSettings; poster: string | null; title: string; width: number }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const reduced = useReducedMotion();
+  const t = useLoopClock(DEMO_PERIOD, boxRef, !reduced);
+  const track = useMemo(() => ({ ...demoTrack(), headline: title }), [title]);
+  // Nel loop di 3 secondi il titolo "solo all'inizio" sparirebbe e ricomparirebbe di continuo: qui resta fisso.
+  const shown = useMemo(() => ({ ...settings, headline: { ...settings.headline, duration: "sempre" as const } }), [settings]);
+  return (
+    <div ref={boxRef} className="absolute inset-0">
+      {poster ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={poster} alt="" className="h-full w-full scale-110 object-cover blur-md brightness-[0.5]" />
       ) : (
-        <p className="mt-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5 text-xs leading-relaxed text-muted">
-          Questo Short è stato fatto prima degli stili: qui vedi il video com&apos;è adesso. Gli esempi dei preset si muovono lo stesso, e dopo il primo
-          &quot;Applica&quot; l&apos;anteprima dal vivo funziona anche qui.
-        </p>
+        <div className="h-full w-full bg-[radial-gradient(120%_80%_at_30%_20%,#2a3550_0%,#14161d_55%,#0d0e12_100%)]" />
       )}
+      {width > 0 && <CaptionOverlay track={track} settings={shown} time={reduced ? 0.8 : t} width={width} />}
     </div>
   );
 }
@@ -407,18 +438,6 @@ function TextPanel({ settings, update }: { settings: CaptionSettings; update: (p
             { value: 2, label: "Due" },
             { value: 3, label: "Tre" },
             { value: 5, label: "Frase" },
-          ]}
-        />
-      </Row>
-      <Row label="Posizione">
-        <Segmented
-          value={settings.position}
-          onChange={(position) => update({ position })}
-          options={[
-            { value: "auto", label: "Auto" },
-            { value: "top", label: "Alto" },
-            { value: "center", label: "Centro" },
-            { value: "bottom", label: "Basso" },
           ]}
         />
       </Row>

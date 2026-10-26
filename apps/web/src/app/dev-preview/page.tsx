@@ -15,22 +15,23 @@ import { ProjectView } from "@/components/views/project-view";
 /**
  * Anteprima SOLO in sviluppo (in produzione 404): i componenti veri con dati finti, per provare il
  * sito (anche in formato telefono) senza login. Le immagini sono fotogrammi dei VOD scaricati sul PC
- * (public/dev-preview, fuori da git). ?v=home (predefinita) | project | processing
+ * (public/dev-preview, fuori da git). ?v=home (predefinita) | project | processing | stile (&old=1 = Short
+ * fatto prima degli stili, senza anteprima) | stili
  */
-export default function DevPreview({ searchParams }: { searchParams: { v?: string; t?: string; preset?: string } }) {
+export default function DevPreview({ searchParams }: { searchParams: { v?: string; t?: string; preset?: string; old?: string } }) {
   if (process.env.NODE_ENV === "production") notFound();
   const view = searchParams.v ?? "home";
   // Editor degli stili su un render vero (anteprima e parole in public/dev-preview, fuori da git).
   const track = view === "stile" ? (JSON.parse(fs.readFileSync(path.join(process.cwd(), "public", "dev-preview", "captions.json"), "utf8")) as CaptionTrack) : null;
   return (
-    <DashboardShell email="anteprima@example.com">
+    <DashboardShell email="anteprima@example.com" focus={view === "stile"}>
       {view === "project" ? (
         <ProjectView detail={fakeDetail("READY")} youtubeConnected discardedVideoId={null} discardedShorts={[]} />
       ) : view === "stile" && track ? (
         <CaptionEditor
           clip={{ id: "c", title: "PESH FA DUE PIOTTE e LO ASFALTANO..", projectId: "p", status: "COMPLETED" }}
-          preview={{ videoUrl: "/dev-preview/preview.mp4", track }}
-          finalVideoUrl={null}
+          preview={searchParams.old ? null : { videoUrl: "/dev-preview/preview.mp4", track }}
+          finalVideoUrl={searchParams.old ? "/dev-preview/preview.mp4" : null}
           poster="/dev-preview/preview-poster.jpg"
           initialSettings={BUILTIN_CAPTION_PRESETS.find((p) => p.id === searchParams.preset)?.settings ?? CLASSIC_CAPTION_SETTINGS}
           initialTime={searchParams.t ? Number(searchParams.t) : undefined}

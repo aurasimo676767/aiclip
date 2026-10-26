@@ -26,6 +26,14 @@ function cueAt(cues: CaptionCue[], t: number): { cue: CaptionCue; index: number 
   return null;
 }
 
+/** A video fermo fra due parole: la prossima riga (o l'ultima, a fine video), così mentre si cambia lo stile il testo si vede sempre. */
+function nearestCue(cues: CaptionCue[], t: number): { cue: CaptionCue; index: number } | null {
+  if (cues.length === 0) return null;
+  const index = cues.findIndex((c) => c.start >= t);
+  const i = index === -1 ? cues.length - 1 : index;
+  return { cue: cues[i]!, index: i };
+}
+
 /** L'indice della prima riga del gruppo: cambia solo quando entra una riga nuova, così l'animazione d'entrata non riparte sui pezzi successivi. */
 function entranceIndex(cues: CaptionCue[], index: number): number {
   let i = index;
@@ -37,19 +45,21 @@ function entranceIndex(cues: CaptionCue[], index: number): number {
  * I sottotitoli disegnati sopra il video SENZA sottotitoli, nello stile scelto, all'istante `time`.
  * Le righe e i loro tempi vengono da buildCaptionCues (packages/shared), lo stesso calcolo che il
  * worker usa per bruciarli nel video: quello che si vede qui è quello che esce. Misure in pixel del
- * video (1080 di larghezza) riportate alla larghezza del riquadro.
+ * video (1080 di larghezza) riportate alla larghezza del riquadro. `hold` (video in pausa): fra due
+ * parole resta a schermo la prossima invece del vuoto.
  */
-export function CaptionOverlay({ track, settings, time, width }: { track: CaptionTrack; settings: CaptionSettings; time: number; width: number }) {
+export function CaptionOverlay({ track, settings, time, width, hold = false }: { track: CaptionTrack; settings: CaptionSettings; time: number; width: number; hold?: boolean }) {
   const cues = useMemo(() => buildCaptionCues(track, settings), [track, settings]);
   const k = width / 1080;
-  const found = cueAt(cues, time);
+  const found = cueAt(cues, time) ?? (hold ? nearestCue(cues, time) : null);
   const title = headlineText(track, settings);
   const showTitle = title && time < headlineEnd(track.duration, settings);
 
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
       {showTitle && <HeadlinePreview text={title} settings={settings} k={k} />}
-      {found && <CaptionLine key={entranceIndex(cues, found.index)} cue={found.cue} settings={settings} k={k} />}
+      {/* Cambiare l'entrata la rifà vedere subito; gli altri ritocchi (grandezza, colori) non la fanno ripartire a ogni scatto del cursore. */}
+      {found && <CaptionLine key={`${entranceIndex(cues, found.index)}-${settings.animation}`} cue={found.cue} settings={settings} k={k} />}
       {settings.progressBar && track.duration > 0 && (
         <div className="absolute bottom-0 left-0 bg-white/85" style={{ height: Math.max(2, 14 * k), width: `${Math.min(100, (time / track.duration) * 100)}%` }} />
       )}
