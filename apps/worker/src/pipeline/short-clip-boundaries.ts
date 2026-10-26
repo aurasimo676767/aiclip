@@ -131,6 +131,18 @@ function fixBoundaries(clip: RankedClip, segments: TranscriptSegment[]): RankedC
     end = lastFitting ? lastFitting.end : limit;
   }
 
+  // Troppo corta: succede con le urla, l'AI chiude subito dopo l'esplosione (2026-10-25, tre clip da
+  // 9-11 s buttate, fra cui proprio la sbroccata che simo voleva). Si allunga sulle frasi che seguono,
+  // di solito il seguito della reazione, fino alla durata consigliata, senza attraversare un buco di
+  // silenzio né superare il tetto. Se non basta, la clip si scarta come prima.
+  if (end - start < CLIP_DURATION_TARGET.hardMin) {
+    for (const next of segments.filter((s) => s.start >= end - 0.05)) {
+      if (next.start - end > MAX_INTERNAL_GAP_SECONDS || next.end - start > CLIP_DURATION_TARGET.hardMax) break;
+      end = next.end;
+      if (end - start >= CLIP_DURATION_TARGET.min) break;
+    }
+  }
+
   // Fine secca per il loop: al massimo 0,2 s dopo l'ultima parola detta (niente silenzio in coda).
   const lastWord = words.filter((w) => w.end <= end + 0.05 && w.start >= start).pop();
   if (lastWord) end = Math.min(end, lastWord.end + 0.2);

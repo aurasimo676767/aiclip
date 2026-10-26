@@ -5,6 +5,7 @@ import { logger } from "../lib/logger.js";
 import type { CropWindow, FaceTracker } from "../face-tracking/face-tracker.js";
 import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
 import type { TranscriptSegment } from "@clipforge/shared";
+import { LONGFORM_EDIT_MAX_SECONDS, LONGFORM_EDIT_TARGET_SECONDS } from "@clipforge/shared";
 import { planHighlights, tightenHighlights } from "../providers/ai/longform-highlights.js";
 import { PhraseLocator, type LocatedPhrase } from "./intro-moments.js";
 import { allowedRanges, type GameSegment } from "../providers/ai/game-timeline.js";
@@ -221,7 +222,7 @@ export async function planLongformEdit(params: {
             // La quota si misura sulla parte in tema: tolto un altro gioco, il resto non va accorciato per compensare.
             onTopic = duration - topic.removedSeconds;
           }
-          if (seconds(chosen) > onTopic * TIGHTEN_ABOVE) {
+          if (seconds(chosen) > onTopic * TIGHTEN_ABOVE || seconds(chosen) > LONGFORM_EDIT_MAX_SECONDS) {
             // Pezzi lunghi spezzati sui confini delle frasi: se l'AI tiene tratti attaccati (Family
             // Feud, 2026-10-02: 35 tratti diventati 1-2 blocchi da un'ora) il secondo giro non aveva
             // niente da scegliere e non partiva nemmeno.
@@ -230,7 +231,12 @@ export async function planLongformEdit(params: {
               text: segments.filter((seg) => seg.end > r.start && seg.start < r.end).map((seg) => seg.text).join(" "),
             }));
             const tightened = await tightenHighlights(
-              { title: params.highlights.title, pieces, targetSeconds: onTopic * TIGHTEN_TARGET },
+              {
+                title: params.highlights.title,
+                pieces,
+                targetSeconds: Math.min(onTopic * TIGHTEN_TARGET, LONGFORM_EDIT_TARGET_SECONDS),
+                maxSeconds: LONGFORM_EDIT_MAX_SECONDS,
+              },
               { apiKey: params.highlights.apiKey, model: params.highlights.model },
             );
             if (tightened && seconds(tightened) >= 60) chosen = tightened;
@@ -423,7 +429,7 @@ export async function renderEditedLongform(params: {
     const base = plan.punches.length + 1;
     const introDuration = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0);
     plan.intro.forEach((r, i) => {
-      introInputs.push("-ss", (params.start + r.start).toFixed(3), "-t", (r.end - r.start).toFixed(3), "-i", params.sourceVideoPath);
+      introInputs.push("-threads", "1", "-ss", (params.start + r.start).toFixed(3), "-t", (r.end - r.start).toFixed(3), "-i", params.sourceVideoPath);
       steps.push(
         `[${base + i}:v]scale=1920:1080:flags=lanczos,setsar=1,setpts=PTS-STARTPTS[iv${i}]`,
         `[${base + i}:a]aresample=44100,asetpts=PTS-STARTPTS[ia${i}]`,
@@ -463,7 +469,9 @@ export async function renderEditedLongform(params: {
   const scriptPath = path.join(params.workDir, "edit-filter.txt");
   await fsp.writeFile(scriptPath, steps.join(";\n"), "utf8");
 
-  const punchInputs = plan.punches.flatMap((p) => ["-ss", (params.start + p.sourceStart).toFixed(3), "-t", (p.end - p.start).toFixed(3), "-i", params.sourceVideoPath]);
+  // Un thread a testa per i pezzetti (2-8 s): con il decoder a thread automatici (20 sul PC di simo)
+  // 49 ingressi dello stesso VOD hanno finito la memoria e ucciso il worker (Affari Tuoi, 2026-10-25).
+  const punchInputs = plan.punches.flatMap((p) => ["-threads", "1", "-ss", (params.start + p.sourceStart).toFixed(3), "-t", (p.end - p.start).toFixed(3), "-i", params.sourceVideoPath]);
   const input = [
     "-y",
     "-ss",

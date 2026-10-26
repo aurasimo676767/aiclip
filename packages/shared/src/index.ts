@@ -20,3 +20,6 @@ export * from "./schemas/longform-ranking.schema.js";
 export * from "./text/censor.js";
 export * from "./text/hashtags.js";
 export * from "./text/feed-risk.js";
+
+export * from "./captions/caption-settings.js";
+export * from "./captions/caption-cues.js";

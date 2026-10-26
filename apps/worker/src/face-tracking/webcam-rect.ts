@@ -202,7 +202,7 @@ export async function detectWebcamRectDebug(
   const ranked = [
     ...contenders.sort((a, b) => b.rect.width * b.rect.height - a.rect.width * a.rect.height),
     ...sortedByScore.filter((e) => e.score < topScore * NEAR_TIE_RATIO),
-  ].slice(0, 5);
+  ].slice(0, 20); // più alternative del necessario: le usa il tracker per far combaciare le webcam di uno stesso layout (fixOversizedWebcamRects)
   const best = ranked[0];
   if (!best) return { rect: null, reason: "nessun rettangolo plausibile attorno al volto", alternatives: [] };
   const cornerOk = best.score >= MIN_CORNER_RECT_SCORE && isCornerAnchored(best.rect, sourceWidth, sourceHeight);

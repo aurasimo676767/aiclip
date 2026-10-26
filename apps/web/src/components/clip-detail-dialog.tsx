@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Loader2, MoreHorizontal, Pencil, RefreshCw, RotateCcw, Scissors, Send, Sparkles, X, Wand2 } from "lucide-react";
+import { Download, Loader2, MoreHorizontal, Pencil, RefreshCw, RotateCcw, Scissors, Send, Sparkles, X, Wand2, Captions } from "lucide-react";
 import { feedRisk, overallScore, type ClipBadge, type ClipScores } from "@clipforge/shared";
 import type { ClipViewModel } from "./clip-list";
 import { isRenderable } from "./clip-list";
@@ -186,6 +187,11 @@ ${clip.publishDescription}`} />}
               {busy === "render" ? <Loader2 size={14} className="animate-spin" /> : clip.status === "FAILED" ? <RotateCcw size={14} /> : <Sparkles size={14} />}
               {clip.status === "FAILED" ? "Riprova render" : "Genera video"}
             </button>
+          )}
+          {isShort && (clip.status === "COMPLETED" || working) && (
+            <Link href={`/dashboard/clips/${clip.id}/stile`} className="btn btn-primary btn-sm">
+              <Captions size={14} /> Stile sottotitoli
+            </Link>
           )}
           {clip.videoUrl && (
             <a href={clip.videoUrl} download className="btn btn-secondary btn-sm">

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarClock, Loader2, Sparkles, X } from "lucide-react";
 import { overallScore, type ClipScores, type ClipBadge } from "@clipforge/shared";
 import { ClipCard } from "./clip-card";
@@ -68,6 +68,13 @@ export function ClipList({ clips, youtubeConnected, compact = false }: { clips: 
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openClipId, setOpenClipId] = useState<string | null>(null);
+  // ?clip=<id> apre subito quello Short (dalla Home, dall'editor degli stili).
+  const searchParams = useSearchParams();
+  const requestedClip = searchParams.get("clip");
+  useEffect(() => {
+    if (requestedClip && clips.some((c) => c.id === requestedClip)) setOpenClipId(requestedClip);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedClip]);
   const [busy, setBusy] = useState<"render" | "schedule" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);

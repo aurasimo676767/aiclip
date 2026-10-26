@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { DEFAULT_TEMPLATES, type RankedClip, type TranscriptSegment } from "@clipforge/shared";
+import { DEFAULT_TEMPLATES, type RankedClip, type TranscriptSegment, normalizeCaptionSettings } from "@clipforge/shared";
 import { renderClip } from "../render/render-clip.js";
 import { ReactionCamFaceTracker } from "../face-tracking/reaction-cam-face-tracker.js";
 
@@ -45,6 +45,9 @@ async function main() {
     faceTracker: new ReactionCamFaceTracker(),
     workDir: "tmp-real-render",
     outputPath: "test-real-out.mp4",
+    captionSettings: normalizeCaptionSettings(null),
+    previewOutputPath: "tmp-real-render/preview.mp4",
+    trackOutputPath: "tmp-real-render/captions.json",
   });
   console.log("OK, durata finale:", result.durationSeconds);
 }

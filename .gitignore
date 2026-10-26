@@ -53,3 +53,7 @@ apps/worker/assets/cover-style/
 apps/worker/assets/emoji-cache/
 apps/worker/assets/sfx/
 apps/web/public/dev-preview/
+
+# Modelli grossi scaricati da OpenCV Zoo e wespeaker: stanno solo sul PC del worker.
+apps/worker/models/face_recognition_sface_2021dec.onnx
+apps/worker/models/wespeaker_en_voxceleb_resnet34_LM.onnx

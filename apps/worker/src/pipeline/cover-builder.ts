@@ -85,13 +85,18 @@ export function pickFaces(
  * libreria (etichetta `tags`) da passare per forza come riferimento, così il modello vede davvero
  * cappello e cuffie.
  */
-export const PERSON_STYLE: Record<string, { note: string; tag?: string }> = {
+export const PERSON_STYLE: Record<string, { note: string; tag?: string; /** Primi piani di riferimento per GPT Image (default 5). */ refs?: number }> = {
   // simo, 2026-09-26: "blur, facciamolo SEMPRE con cuffie della redbull, o cappello della redbull".
   BLUR: { note: "always wearing his Red Bull cap or his Red Bull gaming headphones, exactly as in his reference photos that show them", tag: "redbull" },
   // simo, 2026-09-30, dopo le prove: "marza non è ciccione", "lo fa sempre ciccione".
   MARZA: { note: "SLIM: thin face, defined cheekbones, no double chin, slim body. Never draw him heavier or chubbier than in the photos" },
   // simo, 2026-09-30: "manuxo è diventato marocchino", "cambia sempre etnia", "sembra uscito da gossip girl".
-  MANUXO: { note: "a young Italian guy with fair skin: keep EXACTLY his skin tone, nose, eyes and messy dark hair from the photos, a normal streamer look (not a model or an actor)" },
+  // simo, 2026-10-25: "manuxo in faccia non è manuxo" con le 5 foto giuste (confermate tutte da lui): più
+  // foto e i tratti che si vedono nelle sue foto, scritti uno per uno.
+  MANUXO: {
+    note: "a young Italian guy with fair skin and a few freckles, a small ring piercing on one side of the nose, a thin light mustache, messy wavy dark-brown hair falling on the forehead, often a pearl or chain necklace: keep EXACTLY his face shape, skin tone, nose, eyes and hair from the photos, a normal streamer look (not a model or an actor). Do not make him older, more tanned or more muscular",
+    refs: 7,
+  },
 };
 
 /**

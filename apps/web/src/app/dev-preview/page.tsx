@@ -1,9 +1,15 @@
+import fs from "node:fs";
+import path from "node:path";
 import { notFound } from "next/navigation";
+import { BUILTIN_CAPTION_PRESETS, CLASSIC_CAPTION_SETTINGS, type CaptionTrack } from "@clipforge/shared";
+import { CaptionEditor } from "@/components/captions/caption-editor";
+import { StylesManager } from "@/components/captions/styles-manager";
 import type { ProjectSummary } from "@/lib/data/projects";
 import type { ProjectDetail } from "@/lib/data/clips";
 import { DashboardShell } from "@/components/dashboard-shell";
 import type { ClipViewModel } from "@/components/clip-list";
 import { HomeView } from "@/components/views/home-view";
+import type { PcStatus, ReadyShort } from "@/lib/data/worker-status";
 import { ProjectView } from "@/components/views/project-view";
 
 /**
@@ -11,23 +17,61 @@ import { ProjectView } from "@/components/views/project-view";
  * sito (anche in formato telefono) senza login. Le immagini sono fotogrammi dei VOD scaricati sul PC
  * (public/dev-preview, fuori da git). ?v=home (predefinita) | project | processing
  */
-export default function DevPreview({ searchParams }: { searchParams: { v?: string } }) {
+export default function DevPreview({ searchParams }: { searchParams: { v?: string; t?: string; preset?: string } }) {
   if (process.env.NODE_ENV === "production") notFound();
   const view = searchParams.v ?? "home";
+  // Editor degli stili su un render vero (anteprima e parole in public/dev-preview, fuori da git).
+  const track = view === "stile" ? (JSON.parse(fs.readFileSync(path.join(process.cwd(), "public", "dev-preview", "captions.json"), "utf8")) as CaptionTrack) : null;
   return (
     <DashboardShell email="anteprima@example.com">
       {view === "project" ? (
         <ProjectView detail={fakeDetail("READY")} youtubeConnected discardedVideoId={null} discardedShorts={[]} />
+      ) : view === "stile" && track ? (
+        <CaptionEditor
+          clip={{ id: "c", title: "PESH FA DUE PIOTTE e LO ASFALTANO..", projectId: "p", status: "COMPLETED" }}
+          preview={{ videoUrl: "/dev-preview/preview.mp4", track }}
+          finalVideoUrl={null}
+          poster="/dev-preview/preview-poster.jpg"
+          initialSettings={BUILTIN_CAPTION_PRESETS.find((p) => p.id === searchParams.preset)?.settings ?? CLASSIC_CAPTION_SETTINGS}
+          initialTime={searchParams.t ? Number(searchParams.t) : undefined}
+          userPresets={[{ id: "u1", name: "Urla rosse", settings: { ...CLASSIC_CAPTION_SETTINGS, font: "anton", size: 140, highlightColor: "#FF2E2E" } }]}
+          defaultSettings={null}
+        />
+      ) : view === "stili" ? (
+        <StylesManager
+          userPresets={[{ id: "u1", name: "Urla rosse", settings: { ...CLASSIC_CAPTION_SETTINGS, font: "anton", size: 140, highlightColor: "#FF2E2E" } }]}
+          defaultSettings={null}
+          background="/dev-preview/preview-poster.jpg"
+          editHref="#"
+        />
       ) : view === "processing" ? (
         <ProjectView detail={fakeDetail("TRANSCRIBING")} youtubeConnected discardedVideoId={null} discardedShorts={[]} />
       ) : (
-        <HomeView summaries={fakeSummaries()} limit={12} />
+        <HomeView summaries={fakeSummaries()} pc={fakePc()} shorts={fakeShorts()} />
       )}
     </DashboardShell>
   );
 }
 
 const img = (n: number) => `/dev-preview/f${n}.jpg`;
+
+function fakePc(): PcStatus {
+  return {
+    state: "working",
+    lastSeenAt: new Date().toISOString(),
+    current: [
+      { kind: "render", id: "r1", title: "PESH FA DUE PIOTTE e LO ASFALTANO..", stage: "Render dello Short", progress: 62, imageUrl: img(9), href: "#", portrait: true },
+      { kind: "video", id: "v1", title: "HO TRUFF4T0 KANYE WEST e PETER GRIFFIN ! $CAM WITH YOUR FRIENDS", stage: "Trascrizione", progress: 55, imageUrl: img(19), href: "#", portrait: false },
+    ],
+    queuedRenders: 14,
+    queuedVideos: 1,
+  };
+}
+
+function fakeShorts(): ReadyShort[] {
+  const titles = ["HA TRUFFATO MRBEAST a VOCE?!", "JEFF BEZOS NON SALVA la TRUFFA..", "PETER GRIFFIN PAGA per il CECCHINO..", "IL MAESTRO BOLLITO e il GENIO GLOBALE..", "OFFRE le 5090 e RIDONO TUTTI..", "CARTMAN VUOLE PURE i SOLDI ALTRUI.."];
+  return titles.map((title, i) => ({ id: "s" + i, projectId: "p", title, duration: 17 + i * 7, thumbnailUrl: img(3 + i), publishedOnYoutube: i === 1 }));
+}
 
 function fakeSummaries(): ProjectSummary[] {
   const rows: Array<[string, string, string, number, number, number, number | null, number]> = [

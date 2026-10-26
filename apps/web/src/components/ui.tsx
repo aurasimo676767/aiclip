@@ -5,10 +5,8 @@ export function PageHeader({ title, description, actions }: { title: ReactNode; 
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="text-[1.7rem] font-extrabold leading-tight tracking-tight text-white sm:text-[2rem]" style={{ fontStretch: "110%" }}>
-          {title}
-        </h1>
-        {description && <p className="mt-1 text-sm text-muted">{description}</p>}
+        <h1 className="text-[1.6rem] font-semibold leading-tight tracking-tight text-white sm:text-[1.85rem]">{title}</h1>
+        {description && <p className="mt-1.5 max-w-2xl text-sm text-muted">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -17,8 +15,8 @@ export function PageHeader({ title, description, actions }: { title: ReactNode; 
 
 export function EmptyState({ icon, title, description, action }: { icon?: ReactNode; title: string; description?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center">
-      {icon && <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-raised text-muted">{icon}</div>}
+    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/[0.09] bg-white/[0.015] px-6 py-14 text-center">
+      {icon && <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/[0.06] text-muted">{icon}</div>}
       <div>
         <p className="font-medium text-ink">{title}</p>
         {description && <p className="mt-1 max-w-md text-sm text-muted">{description}</p>}
@@ -28,32 +26,25 @@ export function EmptyState({ icon, title, description, action }: { icon?: ReactN
   );
 }
 
-/** Colore di un punteggio 0-100: stessa scala ovunque nel sito. */
-// Solo i colori del sito (restyling 2026-10-03): il verde lime e lo smeraldo dei punteggi erano un
-// quarto e quinto accento che litigavano col giallo. Giallo = i migliori, bianco = buoni, grigio = medi.
+/** Colore di un punteggio 0-100: stessa scala ovunque nel sito. Azzurro = i migliori, bianco = buoni, grigio = medi. */
 export function scoreTone(score: number): { text: string; ring: string; bg: string } {
-  if (score >= 82) return { text: "text-brand-300", ring: "#ffd400", bg: "bg-brand-400/15" };
-  if (score >= 70) return { text: "text-ink", ring: "#e9e5ef", bg: "bg-white/10" };
-  if (score >= 60) return { text: "text-muted", ring: "#8d8699", bg: "bg-white/5" };
-  return { text: "text-faint", ring: "#5a5466", bg: "bg-white/5" };
+  if (score >= 82) return { text: "text-brand-300", ring: "#4f86ff", bg: "bg-brand-400/15" };
+  if (score >= 70) return { text: "text-ink", ring: "#e9e9ee", bg: "bg-white/10" };
+  if (score >= 60) return { text: "text-muted", ring: "#8a8a95", bg: "bg-white/5" };
+  return { text: "text-faint", ring: "#55555f", bg: "bg-white/5" };
 }
 
-/**
- * Punteggio complessivo come un pezzo di sottotitolo: numero pesante e largo su un tassello. I
- * migliori (giallo pieno, col bordo nero sotto come le scritte degli Shorts) si riconoscono a colpo
- * d'occhio in una griglia di copertine; gli altri restano scuri e non rubano la scena all'immagine.
- * Prima era un anello di progresso: con nove copertine diventavano nove cerchi che si somigliavano.
- */
+/** Punteggio complessivo su un tassello: i migliori pieni d'azzurro, gli altri scuri e discreti sopra la copertina. */
 export function ScoreRing({ score, size = 44 }: { score: number; size?: number }) {
   const top = score >= 82;
   const good = score >= 70;
   return (
     <span
       title={`Punteggio ${score}/100`}
-      className={`inline-flex shrink-0 items-center justify-center rounded-md font-black tabular-nums leading-none ${
-        top ? "bg-brand-400 text-on-brand shadow-slab" : good ? "bg-black/70 text-white ring-1 ring-white/15 backdrop-blur" : "bg-black/60 text-white/60 backdrop-blur"
+      className={`inline-flex shrink-0 items-center justify-center rounded-lg font-semibold tabular-nums leading-none ${
+        top ? "bg-brand-500 text-white" : good ? "bg-black/65 text-white ring-1 ring-white/15 backdrop-blur" : "bg-black/55 text-white/65 backdrop-blur"
       }`}
-      style={{ fontSize: Math.round(size * 0.4), minWidth: Math.round(size * 0.92), height: Math.round(size * 0.66), paddingInline: Math.round(size * 0.14), fontStretch: "118%" }}
+      style={{ fontSize: Math.round(size * 0.36), minWidth: Math.round(size * 0.9), height: Math.round(size * 0.6), paddingInline: Math.round(size * 0.14) }}
     >
       {score}
     </span>
@@ -63,9 +54,9 @@ export function ScoreRing({ score, size = 44 }: { score: number; size?: number }
 /** Piccolo riquadro numerico (statistiche). */
 export function Stat({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
   return (
-    <div className="rounded-xl border border-line bg-raised/60 px-4 py-3">
+    <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3">
       <p className="text-xs font-medium text-faint">{label}</p>
-      <p className="mt-1 font-display text-lg font-semibold text-ink">{value}</p>
+      <p className="mt-1 text-lg font-semibold tabular-nums text-ink">{value}</p>
       {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
     </div>
   );
@@ -73,9 +64,9 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
 
 export function Alert({ tone = "error", children }: { tone?: "error" | "success" | "info"; children: ReactNode }) {
   const styles = {
-    error: "border-red-500/30 bg-red-500/10 text-red-200",
-    success: "border-white/10 bg-white/[0.04] text-ink",
-    info: "border-brand-400/30 bg-brand-500/10 text-brand-100",
+    error: "border-hot/30 bg-hot/10 text-[#ffc2c6]",
+    success: "border-good/25 bg-good/10 text-[#b9f5d3]",
+    info: "border-brand-400/25 bg-brand-500/10 text-brand-100",
   }[tone];
   return <div className={`rounded-xl border px-4 py-3 text-sm ${styles}`}>{children}</div>;
 }

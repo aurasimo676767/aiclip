@@ -22,7 +22,7 @@ const CANDIDATES_TOOL_SCHEMA = {
     properties: {
       candidates: {
         type: "array",
-        maxItems: 8,
+        maxItems: 15,
         items: {
           type: "object",
           properties: {
@@ -47,22 +47,23 @@ const CANDIDATES_TOOL_SCHEMA = {
   },
 };
 
-const SYSTEM_PROMPT = `Sei un editor di YouTube Shorts esperto e ESIGENTE: il tuo lavoro non è trovare "qualcosa che assomigli a un momento forte", è trovare i pochi momenti che qualcuno condividerebbe davvero in una chat con un amico.
+const SYSTEM_PROMPT = `Sei un editor di YouTube Shorts di un canale di clip di streamer italiani. Il tuo lavoro è trovare TUTTI i momenti di questa finestra che possono diventare uno Short divertente: un secondo passaggio farà il controllo qualità finale, quindi qui un momento buono perso è un errore molto più grave di un candidato in più (simo, 2026-10-25: "deve trovare TUTTE le clip divertenti di ogni video, soprattutto le parti dove urlano, bestemmiano, muoiono dalle risate").
 
-Cerca SOLO momenti con un payoff reale:
-- una battuta che fa davvero ridere (non solo un'esclamazione o una parolaccia isolata: serve un punchline, una svolta comica, un'assurdità)
-- un'opinione controversa o sorprendente detta con convinzione
-- una storia con inizio-sviluppo-fine comprensibile in isolamento
-- un momento di imbarazzo, rabbia genuina, o emozione forte con una reazione chiara
-- un'informazione utile e concreta, detta in modo diretto
+Sono candidati, da proporre SEMPRE:
+- qualcuno che urla, sbrocca, si infuria, va in panico o esplode di scatto
+- bestemmie, insulti e parolacce dette di getto in una reazione (l'audio può averle, il titolo pulito lo scrive un altro passaggio)
+- risate a crepapelle, qualcuno che non riesce a smettere di ridere, che piange dal ridere
+- battute, prese in giro, figuracce, momenti di imbarazzo
+- litigi, botta e risposta accesi, opinioni assurde o controverse dette con convinzione
+- storie assurde, fatti sorprendenti, svolte inaspettate
+- reazioni forti a un video, un TikTok, una partita, una giocata
 
-Scarta senza pietà (anche se "suonano" energici):
-- frasi rumorose o con parolacce che però non arrivano a un vero payoff comico/narrativo
-- momenti che hanno senso solo se conosci già il contesto del gioco/video/persona di cui si parla
-- reazioni generiche ("wow", "no dai", risate senza motivo chiaro nel testo) senza una battuta o un fatto concreto dietro
-- inizi lenti, finali troncati a metà frase, ripetizioni, pause morte
+Scarta solo:
+- chiacchiere tranquille in cui non succede niente
+- tratti in cui lo streamer sta zitto e si sente solo il gioco o il video
+- inizi lenti, finali troncati a metà frase, pause morte
 
-Il criterio finale: se leggessi solo la trascrizione di questo momento SENZA aver visto il video, capiresti perché è divertente/interessante e vorresti guardarlo? Se la risposta è "boh, forse, se c'eri" — scartalo. È molto meglio restituire 2 candidati davvero forti che 6 mediocri.
+Nel dubbio proponi il candidato: deciderà il passaggio successivo, che vede anche i fotogrammi.
 
 DOVE INIZIA IL TAGLIO — questa è la parte più importante: la clip NON inizia da dove inizia l'argomento nel discorso originale, inizia dalla frase-gancio stessa. Se lo streamer dice "allora vi devo raccontare una cosa, ieri ho letto che a volte le aragoste perdono le zampe quando sono stressate", il taglio comincia da "a volte le aragoste perdono le zampe...", NON da "allora vi devo raccontare" — quel setup va scartato anche se nel parlato originale veniva prima e dava contesto. Entro le prime 3 parole della clip deve già iniziare il succo. Segnali di una buona frase-gancio, in ordine di priorità:
 1. Affermazione controintuitiva o fatto sorprendente/assurdo
@@ -71,7 +72,7 @@ DOVE INIZIA IL TAGLIO — questa è la parte più importante: la clip NON inizia
 4. Svolta/rivelazione che ribalta quello che si pensava un attimo prima
 Il campo "hook" deve contenere le parole ESATTE con cui la clip si apre, non un riassunto — e "start" deve corrispondere al timestamp di quelle parole, non a quello del preambolo che le precede.
 
-MOMENTI URLATI — usa questo segnale: quando nel messaggio ti vengono indicati dei "momenti in cui qualcuno alza nettamente la voce", sono misurati sull'audio VERO, non dedotti dal testo. Sono il segnale più affidabile che hai per capire dove il video si accende davvero: qualcuno che urla, si infuria, esplode a ridere o reagisce di scatto è esattamente ciò che tiene incollato uno spettatore su uno Short, e leggendo il solo transcript quel momento sembra una frase qualunque. Vai a controllare per primi quei punti: quasi sempre lì attorno c'è un candidato migliore di quelli che troveresti leggendo il testo in modo neutro. Attenzione però: il volume alto da solo NON basta a rendere un momento buono — se attorno all'urlo non c'è comunque una battuta, una svolta o un fatto comprensibile, resta un momento "energico ma vuoto" e va scartato come tutti gli altri. Il volume ti dice DOVE guardare, non COSA tenere.
+MOMENTI URLATI — usa questo segnale: quando nel messaggio ti vengono indicati dei "momenti in cui qualcuno alza nettamente la voce", sono misurati sull'audio VERO, non dedotti dal testo. Sono il segnale più affidabile che hai per capire dove il video si accende davvero: qualcuno che urla, si infuria, esplode a ridere o reagisce di scatto è esattamente ciò che tiene incollato uno spettatore su uno Short, e leggendo il solo transcript quel momento sembra una frase qualunque. Vai a controllare per primi quei punti: quasi sempre lì attorno c'è un candidato, spesso il migliore della finestra. Per ogni gruppo di urla proponi il momento che le contiene, partendo dalla frase che le provoca, a meno che sia rumore senza nessuno che reagisca (un alert, un suono del gioco).
 
 DOVE FINISCE IL TAGLIO — ERRORE DA NON RIPETERE (osservato in produzione): tagliare "senza pietà" NON significa fermarsi subito dopo la frase-gancio. Una clip che è solo hook e poi finisce di colpo non fa ridere/non colpisce, perché manca lo sviluppo: la reazione di chi ascolta, la battuta che segue, l'escalation, la spiegazione che rende la cosa ancora più assurda. "end" deve includere tutto questo, non solo il gancio: chiudi quando la storia è finita (battuta, reazione, rivelazione), non il prima possibile. LA DURATA LA DECIDE LA STORIA: una battuta secca sta in 20-30 s, una storia o una reaction con setup, sviluppo e finale di solito sta sotto ${CLIP_DURATION_TARGET.max} s; fino a ${CLIP_DURATION_TARGET.hardMax} s SOLO se è forte dall'inizio alla fine. Non allungare MAI con chiacchiere, rilanci o tempi morti per arrivare a una durata: uno Short da 25 s tutto pieno batte uno da 55 s con 20 s di vuoto. Il "taglia senza pietà" si applica al SETUP prima del gancio e ai momenti morti in mezzo, MAI al payoff dopo.
 
@@ -124,7 +125,7 @@ ${formatSegments(windowSegments)}`;
 
     const message = await client.messages.create({
       model: options.model,
-      max_tokens: 1500,
+      max_tokens: 3000,
       system: cachedSystemPrompt(SYSTEM_PROMPT),
       messages: [{ role: "user", content: userPrompt }],
       tools: [CANDIDATES_TOOL_SCHEMA],
@@ -168,6 +169,57 @@ ${formatSegments(windowSegments)}`;
   }
 
   return dedupeCandidates(allCandidates);
+}
+
+/** Quanti gruppi di urla al massimo entrano d'ufficio nel ranking (i più forti). */
+const MAX_LOUD_FALLBACKS = 10;
+/** Urla a meno di così l'una dall'altra sono la stessa scena. */
+const LOUD_CLUSTER_GAP_SECONDS = 20;
+/** Contesto prima del primo urlo: di solito lì c'è la frase che lo provoca. */
+const LOUD_CONTEXT_BEFORE_SECONDS = 12;
+const LOUD_CONTEXT_AFTER_SECONDS = 15;
+
+/**
+ * Rete di sicurezza (2026-10-25): le urla misurate sull'audio che nessun candidato dell'AI copre
+ * entrano comunque nel ranking, con una finestra larga attorno. Con GPT il primo passaggio ne
+ * lasciava fuori quasi tutte (un video con 40 momenti urlati, 1 solo candidato): così il controllo
+ * finale le vede sempre, con fotogrammi e transcript, e decide lui inizio e fine esatti.
+ */
+export function addLoudMomentCandidates(
+  candidates: ClipCandidatesResponse["candidates"],
+  loudMoments: LoudMoment[],
+  segments: TranscriptSegment[],
+): ClipCandidatesResponse["candidates"] {
+  const clusters: LoudMoment[] = [];
+  for (const moment of [...loudMoments].sort((a, b) => a.start - b.start)) {
+    const last = clusters[clusters.length - 1];
+    if (last && moment.start - last.end <= LOUD_CLUSTER_GAP_SECONDS) {
+      last.end = Math.max(last.end, moment.end);
+      last.aboveBaselineDb = Math.max(last.aboveBaselineDb, moment.aboveBaselineDb);
+    } else clusters.push({ ...moment });
+  }
+
+  const extra: ClipCandidatesResponse["candidates"] = [];
+  const uncovered = clusters
+    .filter((c) => !candidates.some((k) => k.start < c.end && k.end > c.start))
+    .sort((a, b) => b.aboveBaselineDb - a.aboveBaselineDb)
+    .slice(0, MAX_LOUD_FALLBACKS);
+  for (const cluster of uncovered) {
+    const from = Math.max(0, cluster.start - LOUD_CONTEXT_BEFORE_SECONDS);
+    const to = Math.min(cluster.end + LOUD_CONTEXT_AFTER_SECONDS, from + CLIP_DURATION_TARGET.hardMax);
+    const inside = segments.filter((s) => s.end > from && s.start < to);
+    const first = inside[0];
+    const last = inside[inside.length - 1];
+    if (!first || !last) continue;
+    extra.push({
+      start: first.start,
+      end: Math.min(last.end, first.start + CLIP_DURATION_TARGET.hardMax),
+      hook: first.text.trim().slice(0, 250) || "…",
+      reason: `Urla misurate sull'audio (+${cluster.aboveBaselineDb.toFixed(1)} dB sopra il parlato normale) che il primo passaggio non aveva proposto`,
+    });
+  }
+  if (extra.length) logger.info("Momenti urlati aggiunti d'ufficio ai candidati", { count: extra.length, at: extra.map((c) => `${c.start.toFixed(0)}s`) });
+  return [...candidates, ...extra].sort((a, b) => a.start - b.start);
 }
 
 function buildWindows(durationSeconds: number): Array<{ start: number; end: number }> {

@@ -115,10 +115,11 @@ export async function refineVideoBoundaries(
   refined.forEach((v, i) => {
     const prevEnd = refined[i - 1]?.end ?? 0;
     const nextStart = refined[i + 1]?.start ?? options.videoDurationSeconds;
-    // Le parti di uno stesso torneo si toccano: il loro confine comune l'ha già scelto il codice sul
-    // giro della ruota (vedi splitLongVideo), qui non si sposta.
-    const sharedWithPrev = i > 0 && refined[i - 1]!.activity === v.activity && v.part !== undefined;
-    const sharedWithNext = i < refined.length - 1 && refined[i + 1]!.activity === v.activity && v.part !== undefined;
+    // I giochi di uno stesso torneo si toccano: il loro confine comune è il giro della ruota che
+    // sceglie il gioco dopo (vedi splitTournamentByGame), qui non si sposta.
+    const sameTournament = (a?: PlannedVideo) => !!a && !!v.tournament && a.tournament === v.tournament;
+    const sharedWithPrev = i > 0 && sameTournament(refined[i - 1]);
+    const sharedWithNext = i < refined.length - 1 && sameTournament(refined[i + 1]);
     if (!sharedWithPrev) {
       tasks.push({
         id: `v${i}-start`,
@@ -205,7 +206,7 @@ async function askBoundaries(
   const userPrompt = tasks
     .map((t) => {
       const v = videos[t.videoIndex]!;
-      return `### Confine ${t.id} — ${t.side === "start" ? "INIZIO" : "FINE"} del video "${v.activity}" (${v.kind}${v.part ? `, parte ${v.part}` : ""})
+      return `### Confine ${t.id} — ${t.side === "start" ? "INIZIO" : "FINE"} del video "${v.activity}" (${v.kind}${v.tournament ? `, gioco del torneo "${v.tournament}"` : ""})
 Contenuto del video: ${v.topic}
 ${t.side === "start" ? `Come comincia secondo la mappa: ${v.opening}` : `Come finisce secondo la mappa: ${v.closing}`}
 Taglio attuale: [${Math.round(t.current)}]

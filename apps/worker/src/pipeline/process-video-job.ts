@@ -30,7 +30,7 @@ import { extractAudio } from "./extract-audio.js";
 import { downloadYoutubeVideo } from "./download-youtube.js";
 import { isTwitchVodLive, markWaitingForLiveEnd } from "./live-vod-wait.js";
 import { ensureEnoughDiskSpaceForDownload } from "../lib/disk-space.js";
-import { detectClipCandidates } from "../providers/ai/candidates.js";
+import { addLoudMomentCandidates, detectClipCandidates } from "../providers/ai/candidates.js";
 import { rankAndBuildEdl } from "../providers/ai/ranking.js";
 import { detectLongformCandidates } from "../providers/ai/longform-candidates.js";
 import { rankLongformClips } from "../providers/ai/longform-ranking.js";
@@ -46,7 +46,7 @@ import { updateVideoStatus } from "../queue/video-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
 import { isVideoCancelled } from "../lib/cancellation.js";
 import { ensureLongformGames } from "./longform-games.js";
-import { censorText } from "@clipforge/shared";
+import { censorText, LONGFORM_EDIT_MAX_SECONDS } from "@clipforge/shared";
 
 // Tentativi automatici prima di arrendersi e marcare FAILED (serve poi il pulsante "Riprova"
 // manuale): stesso numero di default usato da claim_next_video per lo stale-reclaim, così i due
@@ -397,7 +397,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
   }
 }
 
-type ClipToInsert = ReturnType<typeof buildInsertRow>;
+type ClipToInsert = ReturnType<typeof buildInsertRow> & { longform_edit?: boolean };
 
 function buildInsertRow(params: {
   video: VideoRow;
@@ -452,13 +452,14 @@ async function buildShortClipsToInsert(
   // solo transcript non può sapere. Vedi vocal-energy.ts.
   const loudMoments = await detectLoudMoments(localVideoPath, segments);
 
-  const candidates = await detectClipCandidates(segments, {
+  const aiCandidates = await detectClipCandidates(segments, {
     apiKey: env.ANTHROPIC_API_KEY,
     model: env.ANTHROPIC_MODEL_CHEAP,
     videoTitle,
     videoDurationSeconds,
     loudMoments,
   });
+  const candidates = addLoudMomentCandidates(aiCandidates, loudMoments, segments);
   logger.info("Candidati Shorts individuati", { videoId: video.id, count: candidates.length });
 
   const rankedClips = await rankAndBuildEdl(candidates, segments, {
@@ -686,7 +687,7 @@ async function planLongformClips(
 // render-longform-clip.ts) non li legge mai, esistono solo perché le colonne DB sono NOT NULL
 // e condivise con gli Shorts.
 function buildLongformInsertRow(video: VideoRow, clip: RankedLongformClip): ClipToInsert {
-  return buildInsertRow({
+  const row = buildInsertRow({
     video,
     start: clip.start,
     end: clip.end,
@@ -703,6 +704,9 @@ function buildLongformInsertRow(video: VideoRow, clip: RankedLongformClip): Clip
     badges: clip.badges,
     format: "longform",
   });
+  // Oltre il tetto del montato il video si monta da solo: un gioco da 3 ore non si pubblica intero
+  // (simo, 2026-10-25). Sotto, il montato resta da accendere a mano dal sito come prima.
+  return { ...row, longform_edit: clip.duration > LONGFORM_EDIT_MAX_SECONDS };
 }
 
 /** Audio mono 16 kHz PCM di un tratto del video (per cercare il respiro prima del gancio). */
@@ -714,12 +718,18 @@ function readPcmWindow(videoPath: string, absStart: number, duration: number): P
  * Filtro sugli Shorts (simo, 2026-09-27: "fa short anche inutili"). I punteggi dell'AI stavano tutti
  * fra 64 e 85 e nessuno veniva scartato. Esce solo chi supera la soglia ED è una reazione vera dello
  * streamer. Sugli ultimi 40 Shorts la soglia scartava proprio quelli che simo ha indicato come inutili.
+ * Soglie abbassate da 70/68 a 65/60 il 2026-10-25 con il passaggio a GPT, che dà voti qualche punto
+ * più bassi di Claude: scartava sbroccate vere a 68 e payoff 63 (simo: "deve trovare tutte le clip
+ * più divertenti").
  */
+const MIN_SHORT_SCORE = 65;
+const MIN_SHORT_PAYOFF = 60;
+
 function whyNotWorthPublishing(clip: RankedClip): string | null {
   if (clip.streamerReacts === false) return "Lo streamer quasi non reagisce: si sente soprattutto il video reagito";
   if (clip.whyStop !== undefined && clip.whyStop.trim().length < 10) return "L'AI non ha trovato un motivo per cui uno si fermi a guardarlo";
   const score = Math.round(overallScore(clip.scores));
-  if (score < 70) return `Voto ${score}, serve almeno 70`;
-  if (clip.scores.payoff < 68) return `Finale debole (payoff ${Math.round(clip.scores.payoff)}, serve almeno 68)`;
+  if (score < MIN_SHORT_SCORE) return `Voto ${score}, serve almeno ${MIN_SHORT_SCORE}`;
+  if (clip.scores.payoff < MIN_SHORT_PAYOFF) return `Finale debole (payoff ${Math.round(clip.scores.payoff)}, serve almeno ${MIN_SHORT_PAYOFF})`;
   return null;
 }

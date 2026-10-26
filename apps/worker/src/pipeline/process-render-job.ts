@@ -1,14 +1,14 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import type { RenderJobRow, ClipRow, VideoRow, TranscriptRow } from "@clipforge/db";
-import { DEFAULT_TEMPLATES, type TemplateName, type RankedClip, type TranscriptSegment } from "@clipforge/shared";
+import { DEFAULT_TEMPLATES, normalizeCaptionSettings, type CaptionSettings, type TemplateName, type RankedClip, type TranscriptSegment } from "@clipforge/shared";
 import { env } from "../env.js";
 import { logger } from "../lib/logger.js";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider, faceTracker } from "../lib/providers.js";
 import { getOrDownloadSourceFile } from "../lib/source-download-cache.js";
 import { redownloadSourceVideo } from "../lib/redownload-source.js";
-import { renderClip } from "../render/render-clip.js";
+import { isRenderPlan, renderClip } from "../render/render-clip.js";
 import { planContentViews } from "../providers/ai/content-focus.js";
 import { renderLongformClip } from "../render/render-longform-clip.js";
 import { runFfmpeg } from "../lib/ffmpeg.js";
@@ -16,6 +16,8 @@ import { updateRenderJobStatus } from "../queue/render-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
 import { isRenderJobCancelled } from "../lib/cancellation.js";
 import { ensureLongformGames, gamesToKeep } from "./longform-games.js";
+import { peopleHintForVideo } from "../face-tracking/face-identity.js";
+import type { PeopleHint } from "../face-tracking/face-tracker.js";
 
 export async function processRenderJob(job: RenderJobRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `render-${job.id}`);
@@ -75,6 +77,8 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
     await updateRenderJobStatus(job.id, "RENDERING", { stage: "rendering", progress: 20 });
 
     const outputPath = path.join(jobDir, "output.mp4");
+    // Solo per gli Shorts: la regia da riusare quando cambia solo lo stile dei sottotitoli.
+    let renderPlan: unknown = null;
 
     if (clipRow.format === "longform") {
       // Long-form: solo taglio, oppure montaggio "da YouTuber" se acceso sulla clip (vedi
@@ -127,7 +131,11 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
         badges: (clipRow.badges as RankedClip["badges"] | null) ?? [],
       };
 
-      await renderClip({
+      // "captions" = cambia solo lo stile: si riusa la regia del render precedente, niente AI.
+      const reusePlan = job.mode === "captions" && isRenderPlan(clipRow.render_plan) ? clipRow.render_plan : null;
+      if (job.mode === "captions" && !reusePlan) logger.info("Cambio stile su uno Short senza regia salvata: render completo", { clipId: clipRow.id });
+      const captionSettings = await captionSettingsFor(clipRow, template.showProgressBar);
+      const rendered = await renderClip({
         sourceVideoPath: localSourcePath,
         clip: rankedClip,
         template,
@@ -135,11 +143,17 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
         faceTracker,
         workDir: jobDir,
         outputPath,
+        captionSettings,
+        plan: reusePlan,
+        previewOutputPath: path.join(jobDir, "preview.mp4"),
+        trackOutputPath: path.join(jobDir, "captions.json"),
+        people: reusePlan ? undefined : await peopleHintForRender(videoRow, clipRow.project_id, jobDir),
         planContentViews:
           env.ANTHROPIC_MODEL_CONTENT_FOCUS === "off"
             ? undefined
             : (input) => planContentViews(input, { apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_CONTENT_FOCUS }),
       });
+      renderPlan = rendered.plan;
     }
 
     if (await cancelled()) return;
@@ -153,6 +167,16 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
     const thumbStoragePath = `thumbnails/${clipRow.project_id}/${clipRow.id}.jpg`;
     await storageProvider.uploadFile(outputPath, clipStoragePath, "video/mp4");
     await storageProvider.uploadFile(thumbnailPath, thumbStoragePath, "image/jpeg");
+    // Anteprima senza sottotitoli e parole coi tempi: il sito ci disegna sopra gli stili dal vivo.
+    const previewPath = path.join(jobDir, "preview.mp4");
+    const trackPath = path.join(jobDir, "captions.json");
+    const hasPreview = clipRow.format !== "longform" && (await fileExists(previewPath)) && (await fileExists(trackPath));
+    const previewStoragePath = `clips/${clipRow.project_id}/${clipRow.id}.preview.mp4`;
+    const trackStoragePath = `clips/${clipRow.project_id}/${clipRow.id}.captions.json`;
+    if (hasPreview) {
+      await storageProvider.uploadFile(previewPath, previewStoragePath, "video/mp4");
+      await storageProvider.uploadFile(trackPath, trackStoragePath, "application/json");
+    }
 
     if (await cancelled()) return;
 
@@ -165,6 +189,8 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
             output_video_path: clipStoragePath,
             thumbnail_path: thumbStoragePath,
             error_message: null,
+            ...(hasPreview ? { preview_video_path: previewStoragePath, caption_track_path: trackStoragePath } : {}),
+            ...(renderPlan ? { render_plan: renderPlan } : {}),
           })
           .eq("id", clipRow.id),
       "Aggiornamento clip a COMPLETED",
@@ -212,12 +238,38 @@ async function setClipStatus(clipId: string, status: "RENDERING" | "FAILED", err
   }
 }
 
+async function fileExists(file: string): Promise<boolean> {
+  return fsp.access(file).then(
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * Stile dei sottotitoli per questo Short: quello scelto per lo Short, altrimenti lo stile di partenza
+ * dell'account, altrimenti il Classico. Senza nessuna scelta la barra di avanzamento resta quella del
+ * template, come prima che gli stili esistessero.
+ */
+async function captionSettingsFor(clip: ClipRow, templateProgressBar: boolean): Promise<CaptionSettings> {
+  if (clip.caption_settings) return normalizeCaptionSettings(clip.caption_settings);
+  const { data } = await supabase.from("projects").select("profiles(default_caption_settings)").eq("id", clip.project_id).maybeSingle();
+  const profileDefault = (data as { profiles?: { default_caption_settings?: unknown } | null } | null)?.profiles?.default_caption_settings;
+  if (profileDefault) return normalizeCaptionSettings(profileDefault);
+  return { ...normalizeCaptionSettings(null), progressBar: templateProgressBar };
+}
+
 async function fetchClip(clipId: string): Promise<ClipRow> {
   const { data, error } = await supabase.from("clips").select("*").eq("id", clipId).single();
   if (error || !data) {
     throw new Error(`Clip ${clipId} non trovata: ${error?.message ?? "nessun dato"}`);
   }
   return data;
+}
+
+/** Persone della pagina Facce del proprietario del progetto e chi è il proprietario del canale del video. */
+async function peopleHintForRender(video: VideoRow, projectId: string, workDir: string): Promise<PeopleHint | undefined> {
+  const { data: project } = await supabase.from("projects").select("user_id").eq("id", projectId).maybeSingle();
+  return project ? peopleHintForVideo(video, project.user_id, workDir) : undefined;
 }
 
 async function fetchVideo(videoId: string): Promise<VideoRow> {

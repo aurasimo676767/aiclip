@@ -43,6 +43,7 @@ COSA TENERE E COSA TOGLIERE
 - FINE: il video finisce quando smettono di giocare a quel gioco (o sull'ultimo momento forte). Niente dopo. Le ULTIME partite, fino alla vittoria o sconfitta finale, restano sempre: sono il finale del video.
 - SII SEVERO: di una partita tieni i momenti forti e quello che serve a capirli, NON la partita intera. Tentativi ripetuti, partite normali senza niente di divertente, commenti tecnici sul gioco si tolgono. Nel dubbio si taglia.
 - DURATA: quella che serve, calcolata sulla parte IN TEMA (dopo aver tolto i pezzi in cui fanno altro): di solito un'ora di gioco vero diventa 20-28 minuti (circa un terzo, mai oltre il 45%). Un montaggio che tiene più di metà è troppo lungo (simo, 2026-09-28: da 60 a 36 minuti era "un goccio assai"). Ma se togli 20 minuti di un altro gioco, NON tagliare il resto per compensare: in un test l'AI ha buttato 17 minuti delle ultime partite per restare nei 22 minuti totali.
+- TETTO: il video montato non supera MAI i 45 minuti, anche se il pezzo dura 3-4 ore (simo, 2026-10-25: "massimo 45-50 minuti, ma anche meno tranquillamente"). Su un pezzo così lungo tieni i momenti più forti distribuiti su tutto il gioco (come comincia, i momenti migliori, come va a finire) e quel poco che serve a capirli: chi guarda deve seguire il filo, non vedere salti senza senso.
 - TAGLI PULITI: ogni tratto inizia all'inizio di una frase e finisce alla fine di una frase (usa i tempi delle righe). Ogni tratto dura almeno 8 secondi; due tratti separati da meno di 4 secondi uniscili.
 - CAMBI DI ARGOMENTO: quando togli un pezzo in cui fanno altro (un altro gioco, altro), il taglio parte ESATTAMENTE dove lasciano il gioco del video (la frase in cui lanciano l'altro gioco o cambiano discorso) e riprende esattamente dove ci tornano. Non tagliare anche la fine della partita prima del cambio, se non è davvero morta. Elenca ogni cambio in "topicChanges" con le parole esatte di quando se ne vanno e di quando tornano (se non tornano più, il video finisce lì e basta).
 
@@ -54,9 +55,9 @@ Proponi 4 momenti candidati (ne verranno usati 2) per l'intro: le REAZIONI più 
 - Per ognuno copia in "quote" le parole ESATTE della reazione (3-8 parole consecutive della trascrizione), così si trova il punto preciso; start/end sono i tempi della riga in cui sta.
 
 PRIMI PIANI SULLA WEBCAM
-Scegli i momenti in cui mostrare a tutto schermo la faccia di chi parla (uno ogni 1-3 minuti di video montato, SOLO dentro i tratti che tieni):
-- "sclero": quando si incazzano DAVVERO (bestemmie a raffica, insulti urlati, rage). Non ogni bestemmia: bestemmiano sempre, scegli i picchi. Nelle "quote" metti le parole dall'INIZIO alla FINE dello sclero, il primo piano dura tutto lo sclero.
-- "frase": una frase forte o divertente detta da qualcuno (la battuta, la risposta cattiva, l'insulto geniale), per dare il primo piano a chi la dice.
+Sono lo zoom sulla faccia di chi parla, come negli edit degli YouTuber: danno ritmo al video (simo, 2026-10-25: "con tutti i zoom sulle webcam nei momenti divertenti, sulle affermazioni... deve essere figo"). Mettine tanti: circa uno ogni 30-60 secondi di video montato, SOLO dentro i tratti che tieni, sui momenti che lo meritano:
+- "sclero": quando si incazzano DAVVERO (bestemmie a raffica, insulti urlati, rage) o esplodono a ridere. Non ogni bestemmia: bestemmiano sempre, scegli i picchi. Nelle "quote" metti le parole dall'INIZIO alla FINE dello sclero, il primo piano dura tutto lo sclero.
+- "frase": una frase forte o divertente detta da qualcuno (la battuta, la risposta cattiva, l'insulto geniale, un'affermazione assurda detta con convinzione, una presa in giro, una domanda stupida), per dare il primo piano a chi la dice.
 Per ognuno copia in "quote" le parole ESATTE (3-15 parole consecutive della trascrizione); start/end sono i tempi della riga.
 
 Rispondi chiamando lo strumento ${TOOL_NAME}.`;
@@ -270,7 +271,13 @@ const tightenSchema = z.object({
  * null se fallisce.
  */
 export async function tightenHighlights(
-  input: { title: string; pieces: Array<HighlightsRange & { text: string }>; targetSeconds: number },
+  input: {
+    title: string;
+    pieces: Array<HighlightsRange & { text: string }>;
+    targetSeconds: number;
+    /** Tetto assoluto: oltre questo si tolgono anche i pezzi non deboli (vedi sotto). */
+    maxSeconds?: number;
+  },
   options: { apiKey: string; model: string },
 ): Promise<HighlightsRange[] | null> {
   const total = input.pieces.reduce((sum, p) => sum + (p.end - p.start), 0);
@@ -312,6 +319,17 @@ export async function tightenHighlights(
       if (x.score > WEAK_SCORE) break;
       remove.add(x.i);
       left -= x.len;
+    }
+    // Tetto assoluto (simo, 2026-10-25: "massimo 45-50 minuti, ma anche meno tranquillamente", su un
+    // Affari Tuoi di 3 ore e mezza): se coi pezzi deboli non basta, si tolgono anche i meno forti, dal
+    // voto più basso, ma mai il primo (la ruota o la scelta del gioco) né l'ultimo (il finale).
+    if (input.maxSeconds !== undefined && left > input.maxSeconds) {
+      for (const x of order) {
+        if (left <= input.targetSeconds) break;
+        if (remove.has(x.i) || x.i === 0) continue;
+        remove.add(x.i);
+        left -= x.len;
+      }
     }
     const kept = input.pieces.filter((_, i) => !remove.has(i)).map((p) => ({ start: p.start, end: p.end }));
     logger.info("Montaggio da YouTuber: secondo giro per accorciare", {

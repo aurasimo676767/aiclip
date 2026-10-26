@@ -4,20 +4,21 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Home,
-  Loader,
-  CheckCircle2,
+  House,
+  Clapperboard,
   Radio,
   MonitorPlay,
   Mic,
   Settings,
   LogOut,
-  Menu,
-  X,
+  LayoutGrid,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   UserRound,
+  Captions,
+  ImageIcon,
+  Loader,
   type LucideIcon,
 } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -35,53 +36,55 @@ interface NavItem {
 const NAV_GROUPS: Array<{ title?: string; items: NavItem[] }> = [
   {
     items: [
-      { href: "/dashboard", label: "Home", icon: Home, exact: true },
+      { href: "/dashboard", label: "Home", icon: House, exact: true },
+      { href: "/dashboard/completed", label: "Progetti", icon: Clapperboard },
       { href: "/dashboard/processing", label: "In lavorazione", icon: Loader },
-      { href: "/dashboard/completed", label: "Completati", icon: CheckCircle2 },
-    ],
-  },
-  {
-    title: "Canali",
-    items: [
-      { href: "/dashboard/feed", label: "Feed", icon: Radio },
       { href: "/dashboard/published", label: "Pubblicati", icon: MonitorPlay },
     ],
   },
   {
     title: "Strumenti",
     items: [
-      { href: "/dashboard/whop", label: "Voice over", icon: Mic },
+      { href: "/dashboard/stili", label: "Stili sottotitoli", icon: Captions },
+      { href: "/dashboard/thumbnails", label: "Copertine", icon: ImageIcon },
       { href: "/dashboard/faces", label: "Facce", icon: UserRound },
+      { href: "/dashboard/feed", label: "Canali", icon: Radio },
+      { href: "/dashboard/whop", label: "Voice over", icon: Mic },
       { href: "/dashboard/settings", label: "Opzioni", icon: Settings },
     ],
   },
 ];
 
+const MOBILE_TABS: Array<NavItem & { short: string }> = [
+  { href: "/dashboard", label: "Home", short: "Home", icon: House, exact: true },
+  { href: "/dashboard/completed", label: "Progetti", short: "Progetti", icon: Clapperboard },
+];
+const MOBILE_TABS_RIGHT: Array<NavItem & { short: string }> = [{ href: "/dashboard/published", label: "Pubblicati", short: "Pubblicati", icon: MonitorPlay }];
+const MORE_ITEMS: NavItem[] = NAV_GROUPS[1]!.items.concat([{ href: "/dashboard/processing", label: "In lavorazione", icon: Loader }]);
+
+function isActive(pathname: string, item: NavItem): boolean {
+  return item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(item.href + "/");
+}
+
 /**
- * Barra in basso come un'app (simo usa il sito soprattutto dal telefono): le pagine di tutti i
- * giorni a un tocco col pollice, il "+" giallo al centro per un nuovo progetto, il resto in "Altro".
- * Prima c'era solo il menu a panino in alto, due tocchi e mano spostata per qualsiasi cosa.
+ * Barra in basso come un'app (l'editor e simo usano il sito dal telefono): Home, Progetti, il "+" al
+ * centro per un nuovo video, Pubblicati, e "Altro" che apre un pannello dal basso con gli strumenti.
+ * Vetro sfocato sopra il contenuto che ci scorre sotto.
  */
-function MobileTabBar({ pathname, onMore }: { pathname: string; onMore: () => void }) {
-  const tabs: Array<NavItem & { short: string }> = [
-    { href: "/dashboard", label: "Home", short: "Home", icon: Home, exact: true },
-    { href: "/dashboard/processing", label: "In lavorazione", short: "In corso", icon: Loader },
-  ];
-  const right: Array<NavItem & { short: string }> = [{ href: "/dashboard/published", label: "Pubblicati", short: "Pubblicati", icon: MonitorPlay }];
-  // "Altro" è acceso sulle pagine che stanno solo nel menu (Completati, Feed, Voice over, Facce, Opzioni...).
-  const moreActive = ["/dashboard/completed", "/dashboard/feed", "/dashboard/whop", "/dashboard/faces", "/dashboard/settings", "/dashboard/thumbnails", "/dashboard/batch", "/dashboard/credits"].some((h) => pathname.startsWith(h));
+function MobileTabBar({ pathname, onMore, moreOpen }: { pathname: string; onMore: () => void; moreOpen: boolean }) {
+  const moreActive = moreOpen || MORE_ITEMS.some((i) => isActive(pathname, i));
   const tab = (item: NavItem & { short: string }) => {
-    const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
+    const active = isActive(pathname, item);
     const Icon = item.icon;
     return (
       <Link
         key={item.href}
         href={item.href}
         aria-label={item.label}
-        className={`relative flex flex-col items-center justify-center gap-1 pb-1 pt-2 text-[11px] font-semibold transition active:scale-95 ${active ? "text-brand-300" : "text-faint"}`}
+        aria-current={active ? "page" : undefined}
+        className={`flex flex-col items-center justify-center gap-1 pb-1.5 pt-2 text-[11px] font-medium transition-colors duration-150 active:scale-95 ${active ? "text-ink" : "text-faint"}`}
       >
-        <span className={`absolute top-0 h-[3px] w-6 rounded-b-full bg-brand-400 transition-opacity ${active ? "opacity-100" : "opacity-0"}`} />
-        <Icon size={21} strokeWidth={active ? 2.4 : 1.9} />
+        <Icon size={22} strokeWidth={active ? 2.2 : 1.8} className={active ? "text-brand-300" : undefined} />
         {item.short}
       </Link>
     );
@@ -89,28 +92,79 @@ function MobileTabBar({ pathname, onMore }: { pathname: string; onMore: () => vo
   return (
     <nav
       aria-label="Navigazione"
-      className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-white/5 bg-canvas/85 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-white/[0.06] bg-canvas/80 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl backdrop-saturate-150 md:hidden"
     >
-      {tabs.map(tab)}
+      {MOBILE_TABS.map(tab)}
       <div className="flex items-center justify-center">
         <Link
           href="/dashboard#nuovo"
-          aria-label="Nuovo progetto"
-          className="-mt-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-400 text-on-brand shadow-slab ring-4 ring-canvas transition active:translate-y-[2px] active:shadow-none"
+          aria-label="Nuovo video"
+          className="flex h-11 w-14 items-center justify-center rounded-2xl bg-brand-500 text-white transition-transform duration-150 ease-out active:scale-95"
+          style={{ boxShadow: "0 1px 0 0 rgba(255,255,255,0.2) inset, 0 8px 18px -8px rgba(53,112,242,0.9)" }}
         >
-          <Plus size={26} strokeWidth={2.8} />
+          <Plus size={24} strokeWidth={2.4} />
         </Link>
       </div>
-      {right.map(tab)}
+      {MOBILE_TABS_RIGHT.map(tab)}
       <button
         onClick={onMore}
-        className={`relative flex flex-col items-center justify-center gap-1 pb-1 pt-2 text-[11px] font-semibold transition active:scale-95 ${moreActive ? "text-brand-300" : "text-faint"}`}
+        aria-expanded={moreOpen}
+        className={`flex flex-col items-center justify-center gap-1 pb-1.5 pt-2 text-[11px] font-medium transition-colors duration-150 active:scale-95 ${moreActive ? "text-ink" : "text-faint"}`}
       >
-        <span className={`absolute top-0 h-[3px] w-6 rounded-b-full bg-brand-400 transition-opacity ${moreActive ? "opacity-100" : "opacity-0"}`} />
-        <Menu size={21} strokeWidth={moreActive ? 2.4 : 1.9} />
+        <LayoutGrid size={22} strokeWidth={moreActive ? 2.2 : 1.8} className={moreActive ? "text-brand-300" : undefined} />
         Altro
       </button>
     </nav>
+  );
+}
+
+/** Pannello "Altro" dal basso: gli strumenti a riquadri grandi da pollice, la pausa del PC e l'uscita. */
+function MoreSheet({ open, onClose, pathname, email, onSignOut }: { open: boolean; onClose: () => void; pathname: string; email: string; onSignOut: () => void }) {
+  return (
+    <div className={`fixed inset-0 z-50 md:hidden ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
+      <button
+        aria-label="Chiudi"
+        tabIndex={open ? 0 : -1}
+        onClick={onClose}
+        className={`absolute inset-0 bg-black/60 transition-opacity duration-200 ${open ? "opacity-100" : "opacity-0"}`}
+      />
+      <div
+        role="dialog"
+        aria-label="Altro"
+        className={`absolute inset-x-0 bottom-0 rounded-t-3xl border-t border-white/[0.08] bg-surface px-4 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-2.5 shadow-pop ${open ? "translate-y-0" : "translate-y-full"}`}
+        style={{ transition: "transform 380ms var(--ease-drawer)" }}
+      >
+        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20" />
+        <div className="grid grid-cols-3 gap-2">
+          {MORE_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(pathname, item);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                tabIndex={open ? 0 : -1}
+                className={`flex flex-col items-center justify-center gap-2 rounded-2xl border px-2 py-4 text-center text-xs font-medium transition active:scale-[0.97] ${
+                  active ? "border-brand-400/40 bg-brand-500/10 text-ink" : "border-white/[0.06] bg-white/[0.03] text-muted"
+                }`}
+              >
+                <Icon size={22} strokeWidth={1.8} className={active ? "text-brand-300" : "text-ink"} />
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+        <div className="mt-4 space-y-1 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-2">
+          <WorkerPauseControl />
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
+            <p className="truncate text-xs text-faint">{email}</p>
+            <button onClick={onSignOut} tabIndex={open ? 0 : -1} className="btn btn-ghost btn-sm -mr-2">
+              <LogOut size={14} /> Esci
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -120,9 +174,8 @@ export function DashboardShell({ email, children }: { email: string; children: R
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
-  // Preferenza di collasso della sidebar desktop, ricordata tra le sessioni.
   useEffect(() => {
     try {
       if (window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === "1") setCollapsed(true);
@@ -142,10 +195,16 @@ export function DashboardShell({ email, children }: { email: string; children: R
     });
   }
 
-  // Chiude il drawer mobile ad ogni cambio pagina.
+  // Il pannello "Altro" si chiude a ogni cambio pagina e con Esc.
   useEffect(() => {
-    setMobileOpen(false);
+    setMoreOpen(false);
   }, [pathname]);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMoreOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [moreOpen]);
 
   async function handleSignOut() {
     const supabase = createSupabaseBrowserClient();
@@ -156,25 +215,25 @@ export function DashboardShell({ email, children }: { email: string; children: R
 
   function renderNav(iconOnly: boolean) {
     return (
-      <nav className="space-y-5">
+      <nav className="space-y-6">
         {NAV_GROUPS.map((group, i) => (
           <div key={i} className="space-y-0.5">
-            {group.title && !iconOnly && <p className="px-3 pb-1 text-xs font-medium text-faint">{group.title}</p>}
+            {group.title && !iconOnly && <p className="px-3 pb-1.5 text-[11px] font-medium text-faint">{group.title}</p>}
             {group.title && iconOnly && <div className="mx-3 mb-2 border-t border-line" />}
             {group.items.map((item) => {
-              const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href);
+              const active = isActive(pathname, item);
               const Icon = item.icon;
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   title={iconOnly ? item.label : undefined}
-                  className={`group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    isActive ? "bg-white/[0.06] text-white" : "text-muted hover:bg-white/[0.04] hover:text-ink"
+                  aria-current={active ? "page" : undefined}
+                  className={`group flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors duration-150 ${
+                    active ? "bg-white/[0.07] font-medium text-white" : "text-muted hover:bg-white/[0.04] hover:text-ink"
                   } ${iconOnly ? "justify-center px-0" : ""}`}
                 >
-                  {isActive && <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-brand-400" />}
-                  <Icon size={18} className={isActive ? "text-brand-300" : "text-faint group-hover:text-muted"} />
+                  <Icon size={18} strokeWidth={active ? 2.1 : 1.8} className={active ? "text-brand-300" : "text-faint group-hover:text-muted"} />
                   {!iconOnly && item.label}
                 </Link>
               );
@@ -185,88 +244,59 @@ export function DashboardShell({ email, children }: { email: string; children: R
     );
   }
 
-  function renderFooter(iconOnly: boolean) {
-    return (
-      <div className="space-y-2 border-t border-line pt-4">
-        <WorkerPauseControl compact={iconOnly} />
-        {!iconOnly && <p className="truncate px-3 pt-1 text-xs text-faint">{email}</p>}
-        <button
-          onClick={handleSignOut}
-          title="Esci"
-          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-raised/60 hover:text-ink ${iconOnly ? "justify-center px-0" : ""}`}
-        >
-          <LogOut size={18} className="text-faint" />
-          {!iconOnly && "Esci"}
-        </button>
-      </div>
-    );
-  }
-
-  const newProjectButton = (iconOnly: boolean) => (
-    <Link href="/dashboard#nuovo" title="Nuovo progetto" className={`btn btn-gradient w-full ${iconOnly ? "px-0" : ""}`}>
-      <Plus size={16} />
-      {!iconOnly && "Nuovo progetto"}
-    </Link>
-  );
-
   return (
     <TooltipProvider>
-    <div className="flex min-h-screen">
-      {/* Sidebar desktop: espansa o ridotta a sole icone */}
-      <aside
-        className={`sticky top-0 z-20 hidden h-screen shrink-0 flex-col justify-between border-r border-white/[0.05] bg-canvas p-3 transition-[width] duration-200 md:flex ${
-          collapsed ? "w-[68px]" : "w-60"
-        }`}
-      >
-        <div className="space-y-5 overflow-y-auto">
-          <div className={`flex items-center pt-1 ${collapsed ? "flex-col gap-3" : "justify-between px-2"}`}>
-            <Logo iconOnly={collapsed} />
+      <div className="flex min-h-screen">
+        {/* Barra laterale desktop: espansa o ridotta a sole icone */}
+        <aside
+          className={`sticky top-0 z-20 hidden h-screen shrink-0 flex-col justify-between border-r border-white/[0.05] bg-canvas p-3 transition-[width] duration-200 ease-out md:flex ${
+            collapsed ? "w-[68px]" : "w-60"
+          }`}
+        >
+          <div className="space-y-6 overflow-y-auto">
+            <div className={`flex items-center pt-1 ${collapsed ? "flex-col gap-3" : "justify-between px-2"}`}>
+              <Logo iconOnly={collapsed} />
+              <button
+                onClick={toggleCollapsed}
+                className="rounded-lg p-1.5 text-faint transition-colors hover:bg-white/[0.06] hover:text-ink"
+                aria-label={collapsed ? "Espandi menu" : "Riduci menu"}
+                title={collapsed ? "Espandi menu" : "Riduci menu"}
+              >
+                {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+              </button>
+            </div>
+            <Link href="/dashboard#nuovo" title="Nuovo video" className={`btn btn-primary w-full ${collapsed ? "px-0" : ""}`}>
+              <Plus size={16} />
+              {!collapsed && "Nuovo video"}
+            </Link>
+            {renderNav(collapsed)}
+          </div>
+          <div className="space-y-2 border-t border-line pt-4">
+            <WorkerPauseControl compact={collapsed} />
+            {!collapsed && <p className="truncate px-3 pt-1 text-xs text-faint">{email}</p>}
             <button
-              onClick={toggleCollapsed}
-              className="rounded-md p-1.5 text-faint transition hover:bg-raised hover:text-ink"
-              aria-label={collapsed ? "Espandi menu" : "Riduci menu"}
-              title={collapsed ? "Espandi menu" : "Riduci menu"}
+              onClick={handleSignOut}
+              title="Esci"
+              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted transition-colors hover:bg-white/[0.05] hover:text-ink ${collapsed ? "justify-center px-0" : ""}`}
             >
-              {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+              <LogOut size={18} className="text-faint" />
+              {!collapsed && "Esci"}
             </button>
           </div>
-          {newProjectButton(collapsed)}
-          {renderNav(collapsed)}
-        </div>
-        {renderFooter(collapsed)}
-      </aside>
+        </aside>
 
-      {/* Backdrop + drawer mobile */}
-      {mobileOpen && <button aria-label="Chiudi menu" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm md:hidden" />}
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col justify-between border-r border-line bg-surface p-3 transition-transform duration-200 md:hidden ${
-          mobileOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <div className="space-y-5 overflow-y-auto">
-          <div className="flex items-center justify-between px-2 pt-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Barra superiore mobile */}
+          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/[0.05] bg-canvas/75 px-4 py-2.5 backdrop-blur-xl backdrop-saturate-150 md:hidden">
             <Logo />
-            <button onClick={() => setMobileOpen(false)} className="rounded-md p-1.5 text-faint hover:bg-raised hover:text-ink" aria-label="Chiudi menu">
-              <X size={18} />
-            </button>
-          </div>
-          {newProjectButton(false)}
-          {renderNav(false)}
+          </header>
+
+          {/* Sul telefono la barra in basso copre gli ultimi ~80px: il contenuto finisce sopra. */}
+          <main className="min-w-0 flex-1 px-4 pb-28 pt-5 sm:px-6 md:px-10 md:py-10">{children}</main>
+          <MobileTabBar pathname={pathname} onMore={() => setMoreOpen(true)} moreOpen={moreOpen} />
+          <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} pathname={pathname} email={email} onSignOut={handleSignOut} />
         </div>
-        {renderFooter(false)}
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* Barra superiore mobile */}
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/5 bg-canvas/75 px-4 py-2.5 backdrop-blur-xl md:hidden">
-          <Logo />
-        </header>
-
-        {/* Sul telefono la barra in basso copre gli ultimi ~80px: il contenuto finisce sopra. */}
-        <main className="min-w-0 flex-1 px-4 pb-28 pt-5 sm:px-6 md:px-10 md:py-10">{children}</main>
-        <MobileTabBar pathname={pathname} onMore={() => setMobileOpen(true)} />
       </div>
-    </div>
     </TooltipProvider>
   );
 }

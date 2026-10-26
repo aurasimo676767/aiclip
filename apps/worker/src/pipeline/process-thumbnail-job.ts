@@ -231,7 +231,9 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       .map((p) => p.toUpperCase())
       .filter((p) => library.faces.some((f) => f.status === "labeled" && f.label === p));
     const people = chosenPeople.length > 0 ? chosenPeople : participantsFromTitle(clip.title, library, streamerAlias);
-    const maxFaces = isShort ? Math.max(1, Math.min(2, chosenPeople.length)) : isReaction ? 2 : 4;
+    // Scelte a mano entrano TUTTE, anche negli Shorts (2026-10-25: scelti Blur, Marza e Pesh, Pesh
+    // restava fuori e GPT Image, senza le sue foto, disegnava un secondo Blur al posto suo).
+    const maxFaces = chosenPeople.length > 0 ? Math.min(4, chosenPeople.length) : isShort ? 1 : isReaction ? 2 : 4;
     const chosenFaces = pickFaces(library, people, selection.desiredExpression, maxFaces, isReaction ? "reaction" : "game");
     const facePaths = await downloadFaces(chosenFaces, jobDir).catch((err) => {
       logger.warn("Download facce fallito, copertina senza facce", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
@@ -267,7 +269,9 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
         const aiPeople = [];
         for (const face of chosenFaces) {
           // Primi piani stretti, grandi e nitidi (vedi face-reference.ts); se non se ne trovano, le foto intere di prima.
-          const crops = face.label ? await bestHeadCrops(library, face.label, 5, jobDir).catch(() => []) : [];
+          // Misurato il 2026-10-25: GPT Image fa pagare ~1.000 token (0,8 cent) per OGNI foto, a 512 come
+          // a 768 px. La spesa la decide il numero di foto, non la misura: si tengono quelle nitide.
+          const crops = face.label ? await bestHeadCrops(library, face.label, PERSON_STYLE[face.label]?.refs ?? 5, jobDir).catch(() => []) : [];
           const photos = crops.length > 0 ? crops.map((c) => c.path) : await downloadFaces(referenceFaces(library, face, 3), jobDir);
           aiPeople.push({ name: face.label ?? "", photos, styleNote: face.label ? PERSON_STYLE[face.label]?.note : undefined });
         }

@@ -1,4 +1,7 @@
+import "dotenv/config";
 import path from "node:path";
+import { peopleHintForVideo } from "../face-tracking/face-identity.js";
+import { supabase } from "../lib/supabase.js";
 import { ReactionCamFaceTracker } from "../face-tracking/reaction-cam-face-tracker.js";
 import fs from "node:fs";
 import { buildVideoFilterComplex, type ContentView } from "../render/build-video-filter.js";
@@ -11,6 +14,7 @@ import { toFfmpegFilterPath } from "../render/ffmpeg-filter-utils.js";
  * un fotogramma solo — i difetti di composizione stanno quasi sempre in un tratto della clip.
  * Uso: tsx src/dev/preview-layout-sheet.ts <video> <width> <height> <start> <end> <out.jpg> [fotogrammi=8] [views.json]
  * views.json: tratti del pannello del gioco (ContentView[], tempi della clip) da provare a mano.
+ * PEOPLE_VIDEO=<videoId>: usa le persone della pagina Facce e il proprietario del canale di quel video, come in produzione.
  */
 const [videoPath, w, h, start, end, outArg, countArg = "8", viewsArg] = process.argv.slice(2);
 if (!videoPath || !w || !h || !start || !end || !outArg) {
@@ -22,12 +26,21 @@ const count = Number(countArg);
 // Timestamp su ogni fotogramma: senza, è facile attribuire un difetto al tratto sbagliato.
 const FONT = toFfmpegFilterPath(path.resolve("assets/fonts/Anton-Regular.ttf"));
 
+async function peopleFor(videoId: string | undefined) {
+  if (!videoId) return undefined;
+  const { data: video } = await supabase.from("videos").select("*").eq("id", videoId).single();
+  const { data: project } = await supabase.from("projects").select("user_id").eq("id", video!.project_id).single();
+  fs.mkdirSync("tmp/preview-people", { recursive: true });
+  return peopleHintForVideo(video!, project!.user_id, "tmp/preview-people");
+}
+
 const layout = await new ReactionCamFaceTracker().computeLayout({
   sourceVideoPath: videoPath,
   sourceWidth: Number(w),
   sourceHeight: Number(h),
   startSeconds,
   endSeconds: Number(end),
+  people: await peopleFor(process.env.PEOPLE_VIDEO),
 });
 if (layout.type === "scenes") {
   console.log("LAYOUT scenes:", layout.scenes.map((s) => `${s.startSeconds.toFixed(1)}-${s.endSeconds.toFixed(1)} ${s.composition.kind}${s.composition.kind === "crop" ? `@${s.composition.crop.x}` : ""}`).join(" | "));

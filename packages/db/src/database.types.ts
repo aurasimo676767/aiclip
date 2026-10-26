@@ -43,6 +43,9 @@ export type ProjectSourceType = "upload" | "youtube_url" | "twitch_vod";
 /** "short" = Short verticale 9:16 (comportamento storico), "longform" = video orizzontale da un VOD, un segmento per argomento. */
 export type ClipFormat = "short" | "longform";
 
+/** "full" = render completo; "captions" = cambia solo lo stile dei sottotitoli, riusando la regia salvata (render_plan), senza AI. */
+export type RenderJobMode = "full" | "captions";
+
 export interface Database {
   public: {
     Tables: {
@@ -54,6 +57,7 @@ export interface Database {
           credits: number;
           processing_minutes_used: number;
           storage_used_bytes: number;
+          default_caption_settings: unknown | null;
           created_at: string;
           updated_at: string;
         };
@@ -64,6 +68,7 @@ export interface Database {
           credits?: number;
           processing_minutes_used?: number;
           storage_used_bytes?: number;
+          default_caption_settings?: unknown | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -74,6 +79,7 @@ export interface Database {
           credits?: number;
           processing_minutes_used?: number;
           storage_used_bytes?: number;
+          default_caption_settings?: unknown | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -251,6 +257,10 @@ export interface Database {
           status: ClipStatus;
           output_video_path: string | null;
           thumbnail_path: string | null;
+          caption_settings: unknown | null;
+          preview_video_path: string | null;
+          caption_track_path: string | null;
+          render_plan: unknown | null;
           error_message: string | null;
           created_at: string;
           updated_at: string;
@@ -281,6 +291,10 @@ export interface Database {
           status?: ClipStatus;
           output_video_path?: string | null;
           thumbnail_path?: string | null;
+          caption_settings?: unknown | null;
+          preview_video_path?: string | null;
+          caption_track_path?: string | null;
+          render_plan?: unknown | null;
           error_message?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -311,6 +325,10 @@ export interface Database {
           status?: ClipStatus;
           output_video_path?: string | null;
           thumbnail_path?: string | null;
+          caption_settings?: unknown | null;
+          preview_video_path?: string | null;
+          caption_track_path?: string | null;
+          render_plan?: unknown | null;
           error_message?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -332,6 +350,7 @@ export interface Database {
           started_at: string | null;
           completed_at: string | null;
           cancel_requested: boolean;
+          mode: RenderJobMode;
           created_at: string;
         };
         Insert: {
@@ -347,6 +366,7 @@ export interface Database {
           started_at?: string | null;
           completed_at?: string | null;
           cancel_requested?: boolean;
+          mode?: RenderJobMode;
           created_at?: string;
         };
         Update: {
@@ -362,7 +382,36 @@ export interface Database {
           started_at?: string | null;
           completed_at?: string | null;
           cancel_requested?: boolean;
+          mode?: RenderJobMode;
           created_at?: string;
+        };
+        Relationships: [];
+      };
+
+      caption_presets: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          settings: unknown;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          settings: unknown;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          settings?: unknown;
+          created_at?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };
@@ -864,16 +913,19 @@ export interface Database {
           id: boolean;
           paused: boolean;
           updated_at: string;
+          last_seen_at: string | null;
         };
         Insert: {
           id?: boolean;
           paused?: boolean;
           updated_at?: string;
+          last_seen_at?: string | null;
         };
         Update: {
           id?: boolean;
           paused?: boolean;
           updated_at?: string;
+          last_seen_at?: string | null;
         };
         Relationships: [];
       };
@@ -964,6 +1016,9 @@ export type PublishScheduleUpdate = Database["public"]["Tables"]["publish_schedu
 export type RenderJobRow = Database["public"]["Tables"]["render_jobs"]["Row"];
 export type RenderJobInsert = Database["public"]["Tables"]["render_jobs"]["Insert"];
 export type RenderJobUpdate = Database["public"]["Tables"]["render_jobs"]["Update"];
+
+export type CaptionPresetRow = Database["public"]["Tables"]["caption_presets"]["Row"];
+export type CaptionPresetInsert = Database["public"]["Tables"]["caption_presets"]["Insert"];
 
 export type SubscriptionRow = Database["public"]["Tables"]["subscriptions"]["Row"];
 export type SubscriptionInsert = Database["public"]["Tables"]["subscriptions"]["Insert"];

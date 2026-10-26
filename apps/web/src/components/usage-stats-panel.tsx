@@ -5,6 +5,8 @@ const MODEL_LABELS: Record<ModelUsageKey, string> = {
   haiku: "Haiku",
   sonnet: "Sonnet",
   opus: "Opus",
+  sol: "GPT-6.1 Sol",
+  luna: "GPT-6 Luna",
 };
 
 function formatSeconds(seconds: number | undefined): string | null {

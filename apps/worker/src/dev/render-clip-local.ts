@@ -1,7 +1,7 @@
 import "dotenv/config";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_TEMPLATES, type RankedClip, type TemplateName, type TranscriptSegment } from "@clipforge/shared";
+import { BUILTIN_CAPTION_PRESETS, DEFAULT_TEMPLATES, normalizeCaptionSettings, type RankedClip, type TemplateName, type TranscriptSegment } from "@clipforge/shared";
 import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
 import { getOrDownloadSourceFile } from "../lib/source-download-cache.js";
@@ -19,6 +19,8 @@ import { env } from "../env.js";
  * Terzo argomento opzionale, per la regia del pannello del gioco: un file JSON con i tratti
  * (ContentView[], tempi della clip) per provarli GRATIS, oppure --ai per farli decidere all'AI come
  * in produzione (A PAGAMENTO, ~3 centesimi). Senza: gioco riempito per tutta la clip.
+ * CAPTION_PRESET=<id> (classico, verde, ombra, pulito, impatto, neon, karaoke, fumetto) prova uno stile;
+ * senza, lo stile salvato sulla clip. Scrive anche l'anteprima senza sottotitoli e le parole coi tempi.
  */
 const [clipId, outArg, viewsArg] = process.argv.slice(2);
 if (!clipId || !outArg) throw new Error("Uso: tsx src/dev/render-clip-local.ts <clip_id> <out.mp4>");
@@ -58,6 +60,11 @@ const result = await renderClip({
   faceTracker: new ReactionCamFaceTracker(),
   workDir,
   outputPath: outPath,
+  captionSettings: process.env.CAPTION_PRESET
+    ? (BUILTIN_CAPTION_PRESETS.find((p) => p.id === process.env.CAPTION_PRESET)?.settings ?? normalizeCaptionSettings(null))
+    : normalizeCaptionSettings(clipRow.caption_settings),
+  previewOutputPath: outPath.replace(/.mp4$/, ".preview.mp4"),
+  trackOutputPath: outPath.replace(/.mp4$/, ".captions.json"),
   planContentViews: !viewsArg
     ? undefined
     : viewsArg === "--ai"

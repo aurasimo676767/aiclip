@@ -28,7 +28,7 @@ export function ProcessingProgressBar({ status, showSteps = true }: { status: st
           return (
             <li key={stage.status} className="space-y-2">
               <div className={`relative h-1.5 overflow-hidden rounded-full ${done ? "bg-brand-400" : current ? "bg-brand-400/25" : "bg-white/[0.08]"}`}>
-                {current && <div className="absolute inset-0 animate-shimmer bg-[linear-gradient(90deg,transparent,#ffd400,transparent)] bg-[length:200%_100%]" />}
+                {current && <div className="absolute inset-0 animate-shimmer bg-[linear-gradient(90deg,transparent,#86adff,transparent)] bg-[length:200%_100%]" />}
               </div>
               <p className={`hidden truncate text-[11px] sm:block ${done ? "text-muted" : current ? "font-semibold text-brand-200" : "text-faint"}`}>{stage.label}</p>
             </li>

@@ -1,11 +1,11 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { env } from "../env.js";
-import type { RankedClip, TranscriptSegment, TemplateConfig } from "@clipforge/shared";
+import { headlineEnd, headlineText as resolveHeadlineText, type CaptionSettings, type RankedClip, type TranscriptSegment, type TemplateConfig } from "@clipforge/shared";
 import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
-import type { FaceTracker, Layout, TimedCrop } from "../face-tracking/face-tracker.js";
-import { buildAssSubtitles, screamWindows } from "./captions.js";
+import type { FaceTracker, Layout, PeopleHint, TimedCrop } from "../face-tracking/face-tracker.js";
+import { screamWindows } from "./captions.js";
+import { buildCaptionTrack, buildStyledAss } from "./styled-captions.js";
 import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
 import { buildVideoFilterComplex, type ContentView } from "./build-video-filter.js";
 import { detectSilences, detectQuietSpeechGaps, mergeIntervals, computeKeepSegments, buildTimeRemap, type TimeSegment } from "./silence.js";
@@ -25,6 +25,32 @@ export interface RenderClipParams {
    * zoomare. Assente = gioco riempito per tutta la clip, senza chiamate a pagamento.
    */
   planContentViews?: (input: { videoPath: string; layout: Layout; durationSeconds: number; segments: TranscriptSegment[] }) => Promise<ContentView[]>;
+  /** Persone etichettate e proprietario del canale: decidono chi va nel pannello webcam (vedi face-tracker.ts). */
+  people?: PeopleHint;
+  /** Stile dei sottotitoli e del titolo d'apertura scelto per questo Short. */
+  captionSettings: CaptionSettings;
+  /**
+   * Regia di un render precedente dello stesso Short: se c'è, inquadrature e regia del gioco si
+   * riusano così come sono (niente rilevamento volti, niente AI). Si usa quando cambia solo lo stile.
+   */
+  plan?: RenderPlan | null;
+  /** Video senza sottotitoli (720x1280) per l'anteprima dal vivo sul sito. */
+  previewOutputPath: string;
+  /** Parole coi tempi del video finale (CaptionTrack JSON), per l'anteprima e per rifare lo stile. */
+  trackOutputPath: string;
+}
+
+/** Ciò che serve per rifare lo stesso video cambiando solo lo stile: inquadrature e regia del gioco. */
+export interface RenderPlan {
+  version: 1;
+  /** Layout calcolato sul sorgente (tempi del sorgente, prima del taglio dei silenzi). */
+  layout: Layout;
+  /** Regia del gioco (tempi del video finale). */
+  contentViews: ContentView[];
+}
+
+export function isRenderPlan(value: unknown): value is RenderPlan {
+  return !!value && typeof value === "object" && (value as RenderPlan).version === 1 && !!(value as RenderPlan).layout;
 }
 
 /**
@@ -34,8 +60,9 @@ export interface RenderClipParams {
 const PUNCH_ZOOM_PER_INTENSITY = 0.12;
 
 /** Renderizza una singola clip end-to-end: taglio, rimozione silenzi, crop 9:16, zoom, captions, loudness. */
-export async function renderClip(params: RenderClipParams): Promise<{ durationSeconds: number }> {
-  const { sourceVideoPath, clip, template, transcriptSegments, faceTracker, workDir, outputPath, planContentViews } = params;
+export async function renderClip(params: RenderClipParams): Promise<{ durationSeconds: number; plan: RenderPlan }> {
+  const { sourceVideoPath, clip, template, transcriptSegments, faceTracker, workDir, outputPath, planContentViews, captionSettings } = params;
+  const reused = params.plan && isRenderPlan(params.plan) ? params.plan : null;
   await fsp.mkdir(workDir, { recursive: true });
 
   const sourceProbe = await probeVideo(sourceVideoPath);
@@ -88,51 +115,74 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
       .map((e) => e.word.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase()),
   );
 
-  const rawLayout = await faceTracker.computeLayout({
-    sourceVideoPath,
-    sourceWidth: sourceProbe.width,
-    sourceHeight: sourceProbe.height,
-    startSeconds: clip.start,
-    endSeconds: clip.end,
-  });
+  const rawLayout = reused
+    ? reused.layout
+    : await faceTracker.computeLayout({
+        sourceVideoPath,
+        sourceWidth: sourceProbe.width,
+        sourceHeight: sourceProbe.height,
+        startSeconds: clip.start,
+        endSeconds: clip.end,
+        people: params.people,
+      });
+  if (reused) logger.info("Regia riusata dal render precedente: cambia solo lo stile dei sottotitoli", { clipStart: clip.start });
   const layout = remapLayout(rawLayout, timeRemap, finalDuration);
 
-  // Il layout serve QUI (position "smart" segue il confine webcam/contenuto quando presente),
-  // per questo viene calcolato prima delle caption invece che dopo come in origine.
-  const assContent = buildAssSubtitles(clipRelativeSegments, template.captionStyle, { highlightWords, layout });
-  // Titolo fisso in alto (immagine con emoji, entra con un'animazione): vedi headline.ts.
-  const headlineText = env.SHORTS_HEADLINE === "off" ? undefined : (clip.edl.headline ?? headlineFromTitle(clip.title));
-  const headlinePath = path.join(workDir, "headline.png");
-  const headlineSize = headlineText ? await renderHeadlinePng(headlineText, headlinePath) : null;
+  // Parole coi tempi del video finale: le usa il sito per l'anteprima dal vivo degli stili, e da qui
+  // escono i sottotitoli bruciati (stessa logica, vedi buildCaptionCues in packages/shared).
+  const track = buildCaptionTrack({
+    segments: clipRelativeSegments,
+    highlightWords,
+    layout,
+    duration: finalDuration,
+    headline: clip.edl.headline ?? headlineFromTitle(clip.title) ?? null,
+  });
+  await fsp.writeFile(params.trackOutputPath, JSON.stringify(track), "utf-8");
   const assPath = path.join(workDir, "captions.ass");
-  await fsp.writeFile(assPath, assContent, "utf-8");
+  await fsp.writeFile(assPath, buildStyledAss(track, captionSettings), "utf-8");
+  // Titolo d'apertura (immagine con emoji, entra con un'animazione): vedi headline.ts.
+  const headlineText = resolveHeadlineText(track, captionSettings);
+  const headlinePath = path.join(workDir, "headline.png");
+  const headlineSize = headlineText ? await renderHeadlinePng(headlineText, headlinePath, { style: captionSettings.headline.style }) : null;
 
-  const contentViews = planContentViews
-    ? await planContentViews({ videoPath: workingClipPath, layout, durationSeconds: finalDuration, segments: clipRelativeSegments }).catch((error) => {
-        logger.warn("Regia del gioco fallita, gioco riempito per tutta la clip", { error: error instanceof Error ? error.message : String(error) });
-        return [];
-      })
-    : [];
+  const contentViews = reused
+    ? reused.contentViews
+    : planContentViews
+      ? await planContentViews({ videoPath: workingClipPath, layout, durationSeconds: finalDuration, segments: clipRelativeSegments }).catch((error) => {
+          logger.warn("Regia del gioco fallita, gioco riempito per tutta la clip", { error: error instanceof Error ? error.message : String(error) });
+          return [];
+        })
+      : [];
 
   const filterComplex = buildVideoFilterComplex({
     contentViews,
     layout,
     assSubtitlesPath: assPath,
-    showProgressBar: template.showProgressBar,
+    showProgressBar: captionSettings.progressBar,
     clipDurationSeconds: finalDuration,
     // Primo piano netto sugli urli, con l'intensità di zoom del template (0 = mai).
     punchIns: template.zoomIntensity > 0 ? screamWindows(clipRelativeSegments) : [],
     punchZoom: 1 + PUNCH_ZOOM_PER_INTENSITY * template.zoomIntensity,
-    headline: headlineSize ? { input: "1:v", ...headlineSize } : undefined,
+    headline: headlineSize
+      ? { input: "1:v", ...headlineSize, until: captionSettings.headline.duration === "intro" ? headlineEnd(finalDuration, captionSettings) : undefined }
+      : undefined,
+    previewLabel: "pv",
   });
 
   // Suono d'entrata del titolo, mescolato all'audio prima della normalizzazione.
   const sfxPath = headlineSize && sourceProbe.hasAudio ? await ensureHeadlineSfx((a) => runFfmpeg(a)) : null;
   const sfxInput = headlineSize ? 2 : 1;
-  const fullFilter = sfxPath
-    ? `${filterComplex};
-[0:a][${sfxInput}:a]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11[aout]`
-    : filterComplex;
+  // Audio: uno per il video finale (col suono del titolo, se c'è) e uno per l'anteprima, senza.
+  const audioSteps = !sourceProbe.hasAudio
+    ? ""
+    : sfxPath
+      ? `;
+[0:a]asplit=2[amain][aprev];
+[amain][${sfxInput}:a]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11[aout];
+[aprev]loudnorm=I=-14:TP=-1.5:LRA=11[apv]`
+      : `;
+[0:a]loudnorm=I=-14:TP=-1.5:LRA=11,asplit=2[aout][apv]`;
+  const fullFilter = filterComplex + audioSteps;
   const args = [
     "-y",
     "-i",
@@ -145,10 +195,8 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
     "[vout]",
   ];
 
-  if (sfxPath) {
+  if (sourceProbe.hasAudio) {
     args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
-  } else if (sourceProbe.hasAudio) {
-    args.push("-map", "0:a:0", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k");
   } else {
     args.push("-an");
   }
@@ -158,11 +206,14 @@ export async function renderClip(params: RenderClipParams): Promise<{ durationSe
   // parità di qualità) è accettabile per un output pensato per essere pubblicato, non solo
   // guardato una volta.
   args.push("-c:v", "libx264", "-preset", "slow", "-crf", "15", "-pix_fmt", "yuv420p", "-movflags", "+faststart", outputPath);
+  // Secondo file dallo stesso passaggio: l'anteprima senza sottotitoli, leggera per il telefono.
+  args.push("-map", "[pv]", ...(sourceProbe.hasAudio ? ["-map", "[apv]", "-c:a", "aac", "-b:a", "96k"] : ["-an"]));
+  args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "29", "-pix_fmt", "yuv420p", "-movflags", "+faststart", params.previewOutputPath);
 
   await runFfmpeg(args, { timeoutMs: 10 * 60 * 1000 });
 
   const outputProbe = await probeVideo(outputPath);
-  return { durationSeconds: outputProbe.durationSeconds };
+  return { durationSeconds: outputProbe.durationSeconds, plan: { version: 1, layout: rawLayout, contentViews } };
 }
 
 async function extractRawClip(

@@ -39,7 +39,18 @@ const envSchema = z.object({
   // TUTTE le clip che ha trovato, direttamente"). "off" = solo i progetti con "Genera più video".
   AUTO_GENERATE_ALL_CLIPS: z.enum(["on", "off"]).default("on"),
   // Analisi dei VOD (mappa, confini, titoli) tramite Message Batches: metà prezzo, più lenta.
+  // Vale anche con OpenAI (Batch API, stesso sconto).
   ANTHROPIC_BATCH_VOD: z.enum(["on", "off"]).default("on"),
+  // Chi risponde alle chiamate AI di testo e immagini. "openai" dal 2026-10-25 (credito Claude
+  // finito): ogni ANTHROPIC_MODEL_* viene sostituito dal modello GPT equivalente qui sotto e passa
+  // da providers/ai/openai-bridge.ts, il resto del codice non cambia. "anthropic" = di nuovo Claude.
+  AI_PROVIDER: z.enum(["anthropic", "openai"]).default("openai"),
+  // Al posto di Haiku (prima scrematura): costa 1/10 di Haiku 4.5 e ai test indipendenti rende di più.
+  OPENAI_MODEL_CHEAP: z.string().default("gpt-6-luna"),
+  // Al posto di Sonnet e Opus: stesso prezzo di Sonnet ($2/$10 per milione di token).
+  OPENAI_MODEL_STRONG: z.string().default("gpt-6.1-sol"),
+  // Ragionamento dei modelli GPT: i suoi token si pagano come output. Sol non accetta "none".
+  OPENAI_REASONING_EFFORT: z.enum(["low", "medium", "high"]).default("medium"),
   // TikTok (Content Posting API): le stesse chiavi messe su Vercel. Senza, la coda TikTok fallisce
   // solo quando serve rinnovare il token.
   TIKTOK_CLIENT_KEY: z.string().optional(),
@@ -58,8 +69,9 @@ const envSchema = z.object({
   // dal pulsante "Genera copertina" del sito, quindi si spende solo quando lo preme simo.
   COVER_AI_MODEL: z.string().default("gpt-image-2.5-sunburst"),
   COVER_AI_QUALITY: z.enum(["low", "medium", "high"]).default("medium"),
-  // Titolo fisso in alto negli Shorts (edl.headline). "off" = niente titolo.
-  SHORTS_HEADLINE: z.string().default("on"),
+  // Titolo fisso in alto negli Shorts (edl.headline). "off" = niente titolo. Spento dal 2026-10-25
+  // (simo: "la scritta in alto fissa di ogni video fa schifo, togliamola").
+  SHORTS_HEADLINE: z.string().default("off"),
   TRANSCRIPTION_PROVIDER: z.enum(["openai", "local"]).default("openai"),
   // Lingua passata a Whisper. Senza, la deduce dai primi 30 secondi di ogni blocco da ~20 minuti:
   // un VOD che si apriva con un audio in inglese è stato trascritto (e tradotto) in inglese per
@@ -106,4 +118,16 @@ if (!parsed.success) {
   throw new Error("Configurazione ambiente non valida. Controlla il tuo file .env rispetto a .env.example.");
 }
 
-export const env = parsed.data;
+const data = parsed.data;
+if (data.AI_PROVIDER === "openai") {
+  const strong = (model: string) => (model === "off" ? model : data.OPENAI_MODEL_STRONG);
+  data.ANTHROPIC_MODEL_CHEAP = data.OPENAI_MODEL_CHEAP;
+  data.ANTHROPIC_MODEL_STRONG = strong(data.ANTHROPIC_MODEL_STRONG);
+  data.ANTHROPIC_MODEL_LONGFORM = strong(data.ANTHROPIC_MODEL_LONGFORM);
+  data.ANTHROPIC_MODEL_LONGFORM_BOUNDARIES = strong(data.ANTHROPIC_MODEL_LONGFORM_BOUNDARIES);
+  data.ANTHROPIC_MODEL_LONGFORM_EDIT = strong(data.ANTHROPIC_MODEL_LONGFORM_EDIT);
+  data.ANTHROPIC_MODEL_GAME_DETECT = strong(data.ANTHROPIC_MODEL_GAME_DETECT);
+  data.ANTHROPIC_MODEL_CONTENT_FOCUS = strong(data.ANTHROPIC_MODEL_CONTENT_FOCUS);
+}
+
+export const env = data;

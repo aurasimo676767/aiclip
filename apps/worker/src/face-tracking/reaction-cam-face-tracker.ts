@@ -1,12 +1,15 @@
 import { OUTPUT_RESOLUTION } from "@clipforge/shared";
-import type { CropWindow, FaceTracker, Layout, Scene, SceneComposition, TimedCrop } from "./face-tracker.js";
+import { scoreActiveSpeakers } from "./active-speaker.js";
+import { identifyWebcams } from "./face-identity.js";
+import { verifySwitchesByVoice } from "./voice-check.js";
+import type { CropWindow, FaceTracker, Layout, PeopleHint, Scene, SceneComposition, TimedCrop } from "./face-tracker.js";
 import { extractRawFrameBGR, extractRawFrameBGRScaled } from "./frame-extractor.js";
 import { detectFaces, type FaceBox } from "./onnx-face-detector.js";
 import { computeMouthMotion } from "./mouth-motion.js";
 import { centeredCrop } from "./crop-geometry.js";
 import { CenterCropFaceTracker } from "./center-crop-face-tracker.js";
 import { detectSceneCuts } from "./scene-detect.js";
-import { detectWebcamRect } from "./webcam-rect.js";
+import { detectWebcamRect, detectWebcamRectDebug } from "./webcam-rect.js";
 import { detectContentBounds, detectContentRegion } from "./content-region.js";
 import { logger } from "../lib/logger.js";
 
@@ -276,6 +279,12 @@ async function perSceneCompositions(
   clipDuration: number,
   sourceWidth: number,
   sourceHeight: number,
+  /**
+   * Webcam da mostrare in ogni tratto (allineato a `segments`), scelta da chooseShownSpeakers.
+   * Senza, tutta la clip usa una webcam sola: sui video montati con 4 webcam restava fissa quella
+   * in alto a sinistra anche quando parlava un altro (segnalato da simo, 2026-10-25).
+   */
+  shownCams?: CropWindow[],
 ): Promise<Scene[]> {
   const fullAspect = OUTPUT_RESOLUTION.width / OUTPUT_RESOLUTION.height;
   const boundaries = [0, ...cutTimes.filter((t) => t > 0.01 && t < clipDuration - 0.01), clipDuration];
@@ -311,7 +320,11 @@ async function perSceneCompositions(
   // volte, e riquadri leggermente diversi facevano "respirare" il pannello a ogni stacco.
   const canonicalCam = mostRecurrentRect(cams);
 
-  // 2) Decisione tratto per tratto.
+  // 2) Decisione tratto per tratto. Il tratto è "webcam sopra" se si vede il volto in UNA QUALSIASI
+  //    delle webcam che si mostrano, non solo in quella di riferimento: sul video di Blur con 4
+  //    webcam il riferimento era quella di Pesh (volto piccolo, spesso girato) e nei tratti in cui
+  //    il rilevatore non lo vedeva la clip finiva a frame intero rimpicciolito, con le webcam minuscole.
+  const camRects = [...new Set([canonicalCam, ...(shownCams ?? [])].filter((c): c is CropWindow => c !== null))];
   const units: CompositionUnit[] = segments.map((seg) => {
     const faces = seg.allFaces.map((m) => m.avg);
     const base = { startSeconds: seg.startSeconds, endSeconds: seg.endSeconds };
@@ -319,7 +332,7 @@ async function perSceneCompositions(
     if (faces.length === 0) return { ...base, kind: null, ...none };
     // Prima la cam: in una reaction il volto più grande è spesso quello del video reagito, e con
     // l'ordine opposto il tratto veniva ritagliato su di lui e lo streamer spariva.
-    if (canonicalCam && faces.some((f) => faceFitsInCam(f, canonicalCam))) return { ...base, kind: "split", ...none };
+    if (canonicalCam && faces.some((f) => camRects.some((c) => faceFitsInCam(f, c)))) return { ...base, kind: "split", ...none };
     const subject = faces.filter((f) => f.height >= sourceHeight * SCENE_SUBJECT_MIN_HEIGHT_RATIO).sort((a, b) => b.height - a.height)[0];
     // Solo un "volto" enormemente più largo del ritaglio va a frame intero (vedi la costante).
     if (subject && subject.width <= sourceHeight * fullAspect * MAX_SUBJECT_WIDTH_IN_CROP) {
@@ -330,6 +343,9 @@ async function perSceneCompositions(
 
   fillUnknownUnits(units, isCut);
   smoothKindOutliers(units, isCut);
+  // Se la clip ha una webcam, mai il gioco a schermo intero senza template (simo, 2026-10-25):
+  // restano solo "webcam sopra + gioco sotto" e i primi piani a tutto schermo del montatore.
+  if (canonicalCam) for (const u of units) if (u.kind === "fit") u.kind = "split";
   logger.info("Composizione per tratti", {
     cam: canonicalCam,
     tratti: units.map((u) => `${u.startSeconds.toFixed(1)} ${u.kind}`).join(" | "),
@@ -345,8 +361,10 @@ async function perSceneCompositions(
   let topRatio = 0;
   let content: CropWindow | null = null;
   const splitUnits = units.filter((u) => u.kind === "split");
+  const camOf = (i: number): CropWindow | null => shownCams?.[i] ?? canonicalCam;
   if (canonicalCam && splitUnits.length > 0) {
-    topRatio = topRatioForWebcam([canonicalCam]);
+    // Un'altezza sola del pannello per tutte le webcam mostrate, così cambiare persona non lo fa saltare.
+    topRatio = topRatioForWebcam(units.flatMap((u, i) => (u.kind === "split" ? [camOf(i)!] : [])));
     // Campioni SOLO dai tratti in split: su tutta la clip l'attività delle scene a schermo intero
     // riempiva il frame e ogni ritaglio sembrava tagliare qualcosa (continuazione ~1.0 ovunque).
     const splitSeconds = splitUnits.reduce((sum, u) => sum + (u.endSeconds - u.startSeconds), 0);
@@ -363,7 +381,7 @@ async function perSceneCompositions(
       }
     }
     const bottomAspect = OUTPUT_RESOLUTION.width / (OUTPUT_RESOLUTION.height * (1 - topRatio));
-    const region = await detectContentRegion(sourceVideoPath, samples, sourceWidth, sourceHeight, bottomAspect, [canonicalCam], true);
+    const region = await detectContentRegion(sourceVideoPath, samples, sourceWidth, sourceHeight, bottomAspect, [canonicalCam, ...(shownCams ?? [])], true);
     content = region ?? { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
   }
 
@@ -372,7 +390,7 @@ async function perSceneCompositions(
   const scenes: Scene[] = units.map((u, i) => {
     const base = { startSeconds: u.startSeconds, endSeconds: u.endSeconds };
     if (u.kind === "split" && canonicalCam && content) {
-      return { ...base, composition: { kind: "split", cam: canonicalCam, content, topRatio } };
+      return { ...base, composition: { kind: "split", cam: camOf(i)!, content, topRatio } };
     }
     if (u.kind === "crop" && cropCx[i] !== null && cropCx[i] !== undefined) {
       return { ...base, composition: { kind: "crop", crop: centeredCrop(cropCx[i]!, sourceHeight / 2, sourceWidth, sourceHeight, fullAspect) } };
@@ -615,6 +633,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     startSeconds: number;
     endSeconds: number;
     sceneCuts?: boolean;
+    people?: PeopleHint;
   }): Promise<Layout> {
     const { sourceVideoPath, sourceWidth, sourceHeight, startSeconds, endSeconds } = params;
     const clipDuration = Math.max(0.1, endSeconds - startSeconds);
@@ -667,9 +686,11 @@ export class ReactionCamFaceTracker implements FaceTracker {
     // deve finire nel pannello webcam.
     const sampleTimes = Array.from({ length: RECT_SAMPLE_COUNT }, (_, i) => startSeconds + (clipDuration * (i + 0.5)) / RECT_SAMPLE_COUNT);
     const cropByAnchor = new Map<PositionGroup, CropWindow>();
+    const rectAlternatives = new Map<PositionGroup, Array<{ rect: CropWindow; score: number }>>();
     for (const anchor of candidateAnchors) {
-      const rect = await detectWebcamRect(sourceVideoPath, sampleTimes, anchor.avg, sourceWidth, sourceHeight);
-      if (rect) cropByAnchor.set(anchor, rect);
+      const found = await detectWebcamRectDebug(sourceVideoPath, sampleTimes, anchor.avg, sourceWidth, sourceHeight);
+      rectAlternatives.set(anchor, found.alternatives);
+      if (found.rect) cropByAnchor.set(anchor, found.rect);
       else logger.info("Volto scartato: non ha attorno un riquadro da webcam (probabile contenuto reagito)", { face: anchor.avg });
     }
 
@@ -688,7 +709,32 @@ export class ReactionCamFaceTracker implements FaceTracker {
     }
 
     const anchorGroups = candidateAnchors.filter((a) => cropByAnchor.has(a));
+    fixOversizedWebcamRects(anchorGroups, cropByAnchor, rectAlternatives, sourceWidth, sourceHeight);
     const decisions = rawDecisions.map((d) => ({ ...d, anchor: d.anchor && cropByAnchor.has(d.anchor) ? d.anchor : null }));
+
+    // Con più webcam, CHI mostrare lo decide il modello chi-parla insieme al proprietario del canale
+    // (vedi chooseShownSpeakers). `decisions` resta com'è perché serve a capire dove le webcam ci sono.
+    const shownIndex =
+      anchorGroups.length >= 2
+        ? await chooseShownSpeakers({
+            sourceVideoPath,
+            sourceWidth,
+            sourceHeight,
+            startSeconds,
+            clipDuration,
+            anchors: anchorGroups,
+            segments: decisions,
+            people: params.people,
+          })
+        : null;
+    // Senza il modello (una webcam sola, o modello fallito) si mostrano comunque le webcam riconosciute
+    // come tali, mai il riquadro "di riferimento" del percorso per scene: quello si cerca attorno al
+    // volto più PICCOLO, e sul video di Blur era la webcam di Pesh, in alto in ogni clip.
+    const shownCams = shownIndex
+      ? shownIndex.map((k) => cropByAnchor.get(anchorGroups[k]!)!)
+      : anchorGroups.length > 0
+        ? decisions.map((d) => cropByAnchor.get(d.anchor ?? anchorGroups[0]!)!)
+        : undefined;
 
     // Nessuna webcam riconoscibile: non c'è niente da affiancare, quindi un crop 9:16 a piena
     // altezza — ma inquadrato SCENA PER SCENA, non uno solo per tutta la clip (vedi perSceneCrops).
@@ -722,7 +768,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
       logger.info("Primo piano a tutto schermo dove la webcam non c'è: composizione scelta per tratti", {
         trattoPrimoPiano: subjectGap.toFixed(1) + "s",
       });
-      const scenes = await perSceneCompositions(sourceVideoPath, startSeconds, rawSegments, cutTimes, clipDuration, sourceWidth, sourceHeight);
+      const scenes = await perSceneCompositions(sourceVideoPath, startSeconds, rawSegments, cutTimes, clipDuration, sourceWidth, sourceHeight, shownCams);
       if (scenes.length) return { type: "scenes", scenes };
     }
 
@@ -751,7 +797,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
           trattoSenzaWebcam: gap.seconds.toFixed(1) + "s",
           durata: clipDuration.toFixed(1) + "s",
         });
-        const scenes = await perSceneCompositions(sourceVideoPath, startSeconds, rawSegments, cutTimes, clipDuration, sourceWidth, sourceHeight);
+        const scenes = await perSceneCompositions(sourceVideoPath, startSeconds, rawSegments, cutTimes, clipDuration, sourceWidth, sourceHeight, shownCams);
         if (scenes.length) return { type: "scenes", scenes };
       }
     }
@@ -796,7 +842,7 @@ export class ReactionCamFaceTracker implements FaceTracker {
     const topCrops: TimedCrop[] = decisions.map((d, i) => ({
       startSeconds: d.startSeconds,
       endSeconds: d.endSeconds,
-      crop: cropByAnchor.get(d.anchor ?? nearestAnchor(decisions, i))!,
+      crop: shownCams?.[i] ?? cropByAnchor.get(d.anchor ?? nearestAnchor(decisions, i))!,
     }));
 
     logger.info("Layout split rilevato (webcam sopra, contenuto fisso sotto)", {
@@ -989,6 +1035,223 @@ export class ReactionCamFaceTracker implements FaceTracker {
     logger.info("Chi parla, segmento per segmento (posizione:movimento -> scelto)", { speakerTrace });
 
     return { decisions, anchorGroups };
+  }
+}
+
+/**
+ * Oltre quante volte la proporzione riquadro/volto delle ALTRE webcam un riquadro è sicuramente
+ * troppo grande. In un layout con più webcam le webcam sono della stessa taglia: sul video di Blur
+ * il riquadro valeva 4,7-4,8 volte la larghezza del volto per tre webcam, e 7,2 per quella di
+ * Manuxo, che si era presa anche la finestra azzurra del gioco dietro (bordi nettissimi).
+ */
+const OVERSIZED_RECT_RATIO = 1.35;
+/** Punteggio minimo (assoluto e relativo al migliore) di un'alternativa per prendere il posto di un riquadro troppo grande. */
+const MIN_ALTERNATIVE_SCORE = 10;
+const MIN_ALTERNATIVE_SCORE_SHARE = 0.2;
+/** Due riquadri sono "della stessa taglia" se larghezza e altezza differiscono al massimo di questo fattore (le tessere del video di Blur: 336-398 px). */
+const SAME_TILE_RATIO = 1.2;
+
+/**
+ * Con più webcam, un riquadro molto più grande (rispetto al suo volto) di quelli delle altre si
+ * sostituisce con l'alternativa trovata dallo stesso rilevatore che ha le proporzioni delle altre,
+ * se abbastanza convincente. Agisce solo sui riquadri troppo GRANDI: uno troppo grande si porta
+ * dentro un pezzo di gioco e rimpicciolisce la persona nel pannello.
+ */
+function fixOversizedWebcamRects(
+  anchors: PositionGroup[],
+  cropByAnchor: Map<PositionGroup, CropWindow>,
+  alternatives: Map<PositionGroup, Array<{ rect: CropWindow; score: number }>>,
+  sourceWidth: number,
+  sourceHeight: number,
+): void {
+  if (anchors.length < 2) return;
+  const ratio = (a: PositionGroup, r: CropWindow) => r.width / a.avg.width;
+  const credible = (a: PositionGroup) => {
+    const alts = alternatives.get(a) ?? [];
+    const best = alts[0]?.score ?? 0;
+    return alts.filter(
+      (alt) =>
+        alt.score >= Math.max(MIN_ALTERNATIVE_SCORE, best * MIN_ALTERNATIVE_SCORE_SHARE) &&
+        faceCenterInside(a.avg, alt.rect) &&
+        !rejectionReasonForWebcamRect(alt.rect, sourceWidth, sourceHeight),
+    );
+  };
+  const similar = (r: CropWindow, s: CropWindow) =>
+    Math.max(r.width, s.width) / Math.min(r.width, s.width) <= SAME_TILE_RATIO && Math.max(r.height, s.height) / Math.min(r.height, s.height) <= SAME_TILE_RATIO;
+
+  // Con più webcam (videochiamata di gruppo, overlay a griglia) le webcam sono tessere della
+  // stessa taglia: un riquadro che non somiglia a NESSUN riquadro possibile delle altre webcam è
+  // sbagliato, e si sceglie tra le sue alternative quella che ne somiglia di più. Misurato sul video
+  // di Blur con 4 webcam: tessere fra 336 e 398 px di larghezza, e riquadri sbagliati di 510-604 px
+  // che si portavano dentro la finestra del gioco. La proporzione col volto deve restare simile a
+  // quella delle altre webcam: così la webcam GRANDE di uno streamer con due ospiti piccoli (il suo
+  // volto è grande anche lui) non viene mai ristretta a un pezzo interno della taglia degli ospiti.
+  {
+    for (let pass = 0; pass < 2; pass++) {
+      for (const anchor of anchors) {
+        const current = cropByAnchor.get(anchor)!;
+        const others = anchors.filter((a) => a !== anchor);
+        const support = (r: CropWindow) => others.filter((o) => credible(o).some((c) => similar(c.rect, r))).length;
+        if (support(current) > 0) continue;
+        const typical = median(others.map((o) => ratio(o, cropByAnchor.get(o)!)));
+        const pick = credible(anchor)
+          .filter(
+            (c) =>
+              c.rect.width * c.rect.height < current.width * current.height &&
+              support(c.rect) >= Math.min(2, others.length) &&
+              ratio(anchor, c.rect) >= typical * 0.75 &&
+              ratio(anchor, c.rect) <= typical * OVERSIZED_RECT_RATIO,
+          )
+          .sort((a, b) => support(b.rect) - support(a.rect) || b.score - a.score)[0];
+        if (!pick) continue;
+        logger.info("Riquadro webcam diverso da tutte le altre webcam del layout: preso quello della loro taglia", {
+          face: anchor.avg,
+          prima: current,
+          dopo: pick.rect,
+          webcamSimili: support(pick.rect),
+        });
+        cropByAnchor.set(anchor, pick.rect);
+      }
+    }
+  }
+
+  // Con 2 webcam, o se la griglia non ha deciso: proporzione col volto molto più grande delle altre.
+  for (const anchor of anchors) {
+    const rect = cropByAnchor.get(anchor)!;
+    const others = anchors.filter((a) => a !== anchor).map((a) => ratio(a, cropByAnchor.get(a)!));
+    const typical = median(others);
+    if (ratio(anchor, rect) <= typical * OVERSIZED_RECT_RATIO) continue;
+    const alts = alternatives.get(anchor) ?? [];
+    const best = alts[0]?.score ?? 0;
+    const replacement = alts
+      .filter(
+        (alt) =>
+          alt.score >= Math.max(MIN_ALTERNATIVE_SCORE, best * MIN_ALTERNATIVE_SCORE_SHARE) &&
+          ratio(anchor, alt.rect) <= typical * OVERSIZED_RECT_RATIO &&
+          faceCenterInside(anchor.avg, alt.rect) &&
+          !rejectionReasonForWebcamRect(alt.rect, sourceWidth, sourceHeight),
+      )
+      .sort((a, b) => Math.abs(ratio(anchor, a.rect) - typical) - Math.abs(ratio(anchor, b.rect) - typical))[0];
+    logger.info("Riquadro webcam troppo grande rispetto alle altre webcam", {
+      face: anchor.avg,
+      rect,
+      proporzione: ratio(anchor, rect).toFixed(2),
+      tipicaAltre: typical.toFixed(2),
+      sostituitoCon: replacement?.rect ?? "nessuna alternativa credibile, resta com'è",
+    });
+    if (replacement) cropByAnchor.set(anchor, replacement.rect);
+  }
+}
+
+/**
+ * Quanto il punteggio del proprietario può stare sotto quello di un altro e restare comunque lui
+ * in scena, quando parlano insieme ("se sta parlando proprio lui deve esserci lui", simo).
+ */
+const OWNER_KEEP_TOLERANCE = 1.5;
+/** Punteggio minimo (modello chi-parla, >0 = parla) perché un ALTRO prenda il pannello: un po' sopra lo zero, per non cambiare su un dubbio. */
+const OTHER_SPEAKER_MIN_SCORE = 0.5;
+
+/**
+ * Chi mostrare nel pannello webcam, tratto per tratto, con la regola di simo (2026-10-25):
+ * - di base il PROPRIETARIO del canale: quando nessuno parla o parla lui;
+ * - quando parla un altro, quello che parla;
+ * - appena torna il silenzio, di nuovo il proprietario.
+ *
+ * "Chi parla" lo dice il modello chi-parla (active-speaker.ts), che guarda bocca e voce insieme:
+ * chi è mutato e muove la bocca per i fatti suoi non vale. Il proprietario si riconosce dalle foto
+ * etichettate da simo (face-identity.ts); se non si riconosce, è chi parla di più nella clip.
+ * Ritorna per ogni tratto l'indice in `anchors`, o null se il modello non è utilizzabile (allora
+ * resta la scelta col solo movimento della bocca).
+ */
+async function chooseShownSpeakers(p: {
+  sourceVideoPath: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  startSeconds: number;
+  clipDuration: number;
+  anchors: PositionGroup[];
+  segments: Array<{ startSeconds: number; endSeconds: number }>;
+  people?: PeopleHint;
+}): Promise<number[] | null> {
+  let scores: number[][];
+  let fps: number;
+  try {
+    ({ scores, fps } = await scoreActiveSpeakers(p.sourceVideoPath, p.startSeconds, p.clipDuration, p.anchors.map((a) => a.avg), p.sourceWidth, p.sourceHeight));
+  } catch (err) {
+    logger.warn("Modello chi-parla non disponibile, scelgo la webcam col solo movimento della bocca", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+  const meanIn = (k: number, from: number, to: number) => {
+    const s = scores[k] ?? [];
+    const a = Math.max(0, Math.floor(from * fps));
+    const b = Math.min(s.length, Math.max(a + 1, Math.ceil(to * fps)));
+    let sum = 0;
+    for (let i = a; i < b; i++) sum += s[i]!;
+    return b > a ? sum / (b - a) : -1;
+  };
+
+  // Proprietario: dalle foto della pagina Facce, guardando ogni webcam nei momenti in cui il suo
+  // volto c'era davvero (nei primi piani del montatore il ritaglio cadrebbe su un altro).
+  let owner = -1;
+  let identities: Array<string | null> = [];
+  if (p.people?.ownerLabel && p.people.references.length) {
+    try {
+      const times = p.anchors.map((a) => {
+        const segs = [...a.segIndices].sort((x, y) => x - y);
+        const picks = segs.length <= 4 ? segs : [0, 1, 2, 3].map((q) => segs[Math.round((q * (segs.length - 1)) / 3)]!);
+        return picks.map((i) => p.startSeconds + (p.segments[i]!.startSeconds + p.segments[i]!.endSeconds) / 2);
+      });
+      const ids = await identifyWebcams(p.sourceVideoPath, times, p.anchors.map((a) => a.avg), p.sourceWidth, p.sourceHeight, p.people.references);
+      identities = ids.map((id) => id.label);
+      const ownerLabel = p.people.ownerLabel;
+      const candidates = ids.map((id, k) => ({ ...id, k })).filter((id) => id.label === ownerLabel).sort((a, b) => b.similarity - a.similarity);
+      owner = candidates[0]?.k ?? -1;
+    } catch (err) {
+      logger.warn("Riconoscimento del proprietario fallito, uso chi parla di più", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  const ownerFromPhotos = owner >= 0;
+  if (!ownerFromPhotos) {
+    const talk = scores.map((s) => s.reduce((sum, v) => sum + Math.max(0, v), 0));
+    owner = talk.indexOf(Math.max(...talk));
+  }
+
+  const trace: string[] = [];
+  const segmentMeans = p.segments.map((seg) => p.anchors.map((_, k) => meanIn(k, seg.startSeconds, seg.endSeconds)));
+  const chosen = p.segments.map((seg, i) => {
+    const means = segmentMeans[i]!;
+    const ownerScore = means[owner]!;
+    let bestOther = -1;
+    for (let k = 0; k < means.length; k++) if (k !== owner && (bestOther < 0 || means[k]! > means[bestOther]!)) bestOther = k;
+    let pick = owner;
+    if (!(ownerScore > 0 && ownerScore >= (means[bestOther] ?? -Infinity) - OWNER_KEEP_TOLERANCE) && bestOther >= 0 && means[bestOther]! >= OTHER_SPEAKER_MIN_SCORE) {
+      pick = bestOther;
+    }
+    trace.push(`${seg.startSeconds.toFixed(1)} ${means.map((m) => m.toFixed(1)).join("/")}→${pick}`);
+    return pick;
+  });
+  // Un tratto cortissimo (stacco del montatore vicino al confine) non fa cambiare persona da solo.
+  for (let i = 1; i < chosen.length; i++) {
+    const seg = p.segments[i]!;
+    if (seg.endSeconds - seg.startSeconds < 0.5) chosen[i] = chosen[i - 1]!;
+  }
+
+  logger.info("Chi parla (modello bocca+voce) e chi va nel pannello", {
+    webcam: p.anchors.map((a, k) => `${k}@${Math.round(a.avg.x)},${Math.round(a.avg.y)}${identities[k] ? `=${identities[k]}` : ""}`),
+    proprietario: `${owner}${ownerFromPhotos ? ` (${p.people!.ownerLabel}, dalle foto)` : " (chi parla di più)"}`,
+    tratti: trace.join(" | "),
+  });
+
+  // Prima di togliere il proprietario, la voce di quei tratti deve essere davvero di chi si mostra
+  // (vedi voice-check.ts): una voce del gioco o di un video non è di nessuna webcam.
+  if (!chosen.some((k) => k !== owner)) return chosen;
+  try {
+    return await verifySwitchesByVoice({ videoPath: p.sourceVideoPath, startSeconds: p.startSeconds, segments: p.segments, means: segmentMeans, chosen, owner });
+  } catch (err) {
+    logger.warn("Controllo voce non riuscito, tengo la scelta del modello chi-parla", { error: err instanceof Error ? err.message : String(err) });
+    return chosen;
   }
 }
 

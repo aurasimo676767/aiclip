@@ -11,7 +11,7 @@
  */
 import path from "node:path";
 import type { RankedClip, TranscriptSegment } from "@clipforge/shared";
-import { DEFAULT_TEMPLATES } from "@clipforge/shared";
+import { DEFAULT_TEMPLATES, normalizeCaptionSettings } from "@clipforge/shared";
 import { renderClip } from "../render/render-clip.js";
 import { ReactionCamFaceTracker } from "../face-tracking/reaction-cam-face-tracker.js";
 
@@ -77,6 +77,9 @@ async function main() {
     faceTracker: new ReactionCamFaceTracker(),
     workDir,
     outputPath,
+    captionSettings: normalizeCaptionSettings(null),
+    previewOutputPath: path.join(workDir, "preview.mp4"),
+    trackOutputPath: path.join(workDir, "captions.json"),
   });
 
   console.log(`Render completato: ${outputPath} (${result.durationSeconds.toFixed(2)}s)`);

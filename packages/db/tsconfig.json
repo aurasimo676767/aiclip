@@ -3,7 +3,9 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "noEmit": true
+    "noEmit": true,
+    // fetch e AbortSignal (client.ts): il pacchetto gira sia nel sito sia nel worker, entrambi li hanno.
+    "lib": ["ES2022", "DOM"]
   },
   "include": ["src"]
 }

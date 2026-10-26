@@ -50,6 +50,11 @@ export const MODEL_PRICING_USD_PER_MTOK = {
   haiku: { input: 1, output: 5 },
   sonnet: { input: 2, output: 10 },
   opus: { input: 5, output: 25 },
+  // OpenAI (AI_PROVIDER=openai nel worker), prezzi ufficiali controllati il 2026-10-25. Da OpenAI
+  // la cache non costa niente in scrittura e in lettura ha un prezzo suo, non il 10% fisso di
+  // Anthropic. Sopra i 272mila token di input Sol costa $4/$15: qui non è contato.
+  sol: { input: 2, output: 10, cachedInput: 0.1 },
+  luna: { input: 0.1, output: 0.5, cachedInput: 0.01 },
 } as const;
 
 /** Formato di output verticale standard (YouTube Shorts / TikTok / Reels). */
@@ -66,6 +71,13 @@ export const LONGFORM_DURATION_TARGET = { min: 600, max: 2400, hardMin: 300, har
 export const LONGFORM_CHUNK_WINDOW_SECONDS = 2700; // 45 minuti
 
 export const LONGFORM_CHUNK_OVERLAP_SECONDS = 600; // 10 minuti
+
+/**
+ * Tetto del montato long-form (simo, 2026-10-25: "massimo 45-50 minuti, ma anche meno
+ * tranquillamente"). I video più lunghi si montano da soli e il montaggio li porta sotto i 45 minuti.
+ */
+export const LONGFORM_EDIT_MAX_SECONDS = 50 * 60;
+export const LONGFORM_EDIT_TARGET_SECONDS = 45 * 60;
 
 /** Numero massimo di segmenti long-form suggeriti per VOD dopo il ranking. */
 export const MAX_SUGGESTED_LONGFORM_CLIPS = 15;

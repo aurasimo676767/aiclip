@@ -1,5 +1,11 @@
 import type { Config } from "tailwindcss";
 
+/**
+ * App scura "standard", al livello di Opus Clip e CapCut (scelta di simo il 2026-10-26): neutri
+ * freddi a gradini, i video sono il colore, UN accento azzurro per selezione e azione principale.
+ * I nomi dei token sono rimasti quelli di prima (canvas, surface, brand…) così ogni pagina passa al
+ * nuovo look senza riscriverla; cambiano i valori.
+ */
 const config: Config = {
   content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
   theme: {
@@ -9,66 +15,82 @@ const config: Config = {
         display: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       colors: {
-        // Il sito ha i colori degli Shorts che produce: fondo notte-Twitch, giallo del sottotitolo
-        // per le azioni, rosso delle urla per ciò che chiede attenzione, viola Twitch solo per i VOD.
-        canvas: "#0d0b12",
-        surface: "#15121c",
-        raised: "#1d1926",
-        overlay: "#262130",
-        line: "#2a2534",
-        "line-strong": "#3a3446",
-        ink: "#f5f3f7",
-        muted: "#a9a3b5",
-        faint: "#6f687c",
-        // "brand" = giallo sottotitolo. Su fondo giallo il testo va scuro (text-on-brand).
+        canvas: "#0b0b0e",
+        surface: "#131317",
+        raised: "#1a1a1f",
+        overlay: "#232329",
+        line: "#24242b",
+        "line-strong": "#33333c",
+        ink: "#f4f4f6",
+        muted: "#a2a2ad",
+        faint: "#6d6d78",
+        // "brand" = l'accento azzurro: azione principale, selezione, stato attivo. Testo sopra: bianco.
         brand: {
-          50: "#fffbe0",
-          100: "#fff4b3",
-          200: "#ffea75",
-          300: "#ffe03d",
-          400: "#ffd400",
-          500: "#f0c200",
-          600: "#c99f00",
-          700: "#9c7a00",
-          800: "#6e5600",
-          900: "#3f3100",
+          50: "#eef4ff",
+          100: "#d9e6ff",
+          200: "#b6ceff",
+          300: "#86adff",
+          400: "#4f86ff",
+          500: "#3570f2",
+          600: "#2457d6",
+          700: "#1d45a8",
+          800: "#1b3a82",
+          900: "#172f63",
         },
-        "on-brand": "#1a1400",
-        // Rosso urla: live, errori, cose che chiedono attenzione.
-        hot: "#ff2d3d",
+        "on-brand": "#ffffff",
+        // Errori e cose che chiedono attenzione.
+        hot: "#f2434f",
+        good: "#2fd27c",
+        warn: "#f5a524",
         twitch: {
           300: "#c4a2ff",
           400: "#a970ff",
           500: "#9146ff",
         },
       },
+      borderRadius: {
+        xl: "0.875rem",
+        "2xl": "1.125rem",
+        "3xl": "1.5rem",
+      },
       boxShadow: {
-        card: "0 1px 0 0 rgba(255,255,255,0.04) inset, 0 12px 28px -18px rgba(0,0,0,0.8)",
-        glow: "0 0 0 1px rgba(255,212,0,0.55), 0 10px 30px -12px rgba(255,212,0,0.35)",
-        // Il bordo nero spesso dei sottotitoli, usato come ombra "dura" sui pulsanti principali.
-        slab: "0 3px 0 0 #000",
+        // Profondità morbida e fredda (luce dall'alto): mai ombre dure.
+        card: "0 1px 0 0 rgba(255,255,255,0.03) inset, 0 8px 24px -12px rgba(0,0,0,0.6)",
+        pop: "0 1px 0 0 rgba(255,255,255,0.06) inset, 0 18px 48px -16px rgba(0,0,0,0.75), 0 2px 8px -2px rgba(0,0,0,0.5)",
+        glow: "0 0 0 1px rgba(79,134,255,0.6), 0 8px 24px -10px rgba(79,134,255,0.5)",
+        // Il vecchio "slab" (ombra dura nera) diventa un'ombra morbida: chi lo usa ancora non stona.
+        slab: "0 6px 16px -6px rgba(53,112,242,0.55)",
       },
       backgroundImage: {
-        "brand-gradient": "linear-gradient(90deg, #ffd400 0%, #ffe03d 100%)",
+        "brand-gradient": "linear-gradient(90deg, #3570f2 0%, #4f86ff 100%)",
+      },
+      transitionTimingFunction: {
+        out: "cubic-bezier(0.23, 1, 0.32, 1)",
+        "in-out": "cubic-bezier(0.77, 0, 0.175, 1)",
+        drawer: "cubic-bezier(0.32, 0.72, 0, 1)",
       },
       keyframes: {
         shimmer: { "0%": { backgroundPosition: "-200% 0" }, "100%": { backgroundPosition: "200% 0" } },
-        "fade-in": { from: { opacity: "0", transform: "translateY(4px)" }, to: { opacity: "1", transform: "none" } },
+        "fade-in": { from: { opacity: "0", transform: "translateY(6px)" }, to: { opacity: "1", transform: "none" } },
         "overlay-in": { from: { opacity: "0" }, to: { opacity: "1" } },
         "dialog-in": {
-          from: { opacity: "0", transform: "translateY(10px) scale(0.97)" },
+          from: { opacity: "0", transform: "translateY(8px) scale(0.97)" },
           to: { opacity: "1", transform: "none" },
         },
-        "pop-check": { "0%": { transform: "scale(0.4)" }, "60%": { transform: "scale(1.2)" }, "100%": { transform: "scale(1)" } },
-        "live-pulse": { "0%, 100%": { opacity: "1" }, "50%": { opacity: "0.35" } },
+        "sheet-in": { from: { transform: "translateY(100%)" }, to: { transform: "none" } },
+        "pop-check": { "0%": { transform: "scale(0.6)", opacity: "0" }, "100%": { transform: "scale(1)", opacity: "1" } },
+        "live-pulse": { "0%, 100%": { opacity: "1" }, "50%": { opacity: "0.4" } },
+        "progress-stripes": { from: { backgroundPosition: "0 0" }, to: { backgroundPosition: "28px 0" } },
       },
       animation: {
-        shimmer: "shimmer 2.2s linear infinite",
-        "fade-in": "fade-in 180ms ease-out",
-        "overlay-in": "overlay-in 160ms ease-out",
-        "dialog-in": "dialog-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.1)",
-        "pop-check": "pop-check 260ms cubic-bezier(0.2, 0.9, 0.3, 1.4)",
+        shimmer: "shimmer 2s linear infinite",
+        "fade-in": "fade-in 240ms cubic-bezier(0.23, 1, 0.32, 1) both",
+        "overlay-in": "overlay-in 200ms cubic-bezier(0.23, 1, 0.32, 1)",
+        "dialog-in": "dialog-in 240ms cubic-bezier(0.23, 1, 0.32, 1)",
+        "sheet-in": "sheet-in 320ms cubic-bezier(0.32, 0.72, 0, 1)",
+        "pop-check": "pop-check 200ms cubic-bezier(0.23, 1, 0.32, 1)",
         "live-pulse": "live-pulse 1.6s ease-in-out infinite",
+        "progress-stripes": "progress-stripes 900ms linear infinite",
       },
     },
   },

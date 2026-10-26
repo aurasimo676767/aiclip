@@ -9,4 +9,7 @@ import { env } from "../env.js";
 export const supabase = createServiceRoleClient({
   url: env.SUPABASE_URL,
   serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+  // Le query del worker durano meno di un secondo: oltre un minuto la connessione è morta, meglio
+  // un errore (il giro riprova da solo) che un giro appeso per sempre.
+  timeoutMs: 60_000,
 });

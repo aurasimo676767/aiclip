@@ -228,7 +228,7 @@ const RELATIVE_RED_SHARE = 1 / 6;
 const MIN_RED_WORD_LETTERS = 3;
 
 /** 0 = normale, 1 = voce alzata, 2 = urlo. */
-function shoutLevels(words: TranscriptWord[]): Map<TranscriptWord, 0 | 1 | 2> {
+export function shoutLevels(words: TranscriptWord[]): Map<TranscriptWord, 0 | 1 | 2> {
   const levels = new Map<TranscriptWord, 0 | 1 | 2>();
   const measured = words.map((w) => w.loudnessDb).filter((v): v is number => v !== undefined).sort((a, b) => a - b);
   if (measured.length === 0) return levels;

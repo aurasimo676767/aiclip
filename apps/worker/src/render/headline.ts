@@ -3,7 +3,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import { logger } from "../lib/logger.js";
-import { censorText } from "@clipforge/shared";
+import { censorText, type HeadlineStyle } from "@clipforge/shared";
 
 /**
  * Titolo fisso in alto negli Shorts, come immagine (PNG trasparente) da sovrapporre al video con
@@ -82,7 +82,8 @@ export async function renderHeadlinePng(
   text: string,
   outputPath: string,
   // Per "IN QUESTO VIDEO" nei video montati: tutto bianco e più grande (video 1920x1080).
-  opts: { allWhite?: boolean; baseSize?: number; maxWidth?: number } = {},
+  // style: lo stile scelto dall'editor per il titolo d'apertura (vedi HEADLINE_STYLES in packages/shared).
+  opts: { allWhite?: boolean; baseSize?: number; maxWidth?: number; style?: HeadlineStyle } = {},
 ): Promise<{ width: number; height: number } | null> {
   const maxWidth = opts.maxWidth ?? MAX_WIDTH;
   // Parole che YouTube/TikTok penalizzano censurate ("cicci0ni"), vedi shared/text/censor.ts.
@@ -113,15 +114,27 @@ export async function renderHeadlinePng(
   const height = Math.ceil(lineH * lines.length + size * 0.25 + pad * 2);
 
   const emojiImages = await Promise.all(emojis.map(emojiPng));
+  const style = opts.allWhite ? "bianco" : (opts.style ?? "classico");
   const parts: string[] = [];
   lines.forEach((line, k) => {
     const baseline = pad + size * 0.92 + k * lineH;
     const lineWidth = widths[k]!;
     const x0 = (width - lineWidth) / 2;
-    const fill = opts.allWhite || (lines.length > 1 && k === 0) ? "url(#w)" : "url(#y)";
-    const text = `<text x="${x0}" y="${baseline}" font-family="${FONT.family}" font-size="${size}" fill="${fill}" stroke="#000" stroke-width="${STROKE}" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(line)}</text>`;
-    const shadow = `<text x="${x0 + 5}" y="${baseline + 7}" font-family="${FONT.family}" font-size="${size}" fill="#000" stroke="#000" stroke-width="${STROKE}" stroke-linejoin="round" opacity="0.6">${escapeXml(line)}</text>`;
-    parts.push(shadow, text);
+    const accentLine = !(lines.length > 1 && k === 0);
+    const t = (attrs: string) => `<text x="${x0}" y="${baseline}" font-family="${FONT.family}" font-size="${size}" ${attrs}>${escapeXml(line)}</text>`;
+    if (style === "riquadro") {
+      // Testo nero su un riquadro bianco arrotondato, una riga per riquadro.
+      const bx = x0 - size * 0.28;
+      parts.push(`<rect x="${bx}" y="${baseline - size * 0.98}" width="${lineWidth + size * 0.56}" height="${size * 1.22}" rx="${size * 0.16}" fill="${accentLine ? "#FFD400" : "#FFFFFF"}"/>`);
+      parts.push(t(`fill="#111111"`));
+    } else if (style === "neon") {
+      parts.push(t(`fill="none" stroke="#00C8FF" stroke-width="${STROKE * 1.6}" stroke-linejoin="round" filter="url(#glow)"`));
+      parts.push(t(`fill="#FFFFFF" stroke="#00C8FF" stroke-width="${STROKE * 0.5}" stroke-linejoin="round" paint-order="stroke fill"`));
+    } else {
+      const fill = style === "bianco" || !accentLine ? "url(#w)" : style === "verde" ? "url(#g)" : "url(#y)";
+      parts.push(t(`fill="#000" stroke="#000" stroke-width="${STROKE}" stroke-linejoin="round" opacity="0.6" transform="translate(5 7)"`));
+      parts.push(t(`fill="${fill}" stroke="#000" stroke-width="${STROKE}" stroke-linejoin="round" paint-order="stroke fill"`));
+    }
     if (k === lines.length - 1) {
       let ex = x0 + textWidth(line, size) + size * 0.15;
       emojiImages.forEach((img) => {
@@ -136,6 +149,8 @@ export async function renderHeadlinePng(
     <defs>
       <linearGradient id="w" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#e6e6ec"/></linearGradient>
       <linearGradient id="y" x1="0" y1="0" x2="0" y2="1"><stop offset="10%" stop-color="#fff200"/><stop offset="100%" stop-color="#ffae00"/></linearGradient>
+      <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="10%" stop-color="#7dff8f"/><stop offset="100%" stop-color="#1fd155"/></linearGradient>
+      <filter id="glow" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="9"/></filter>
     </defs>
     <g>${parts.join("")}</g>
   </svg>`;

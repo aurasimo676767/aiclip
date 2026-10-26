@@ -42,8 +42,10 @@ export interface PlannedVideo {
   opening: string;
   /** Descrizione di come finisce (l'ultimo blocco). */
   closing: string;
-  /** Solo per i video divisi in parti: 1, 2, 3... */
+  /** Vecchi piani divisi in parti (prima del 2026-10-25): 1, 2, 3... */
   part?: number;
+  /** Solo per i giochi di un torneo: il nome del torneo. I giochi dello stesso torneo si toccano sulla ruota. */
+  tournament?: string;
 }
 
 const TIMELINE_KINDS = ["wait", "chatter", "setup", "wheel", "game", "tournament_game", "reaction", "talk", "pause", "outro"] as const;
@@ -67,14 +69,8 @@ export interface LongformPlanResult {
 
 const TOOL_NAME = "return_vod_timeline";
 
-/** Oltre questa durata un video si divide in parti — simo: "basta che non venga ore e ore" (niente tolleranza: un Black Ops 2 da 2h02 restava intero). */
-export const LONG_VIDEO_SPLIT_SECONDS = 2 * 60 * 60;
 /** Sotto questa durata un gioco/reaction/argomento non regge da solo come video. */
 export const MIN_VIDEO_SECONDS = 8 * 60;
-/** Durata a cui puntare per ogni parte di un video diviso. */
-const PART_TARGET_SECONDS = 75 * 60;
-/** Una parte più corta di così non ha senso: meglio un taglio meno bilanciato. */
-const PART_MIN_SECONDS = 30 * 60;
 /**
  * Due tratti della stessa attività separati da meno di così (chiacchiere, una pausa) sono lo
  * stesso video: "se lasciano il gioco per pochi minuti e poi lo riprendono è lo stesso video".
@@ -101,7 +97,11 @@ const TIMELINE_TOOL_SCHEMA = {
               description:
                 "Il nome dell'attività a cui il blocco appartiene, SCRITTO IDENTICO in tutti i blocchi della stessa attività (\"Black Ops 2\", \"Torneo Impossibile\", \"reaction: documentario sui Sadhu\", \"reaction: TikTok\", \"talk: furto negli spogliatoi degli Stallions\"). Stringa vuota per wait/chatter/outro che non appartengono a niente.",
             },
-            what: { type: "string", description: "Cosa succede in questo blocco, specifico (per un torneo: il gioco di questa partita)." },
+            what: {
+              type: "string",
+              description:
+                "Cosa succede in questo blocco, specifico. Per una partita (game o tournament_game) comincia SEMPRE col nome del gioco seguito da due punti, scritto identico in tutte le partite allo stesso gioco (\"Fortnite: vincono il primo round\"): un torneo viene diviso in un video per gioco usando questo nome.",
+            },
           },
           required: ["start", "end", "kind", "activity", "what"],
         },
@@ -265,7 +265,9 @@ interface ActivityGroup {
  *   SAME_ACTIVITY_GAP_SECONDS di altro) sono un video solo;
  * - setup e ruota ne fanno parte perché hanno la sua attività: il video comincia dalla ruota;
  * - un'attività sotto MIN_VIDEO_SECONDS (o fatta solo di preparazione) non diventa un video;
- * - un video oltre LONG_VIDEO_SPLIT_SECONDS viene diviso in parti (splitLongVideo).
+ * - mai divisa in parti, anche se dura ore: la accorcia il montaggio (simo, 2026-10-25: "se UN SOLO
+ *   argomento dura tanto, lo deve far durare tutto unico");
+ * - un torneo diventa un video per gioco (splitTournamentByGame).
  */
 export function buildVideosFromTimeline(timeline: TimelineBlock[]): PlannedVideo[] {
   const groups: ActivityGroup[] = [];
@@ -313,84 +315,72 @@ export function buildVideosFromTimeline(timeline: TimelineBlock[]): PlannedVideo
       logger.info("Attività troppo corta per un video", { activity: group.activity, seconds: Math.round(duration) });
       continue;
     }
-    videos.push(...splitLongVideo(group, kind));
+    videos.push(...(kind === "tournament" ? splitTournamentByGame(group) : [toVideo(group, group.blocks, kind)]));
   }
   return videos;
 }
 
-/** Elenco dei giochi di un tratto di torneo, per il topic ("Fortnite, REMATCH, Brainrot Kart"). */
-function gamesIn(blocks: TimelineBlock[]): string {
-  const names = blocks.filter((b) => b.kind === "tournament_game" || b.kind === "game").map((b) => b.what.split(/[(:,—-]/)[0]!.trim());
-  return [...new Set(names)].slice(0, 8).join(", ");
-}
+/** Il gioco di una partita, dalla descrizione del blocco ("Fortnite: secondo round" → "Fortnite"). */
+const gameOf = (block: TimelineBlock) => block.what.split(/[(:,—-]/)[0]!.trim();
 
-function toVideo(group: ActivityGroup, blocks: TimelineBlock[], kind: PlannedVideoKind, part?: number): PlannedVideo {
-  const games = kind === "tournament" ? gamesIn(blocks) : "";
+function toVideo(group: ActivityGroup, blocks: TimelineBlock[], kind: PlannedVideoKind): PlannedVideo {
   return {
     start: blocks[0]!.start,
     end: blocks[blocks.length - 1]!.end,
     kind,
     activity: group.activity,
-    topic: `${group.activity}${part ? ` — parte ${part}` : ""}${games ? ` (${games})` : ""}`,
+    topic: group.activity,
     opening: blocks[0]!.what,
     closing: blocks[blocks.length - 1]!.what,
-    part,
   };
 }
 
 /**
- * Divide un video troppo lungo (tornei soprattutto) in parti di durata simile. Si taglia solo
- * all'inizio di un blocco — cioè tra una partita e l'altra, mai a metà partita — arretrato sulla
- * sua preparazione e sulla sua ruota (regola di simo: la ruota apre la parte, non si taglia mai
- * fuori). A parità di distanza dal punto ideale si preferisce tagliare sulla ruota.
+ * Un torneo diventa un video per gioco (simo, 2026-10-25: "quando fanno i tornei voglio che li
+ * divida per gioco, anche se è un torneo unico"). La preparazione e la ruota stanno col gioco che
+ * scelgono, così ogni video parte dalla ruota (regola di simo: la ruota non si taglia mai fuori);
+ * più partite di fila allo stesso gioco restano un video solo; classifica e saluti finali chiudono
+ * l'ultimo. Un gioco troppo corto per reggere da solo si unisce a quello prima.
  */
-function splitLongVideo(group: ActivityGroup, kind: PlannedVideoKind): PlannedVideo[] {
-  const blocks = group.blocks;
-  const start = blocks[0]!.start;
-  const end = blocks[blocks.length - 1]!.end;
-  const duration = end - start;
-  if (duration <= LONG_VIDEO_SPLIT_SECONDS) return [toVideo(group, blocks, kind)];
-
-  // Indici dei blocchi da cui può cominciare una parte, già arretrati su setup/ruota attaccati.
-  const cuts: Array<{ index: number; wheel: boolean }> = [];
-  for (let i = 1; i < blocks.length; i++) {
-    const block = blocks[i]!;
-    if (block.kind === "setup" || block.kind === "wheel") continue; // coperti dal blocco che preparano
-    let first = i;
-    let wheel = false;
-    while (first > 1 && (blocks[first - 1]!.kind === "setup" || blocks[first - 1]!.kind === "wheel")) {
-      if (blocks[first - 1]!.kind === "wheel") wheel = true;
-      first--;
+function splitTournamentByGame(group: ActivityGroup): PlannedVideo[] {
+  const pieces: Array<{ game: string; blocks: TimelineBlock[] }> = [];
+  let pending: TimelineBlock[] = [];
+  for (const block of group.blocks) {
+    if (block.kind !== "tournament_game" && block.kind !== "game") {
+      pending.push(block);
+      continue;
     }
-    const time = blocks[first]!.start;
-    if (time - start < PART_MIN_SECONDS || end - time < PART_MIN_SECONDS) continue;
-    if (!cuts.some((c) => c.index === first)) cuts.push({ index: first, wheel });
+    const game = gameOf(block);
+    const last = pieces[pieces.length - 1];
+    if (last && activityKey(last.game) === activityKey(game)) last.blocks.push(...pending, block);
+    else pieces.push({ game, blocks: [...pending, block] });
+    pending = [];
+  }
+  if (pieces.length === 0) return [toVideo(group, group.blocks, "tournament")];
+  pieces[pieces.length - 1]!.blocks.push(...pending);
+
+  const merged: typeof pieces = [];
+  for (const piece of pieces) {
+    const duration = piece.blocks[piece.blocks.length - 1]!.end - piece.blocks[0]!.start;
+    const previous = merged[merged.length - 1];
+    if (previous && duration < MIN_VIDEO_SECONDS) {
+      previous.game = `${previous.game} + ${piece.game}`;
+      previous.blocks.push(...piece.blocks);
+    } else merged.push(piece);
+  }
+  // Il primo, se è troppo corto, va col secondo.
+  if (merged.length > 1 && merged[0]!.blocks[merged[0]!.blocks.length - 1]!.end - merged[0]!.blocks[0]!.start < MIN_VIDEO_SECONDS) {
+    const first = merged.shift()!;
+    merged[0] = { game: `${first.game} + ${merged[0]!.game}`, blocks: [...first.blocks, ...merged[0]!.blocks] };
   }
 
-  const parts = Math.max(2, Math.round(duration / PART_TARGET_SECONDS));
-  const chosen: typeof cuts = [];
-  for (let k = 1; k < parts; k++) {
-    const ideal = start + (duration * k) / parts;
-    const lastTime = chosen.length > 0 ? blocks[chosen[chosen.length - 1]!.index]!.start : start;
-    const distance = (c: (typeof cuts)[number]) => Math.abs(blocks[c.index]!.start - ideal) / (c.wheel ? 2 : 1);
-    const best = cuts.filter((c) => blocks[c.index]!.start - lastTime >= PART_MIN_SECONDS).sort((a, b) => distance(a) - distance(b))[0];
-    if (best) chosen.push(best);
-  }
-  chosen.sort((a, b) => a.index - b.index);
-
-  if (chosen.length === 0) {
-    logger.warn("Video lungo non divisibile: nessun confine tra partite", { activity: group.activity, duration: fmt(duration) });
-    return [toVideo(group, blocks, kind)];
-  }
-
-  const bounds = [0, ...chosen.map((c) => c.index), blocks.length];
-  const parts_ = bounds.slice(0, -1).map((from, p) => toVideo(group, blocks.slice(from, bounds[p + 1]), kind, p + 1));
-  logger.info("Video lungo diviso in parti", {
-    activity: group.activity,
-    duration: fmt(duration),
-    parts: parts_.map((v) => `${fmt(v.start)}-${fmt(v.end)} (apre: ${v.opening})`),
-  });
-  return parts_;
+  const videos = merged.map((piece) => ({
+    ...toVideo({ activity: piece.game, blocks: piece.blocks }, piece.blocks, "tournament"),
+    topic: `${piece.game} (partita del torneo "${group.activity}")`,
+    tournament: group.activity,
+  }));
+  logger.info("Torneo diviso per gioco", { tournament: group.activity, videos: videos.map((v) => `${fmt(v.start)}-${fmt(v.end)} ${v.activity}`) });
+  return videos;
 }
 
 export function fmt(seconds: number): string {

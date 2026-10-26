@@ -44,6 +44,8 @@ export function classifyModelTier(modelId: string): ModelUsageKey | null {
   if (lower.includes("haiku")) return "haiku";
   if (lower.includes("opus")) return "opus";
   if (lower.includes("sonnet")) return "sonnet";
+  if (lower.includes("luna")) return "luna";
+  if (lower.includes("sol")) return "sol";
   return null;
 }
 
@@ -55,10 +57,11 @@ const CACHE_WRITE_MULTIPLIER = 1.25;
 /** Costo in $ per un singolo livello dati i token effettivi (cache inclusa) — stessa formula usata dal worker e dal sito. */
 export function computeModelCostUsd(model: ModelUsageKey, usage: ModelTokenUsage): number {
   const pricing = MODEL_PRICING_USD_PER_MTOK[model];
+  const cachedInput = "cachedInput" in pricing ? pricing.cachedInput : pricing.input * CACHE_READ_MULTIPLIER;
   return (
     (usage.input / 1e6) * pricing.input +
     (usage.output / 1e6) * pricing.output +
-    (usage.cacheRead / 1e6) * pricing.input * CACHE_READ_MULTIPLIER +
+    (usage.cacheRead / 1e6) * cachedInput +
     (usage.cacheWrite / 1e6) * pricing.input * CACHE_WRITE_MULTIPLIER
   );
 }

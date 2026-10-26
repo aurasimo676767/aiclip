@@ -64,7 +64,7 @@ const TOOL_SCHEMA = {
 const SYSTEM_PROMPT = `Prepari la pubblicazione su YouTube di video long-form ricavati da una live Twitch italiana. I video sono già tagliati: per ognuno ricevi l'attività, cosa succede dentro (la mappa della live, blocco per blocco) e alcuni estratti del parlato. Non scartarne nessuno e non cambiare i tempi.
 
 Per ogni video scrivi:
-- title: il titolo reale di pubblicazione. Deve dire l'attività e il momento più forte che succede dentro. Per i video divisi in parti metti "(Parte N)" in fondo al titolo.
+- title: il titolo reale di pubblicazione. Deve dire l'attività e il momento più forte che succede dentro. Per i giochi di un torneo il titolo dice il gioco di quel video, non tutto il torneo.
 - hook e reason: interni, per la dashboard.
 - scores: 6 punteggi 0-100 (hook, retention, emotion, clarity, payoff, virality) calibrati su tutta la scala: 90-100 eccezionale, 75-89 forte, 55-74 discreto, sotto 55 debole. Servono a ordinare i video, quindi differenziali davvero fra loro.
 - hashtags: 5-8, senza #, minuscoli, senza spazi.
@@ -194,7 +194,7 @@ export async function describePlannedVideos(
     const meta = byIndex.get(i);
     // Un video senza metadati validi resta comunque: il taglio è la parte importante, il titolo si
     // può correggere a mano dalla dashboard.
-    const fallbackTitle = `${v.activity}${v.part ? ` (Parte ${v.part})` : ""}`.slice(0, 100);
+    const fallbackTitle = v.activity.slice(0, 100);
     return {
       start: v.start,
       end: v.end,
@@ -230,7 +230,7 @@ function describeForPrompt(index: number, v: PlannedVideo, timeline: TimelineBlo
     .map((l) => `[${fmt(l.start)}] ${l.text.slice(0, LINE_MAX_CHARS)}`)
     .join("\n");
 
-  return `### Video ${index} — ${v.activity}${v.part ? ` (Parte ${v.part})` : ""}
+  return `### Video ${index} — ${v.activity}${v.tournament ? ` (gioco del torneo "${v.tournament}")` : ""}
 Tipo: ${v.kind} · ${fmt(v.start)}-${fmt(v.end)} (${Math.round((v.end - v.start) / 60)} minuti)
 Contenuto: ${v.topic}
 Mappa della live dentro questo video:

@@ -13,8 +13,16 @@ export interface VideoFilterParams {
   punchZoom?: number;
   /** Tratti in cui il pannello del gioco NON è riempito al centro (vedi ContentView). */
   contentViews?: ContentView[];
-  /** Titolo fisso in alto (PNG di headline.ts, input ffmpeg già in loop per tutta la clip). */
-  headline?: { input: string; width: number; height: number };
+  /**
+   * Titolo in alto (PNG di headline.ts, input ffmpeg già in loop per tutta la clip). `until`: secondi
+   * dopo cui sparisce con una breve dissolvenza (titolo d'apertura); assente = per tutta la clip.
+   */
+  headline?: { input: string; width: number; height: number; until?: number };
+  /**
+   * Se presente, il video composto PRIMA di sottotitoli, titolo e barra esce anche su questa etichetta,
+   * rimpicciolito a 720x1280: è il video su cui il sito disegna l'anteprima dal vivo degli stili.
+   */
+  previewLabel?: string;
 }
 
 /**
@@ -31,9 +39,11 @@ const HEADLINE_CENTER_Y = 175;
 function headlineSteps(inputLabel: string, headline: NonNullable<VideoFilterParams["headline"]>, base: string, out: string): string[] {
   // Visibile già al primo fotogramma (quello che decide se si scorre via): parte al 90%, 112% a 0,12 s, 100% a 0,25 s.
   const s = "if(lt(t,0.12),0.9+1.83*t,if(lt(t,0.25),1.12-0.92*(t-0.12),1))";
+  const fadeOut = headline.until !== undefined ? `,fade=t=out:st=${Math.max(0, headline.until - 0.25).toFixed(3)}:d=0.25:alpha=1` : "";
+  const enable = headline.until !== undefined ? `:enable='lte(t,${headline.until.toFixed(3)})'` : "";
   return [
-    `[${headline.input}]format=rgba,scale=w='max(2,trunc(${headline.width}*${s}/2)*2)':h=-2:eval=frame[hl]`,
-    `[${base}][hl]overlay=x='(W-w)/2':y='${HEADLINE_CENTER_Y}-h/2':eval=frame:shortest=1[${out}]`,
+    `[${headline.input}]format=rgba,scale=w='max(2,trunc(${headline.width}*${s}/2)*2)':h=-2:eval=frame${fadeOut}[hl]`,
+    `[${base}][hl]overlay=x='(W-w)/2':y='${HEADLINE_CENTER_Y}-h/2':eval=frame:shortest=1${enable}[${out}]`,
   ];
 }
 
@@ -77,6 +87,12 @@ export function buildVideoFilterComplex(params: VideoFilterParams): string {
   if (punchIns.length > 0 && (params.punchZoom ?? 1) > 1.01) {
     steps.push(...buildPunchInSteps(layout, punchIns, params.punchZoom!, clipDurationSeconds));
     composed = "punched";
+  }
+
+  if (params.previewLabel) {
+    steps.push(`[${composed}]split=2[forsubs][forpreview]`);
+    steps.push(`[forpreview]scale=720:1280:flags=bicubic[${params.previewLabel}]`);
+    composed = "forsubs";
   }
 
   const lastLabel = "subbed";

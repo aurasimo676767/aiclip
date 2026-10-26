@@ -71,13 +71,15 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
         : "a frame of the Short clip itself (the key moment): use what happens in it as the scene behind the streamer (for a reaction to a TikTok or video, show that video behind; for a game, the game)";
   inputLines.push(`- image ${bgIndex}: the background, ${background}.`);
   for (const person of params.people) {
-    const first = images.length + 1;
-    for (const p of person.photos) add(p);
-    const last = images.length;
+    // Le foto di una persona vanno in un collage solo: GPT Image fa pagare ~1.000 token per OGNI
+    // immagine (misurato il 2026-10-25, 17,7 cent per una copertina con 20 foto), qualunque misura abbia.
+    const photo = person.photos.length > 1 ? await buildCollage(person.photos, path.join(path.dirname(params.outputPath), `refs-${person.name || images.length}.jpg`)) : person.photos[0];
+    if (!photo) continue;
+    const n = add(photo);
     inputLines.push(
-      (first === last
-        ? `- image ${first}: close-up reference photo of the face of the real streamer nicknamed "${person.name}"`
-        : `- images ${first}-${last}: ${last - first + 1} close-up reference photos of the face of the SAME single streamer, nicknamed "${person.name}" (draw them only once)`) +
+      (person.photos.length === 1
+        ? `- image ${n}: close-up reference photo of the face of the real streamer nicknamed "${person.name}"`
+        : `- image ${n}: a grid of ${person.photos.length} close-up reference photos of the face of the SAME single streamer, nicknamed "${person.name}". It is one person photographed several times, NOT a group: draw him only once`) +
         (person.styleNote ? `. In the thumbnail "${person.name}" is ${person.styleNote}.` : ""),
     );
   }
@@ -128,7 +130,7 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     "Use the reference photos ONLY to know what each face looks like (plus any fixed style written above). Do NOT copy a single photo: create a NEW natural pose and expression for each person, and do not reuse clothes or accessories (scarves, jerseys, props) that don't fit this video; plain streamer clothes (t-shirt or hoodie, gaming headphones) are fine. Hands and arms must be anatomically realistic, or keep them out of the frame.",
     // Con 3 foto della stessa persona GPT disegnava tre ragazzi diversi (copertina di Murri, 2026-09-26).
     params.people.length > 0
-      ? `Exactly ${params.people.length} streamer${params.people.length === 1 ? "" : "s"} in the foreground, each drawn ONCE: ${params.people.map((p) => `"${p.name}"`).join(", ")}. Never duplicate a person and never add other streamers.${params.draftPath ? " If someone is missing from the draft, add them next to the others, same size and style." : ""}`
+      ? `Exactly ${params.people.length} streamer${params.people.length === 1 ? "" : "s"} in the foreground, each drawn ONCE: ${params.people.map((p) => `"${p.name}"`).join(", ")}. ONE single person per name: never draw the same person twice, never give two people the same face, never add other streamers, and never invent someone who has no reference photos here.${params.draftPath ? " If someone is missing from the draft, add them next to the others, same size and style." : ""}`
       : `No reference photos: the streamer in the foreground is the person already visible in image ${bgIndex}, redrawn big and sharp with the SAME face; never invent a different person.`,
     ...(params.kind === "reaction"
       ? [`Keep the main person or subject of the original thumbnail (image ${bgIndex}) clearly visible in the background: it is what the streamers are reacting to.`]
@@ -139,15 +141,20 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     // con l'AI): piene, sature, facce enormi, logo del gioco, bigliettini, costumi a tema.
     "Visual style: like the top Italian clip channels (e.g. \"Avrai Aura Booter\"): a dense, busy, hyper-saturated composition, glossy and dramatic, strong rim light and colored glow around the people, subtle vignette, bright complementary colors (blue/orange, purple/yellow, red/yellow). The people fill most of the frame, big faces close together, slightly overlapping, the main one biggest.",
     "When it fits the video and is funny, dress the people for the theme (e.g. hard hats for a building game, costumes for a party game) and add a few themed props from the game or the topic around them.",
-    `Add 2-4 small sticker labels in ITALIAN (1-3 words each, white or yellow paper notes or speech bubbles, simple correct Italian words) with funny comments about the video${params.videoTitle ? ` ("${params.videoTitle}")` : ""}, plus 1-2 red arrows or question marks pointing at the key thing. Keep them small, at the edges, never over faces.`,
     "",
     line2
       ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. First line white with a light grey gradient, second line in one bold color that fits the video (red, yellow-orange, purple, green or blue gradient with a glossy highlight), thick dark outline, 3D extrusion and drop shadow, soft glow.`
       : `Text: exactly "${line1}", spelled exactly, one line. Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. One bold color that fits the video (red, yellow-orange, purple, green or blue gradient with a glossy highlight), thick dark outline, 3D extrusion and drop shadow, soft glow.`,
-    "Apart from the title, the game logo and the small stickers: no other text, no channel logos, no watermarks, no borders. Very sharp.",
+    // simo, 2026-10-25: "ci sono delle scritte nella copertina, 3 quadratini, non voglio che proprio ci siano".
+    "Apart from the title and the game logo there is NO other text anywhere: no stickers, no paper notes, no labels, no speech bubbles, no captions, no small words, no channel logos, no watermarks, no borders. Very sharp.",
     // simo, 2026-09-29: "voglio poter dire all'ia come farle". Le sue istruzioni (in italiano) vincono.
     ...(params.userInstructions
       ? ["", `INSTRUCTIONS FROM THE CHANNEL OWNER (written in Italian; they have the HIGHEST priority and override any rule above about the text, how many texts, stickers, game, layout and style; the faces must still stay the real people): ${params.userInstructions}`]
+      : []),
+    // simo, 2026-10-25: chiesti Blur, Marza e Pesh, uscito un secondo Blur al posto di Pesh. Ripetuto in
+    // fondo perché le istruzioni del proprietario qui sopra vincono sul resto, ma non su questo.
+    ...(params.people.length > 0
+      ? ["", `NON-NEGOTIABLE, even over the owner's instructions: ONE single person per name, each drawn exactly once (${params.people.map((p) => `1 "${p.name}"`).join(", ")}). No copies of anyone.`]
       : []),
   ].join("\n");
 
@@ -195,6 +202,21 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     secondi: Math.round((Date.now() - started) / 1000),
     usage: body.usage,
   });
+}
+
+/** Le foto di una persona affiancate in una griglia (tasselli da 512 px, fondo grigio neutro), salvata in `out`. */
+async function buildCollage(photos: string[], out: string): Promise<string> {
+  const TILE = 512;
+  const cols = Math.ceil(Math.sqrt(photos.length));
+  const rows = Math.ceil(photos.length / cols);
+  const tiles = await Promise.all(
+    photos.map((p) => sharp(p).resize(TILE, TILE, { fit: "contain", background: "#808080" }).flatten({ background: "#808080" }).jpeg({ quality: 92 }).toBuffer()),
+  );
+  await sharp({ create: { width: cols * TILE, height: rows * TILE, channels: 3, background: "#808080" } })
+    .composite(tiles.map((input, i) => ({ input, left: (i % cols) * TILE, top: Math.floor(i / cols) * TILE })))
+    .jpeg({ quality: 92 })
+    .toFile(out);
+  return out;
 }
 
 /** Le stesse due righe della bozza (compose-cover divide allo stesso modo); in verticale si va a capo prima. */

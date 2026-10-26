@@ -5,12 +5,21 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { env } from "../../env.js";
+import { isOpenAIModel, openaiCreate, openaiCreateMessage } from "./openai-bridge.js";
 
 let client: Anthropic | null = null;
 
 export function getAnthropicClient(apiKey: string): Anthropic {
   if (!client) {
-    client = new Anthropic({ apiKey });
+    const real = new Anthropic({ apiKey });
+    // Con AI_PROVIDER=openai i modelli sono GPT: la chiamata passa dal ponte (openai-bridge.ts) e
+    // chi chiama riceve comunque una risposta nel formato di Claude.
+    const create = real.messages.create.bind(real.messages);
+    real.messages.create = ((params: Anthropic.MessageCreateParams, options?: Anthropic.RequestOptions) =>
+      isOpenAIModel(params.model)
+        ? openaiCreate(params as Anthropic.MessageCreateParamsNonStreaming)
+        : create(params as Anthropic.MessageCreateParamsNonStreaming, options)) as typeof real.messages.create;
+    client = real;
   }
   return client;
 }
@@ -80,6 +89,7 @@ const BATCH_MAX_WAIT_MS = 2 * 60 * 60 * 1000;
  * quelli "Beta", identici nella forma, da qui i cast.
  */
 export async function createMessage(client: Anthropic, params: Anthropic.MessageCreateParamsNonStreaming, opts: { batch?: boolean; label?: string } = {}): Promise<Anthropic.Message> {
+  if (isOpenAIModel(params.model)) return openaiCreateMessage(params, opts);
   if (!opts.batch) return client.messages.create(params);
 
   const started = Date.now();

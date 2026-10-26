@@ -1,3 +1,5 @@
+import type { PersonReference } from "./face-identity.js";
+
 /** Rettangolo di crop in pixel, riferito ai frame del video sorgente. */
 export interface CropWindow {
   x: number;
@@ -91,5 +93,15 @@ export interface FaceTracker {
      * quasi tutto il tempo dell'analisi per niente. Default: true.
      */
     sceneCuts?: boolean;
+    /**
+     * Persone etichettate da simo (pagina Facce) e quale di loro è il proprietario del canale: il
+     * pannello webcam mostra lui quando nessun altro parla. Assente = proprietario = chi parla di più.
+     */
+    people?: PeopleHint;
   }): Promise<Layout>;
+}
+
+export interface PeopleHint {
+  references: PersonReference[];
+  ownerLabel: string | null;
 }
