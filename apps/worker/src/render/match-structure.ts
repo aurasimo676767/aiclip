@@ -26,10 +26,16 @@ const MATCH_END_SECONDS = 15;
 const MIN_KEPT_FOR_EDGES = 30;
 /** Un gioco conta (e deve avere almeno una partita) se a schermo si gioca almeno così: sotto è un fotogramma riconosciuto male. */
 const MIN_GAME_SECONDS = 60;
-/** Menu, caricamenti e attese di fila nel video montato: al massimo così, presi a ridosso della partita dopo. */
+/**
+ * Menu, caricamenti e attese di fila nel video montato: circa così, presi a ridosso della partita dopo.
+ * Limiti morbidi (simo, 2026-10-26: "non per forza 30 secondi, non deve essere macchinoso"): il taglio
+ * cade sulla pausa fra due frasi più vicina (naturalStart), anche qualche secondo prima o dopo.
+ */
 const MENU_MAX_SECONDS = 15;
-/** Prima della prima partita, IN TUTTO: la presentazione ("dai andiamo a giocare a..."), poi si gioca. */
-const SETUP_MAX_SECONDS = 30;
+/** Prima della prima partita, IN TUTTO, circa così: la presentazione ("dai andiamo a giocare a..."), poi si gioca. */
+const SETUP_MAX_SECONDS = 45;
+/** Una pausa fra due frasi lunga almeno così è un punto naturale per cominciare un pezzo. */
+const NATURAL_PAUSE_SECONDS = 0.5;
 /** Attorno a un momento forte (intro, primo piano) dentro un menu: lì il menu resta. */
 const STRONG_PAD_SECONDS = 3;
 /** Pezzi più vicini di così si uniscono; più corti di così si buttano. */
@@ -74,6 +80,23 @@ function subtract(a: Range[], b: Range[]): Range[] {
     });
   }
   return out;
+}
+
+/**
+ * Il punto più naturale vicino a t per far cominciare un pezzo: l'inizio di una frase che arriva dopo
+ * una pausa, fra `before` secondi prima e `after` dopo (il più vicino a t). Senza pause lì attorno,
+ * l'inizio della frase che contiene t.
+ */
+function naturalStart(t: number, segments: TranscriptSegment[], before = 8, after = 5): number {
+  let best: number | null = null;
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i]!;
+    if (s.start < t - before || s.start > t + after) continue;
+    const prevEnd = i > 0 ? segments[i - 1]!.end : -Infinity;
+    if (s.start - prevEnd < NATURAL_PAUSE_SECONDS) continue;
+    if (best === null || Math.abs(s.start - t) < Math.abs(best - t)) best = s.start;
+  }
+  return best ?? sentenceStart(t, segments);
 }
 
 /** Il punto sposta all'inizio della frase che lo contiene (i tagli non devono cadere a metà parola). */
@@ -130,7 +153,7 @@ export function enforceMatchStructure(params: {
   const drop: Range[] = [];
   for (const run of normalize(intersect(keep, idle), duration)) {
     if (run.end <= firstMatch + 1 || run.end - run.start <= MENU_MAX_SECONDS) continue;
-    const tailStart = sentenceStart(run.end - MENU_MAX_SECONDS, segments);
+    const tailStart = Math.min(run.end, naturalStart(run.end - MENU_MAX_SECONDS, segments));
     const head = [{ start: run.start, end: tailStart }];
     drop.push(...subtract(head, intersect(head, strong)));
   }
@@ -144,7 +167,7 @@ export function enforceMatchStructure(params: {
         budget -= len;
         continue;
       }
-      const from = budget > 0 ? sentenceStart(r.end - budget, segments) : r.end;
+      const from = budget > 0 ? Math.min(r.end, naturalStart(r.end - budget, segments)) : r.end;
       drop.push({ start: r.start, end: from });
       budget = 0;
     }
