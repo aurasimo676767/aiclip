@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { runFfmpeg, probeVideo } from "../lib/ffmpeg.js";
 import { findSpeakingWebcam } from "../face-tracking/closeup-cams.js";
-import { zoomWindow } from "../render/longform-auto-edit.js";
+import { closeupWindow } from "../render/longform-auto-edit.js";
 import { env } from "../env.js";
 
 /**
@@ -30,7 +30,7 @@ for (const [i, m] of moments.entries()) {
   if (!found) {
     await runFfmpeg(["-y", "-ss", at, "-i", source!, "-frames:v", "1", "-vf", `scale=960:540,drawtext=${font}:text='${t} nessuno parla chiaramente':x=10:y=10:fontsize=28:fontcolor=red:box=1:boxcolor=black,pad=1920:540`, out]);
   } else {
-    const z = zoomWindow(found.rect, W, H);
+    const z = closeupWindow(found, W, H);
     await runFfmpeg([
       "-y", "-ss", at, "-i", source!, "-frames:v", "1", "-filter_complex",
       `[0:v]split[a][b];[a]scale=960:540,${box(found.rect, "lime", 3)},${box(z, "yellow", 2)},drawtext=${font}:text='${t}':x=10:y=10:fontsize=28:fontcolor=yellow:box=1:boxcolor=black[l];[b]crop=${z.width}:${z.height}:${z.x}:${z.y},scale=960:540:flags=lanczos,unsharp=5:5:0.9:5:5:0.0[r];[l][r]hstack`,

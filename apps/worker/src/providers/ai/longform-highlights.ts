@@ -34,16 +34,19 @@ export interface HighlightsPlan {
 
 const TOOL_NAME = "monta_video";
 
-const SYSTEM_PROMPT = `Sei il montatore di un canale YouTube italiano che ripubblica le live di streamer (Blur, Marza, Pesh, Manuxo, Lollo...). Ricevi la trascrizione con i tempi (secondi dall'inizio del pezzo) di un pezzo di live dedicato a UN argomento, di solito un gioco, e i momenti in cui qualcuno alza molto la voce, misurati sull'audio vero. Devi montarlo come fanno gli YouTuber che fanno milioni di visualizzazioni.
+const SYSTEM_PROMPT = `Sei il montatore di un canale YouTube italiano che ripubblica le live di streamer (Blur, Marza, Pesh, Manuxo, Lollo...). Ricevi la trascrizione con i tempi (secondi dall'inizio del pezzo) di un pezzo di live dedicato a UN argomento, di solito un gioco, i momenti in cui qualcuno alza molto la voce misurati sull'audio vero e, quando c'è, cosa si vede A SCHERMO (partita, inizio o fine di una partita, menu, caricamento) con gli stessi tempi. Devi montarlo come fanno gli YouTuber che fanno milioni di visualizzazioni.
 
 COSA TENERE E COSA TOGLIERE
 - UN SOLO ARGOMENTO: il video parla solo di quello del titolo. Se in mezzo parlano d'altro (leggono la chat su altri temi, parlano di altri giochi, di soldi, di sponsor, di cosa mangiano) e poi tornano al gioco, quel pezzo si toglie TUTTO.
+- SI DEVE VEDERE CHE GIOCANO (simo, 2026-10-26): il video è fatto soprattutto di PARTITE. Menu, lobby, caricamenti, attese e tutorial restano solo per pochi secondi (al massimo una quindicina di fila), quanto basta a capire il passaggio, oppure se dentro c'è un momento davvero divertente (risate, sclero). Usa la parte "A SCHERMO" per sapere dove sono.
+- INIZIO DEL VIDEO: una breve presentazione, al massimo mezzo minuto: il momento in cui dicono a cosa giocano o lo scelgono ("dai andiamo a giocare a...", "andiamo in quel gioco di merda", la scelta del gioco, la ruota). Poi la prima partita parte quasi subito.
+- OGNI PARTITA o ROUND che tieni si vede COMINCIARE (schermata d'inizio, "Via!", primi secondi) e FINIRE (ultimo punto, schermata di vittoria, sconfitta o risultato). In mezzo puoi tagliare, tenendo i momenti forti. Ogni gioco o minigioco a cui giocano ha almeno una partita così.
+- NON PERDERE IL FILO: chi guarda deve capire a cosa stanno giocando, chi vince e come va.
 - VIA LE PARTI MORTE: attese, caricamenti, menu, silenzi, "vabbè", tentativi ripetuti uguali senza niente di divertente, chiacchiere che non portano a niente.
 - TIENI i momenti che fanno ridere, arrabbiare o stupire, CON il loro contesto: il setup che serve a capire la battuta, la battuta, la reazione. Mai la sola frase finale staccata dal resto.
 - FINE: il video finisce quando smettono di giocare a quel gioco (o sull'ultimo momento forte). Niente dopo. Le ULTIME partite, fino alla vittoria o sconfitta finale, restano sempre: sono il finale del video.
-- SII SEVERO: di una partita tieni i momenti forti e quello che serve a capirli, NON la partita intera. Tentativi ripetuti, partite normali senza niente di divertente, commenti tecnici sul gioco si tolgono. Nel dubbio si taglia.
-- DURATA: quella che serve, calcolata sulla parte IN TEMA (dopo aver tolto i pezzi in cui fanno altro): di solito un'ora di gioco vero diventa 20-28 minuti (circa un terzo, mai oltre il 45%). Un montaggio che tiene più di metà è troppo lungo (simo, 2026-09-28: da 60 a 36 minuti era "un goccio assai"). Ma se togli 20 minuti di un altro gioco, NON tagliare il resto per compensare: in un test l'AI ha buttato 17 minuti delle ultime partite per restare nei 22 minuti totali.
-- TETTO: il video montato non supera MAI i 45 minuti, anche se il pezzo dura 3-4 ore (simo, 2026-10-25: "massimo 45-50 minuti, ma anche meno tranquillamente"). Su un pezzo così lungo tieni i momenti più forti distribuiti su tutto il gioco (come comincia, i momenti migliori, come va a finire) e quel poco che serve a capirli: chi guarda deve seguire il filo, non vedere salti senza senso.
+- SII SEVERO: di una partita tieni l'inizio, la fine e i momenti forti con quello che serve a capirli, NON la partita intera. Tentativi ripetuti, partite normali senza niente di divertente, commenti tecnici sul gioco si tolgono. Nel dubbio si taglia.
+- DURATA: NESSUN numero di minuti da raggiungere (simo, 2026-10-26: un video di 2 ore e mezza portato a 45 minuti esatti era forzato). Tieni solo quello che è forte o che serve a capire, e taglia il più possibile il resto: se c'è poco di forte il video viene corto, ed è giusto così. Su un pezzo lungo tieni i momenti forti distribuiti su tutto il gioco (come comincia, i momenti migliori, come va a finire). Se togli un pezzo in cui fanno altro, NON tagliare il resto per compensare.
 - TAGLI PULITI: ogni tratto inizia all'inizio di una frase e finisce alla fine di una frase (usa i tempi delle righe). Ogni tratto dura almeno 8 secondi; due tratti separati da meno di 4 secondi uniscili.
 - CAMBI DI ARGOMENTO: quando togli un pezzo in cui fanno altro (un altro gioco, altro), il taglio parte ESATTAMENTE dove lasciano il gioco del video (la frase in cui lanciano l'altro gioco o cambiano discorso) e riprende esattamente dove ci tornano. Non tagliare anche la fine della partita prima del cambio, se non è davvero morta. Elenca ogni cambio in "topicChanges" con le parole esatte di quando se ne vanno e di quando tornano (se non tornano più, il video finisce lì e basta).
 
@@ -171,7 +174,15 @@ const responseSchema = z.object({
  * null se l'AI non risponde in modo usabile: il chiamante ripiega sul montaggio solo-silenzi.
  */
 export async function planHighlights(
-  input: { title: string; durationSeconds: number; segments: TranscriptSegment[]; loudMoments: number[]; note?: string },
+  input: {
+    title: string;
+    durationSeconds: number;
+    segments: TranscriptSegment[];
+    loudMoments: number[];
+    note?: string;
+    /** Cosa c'è a schermo, a righe "[da-a] fase gioco" (vedi match-phases.ts). */
+    screen?: string;
+  },
   options: { apiKey: string; model: string },
 ): Promise<HighlightsPlan | null> {
   const lines = input.segments
@@ -180,7 +191,8 @@ export async function planHighlights(
     .join("\n");
   if (!lines) return null;
   const loud = input.loudMoments.length ? input.loudMoments.map((t) => t.toFixed(0)).join(", ") : "nessuno misurato";
-  const text = `Titolo del video: ${input.title}\nDurata del pezzo: ${Math.round(input.durationSeconds)} secondi\nMomenti in cui qualcuno alza molto la voce (secondi): ${loud}${input.note ? `\n\n${input.note}` : ""}\n\nTrascrizione:\n${lines}`;
+  const screen = input.screen ? `\n\nA SCHERMO (un fotogramma ogni 10 secondi, stessi tempi della trascrizione):\n${input.screen}` : "";
+  const text = `Titolo del video: ${input.title}\nDurata del pezzo: ${Math.round(input.durationSeconds)} secondi\nMomenti in cui qualcuno alza molto la voce (secondi): ${loud}${input.note ? `\n\n${input.note}` : ""}${screen}\n\nTrascrizione:\n${lines}`;
 
   const usage: ModelTokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 };
   try {
@@ -235,7 +247,7 @@ const TIGHTEN_TOOL = "accorcia_montaggio";
 /** Voto massimo di un pezzo che si può togliere per accorciare. */
 const WEAK_SCORE = 4;
 
-const TIGHTEN_PROMPT = `Sei il montatore di un canale YouTube italiano che ripubblica le live di streamer. Hai già montato un video, ma è troppo lungo. Ricevi i pezzi tenuti, numerati, con il loro testo. Dai a OGNI pezzo un voto da 1 a 10 su quanto è forte per il video: poi si tolgono i pezzi col voto più basso finché si arriva alla durata obiettivo.
+const TIGHTEN_PROMPT = `Sei il montatore di un canale YouTube italiano che ripubblica le live di streamer. Hai già montato un video e ora va asciugato. Ricevi i pezzi tenuti, numerati, con il loro testo. Dai a OGNI pezzo un voto da 1 a 10 su quanto è forte per il video: poi si tolgono TUTTI i pezzi deboli (voto 4 o meno). Non c'è una durata da raggiungere: il video dura quello che resta di forte.
 
 - Voti bassi (1-4): partite normali, spiegazioni, commenti tecnici, tentativi ripetuti, pezzi che non fanno ridere né arrabbiare.
 - Voti alti (8-10): i momenti che fanno ridere, sclerare, arrabbiare; le vittorie e le sconfitte che contano.
@@ -265,25 +277,23 @@ const tightenSchema = z.object({
 });
 
 /**
- * Secondo giro quando il montaggio resta troppo lungo (simo, 2026-09-28: da 60 a 32 minuti era
- * ancora "un goccio assai" anche dopo aver chiesto all'AI 20-28 minuti). L'AI rilegge SOLO i pezzi
- * tenuti e dà un voto a ognuno; poi si tolgono i più deboli finché si arriva all'obiettivo. Prima le
- * si chiedeva quali togliere, ma ne toglieva 3 su 20 e restava 32 minuti. Ritorna i pezzi rimasti, o
- * null se fallisce.
+ * Secondo giro, sempre (simo, 2026-09-28: da 60 a 32 minuti era ancora "un goccio assai"). L'AI
+ * rilegge SOLO i pezzi tenuti e dà un voto a ognuno; poi si tolgono tutti i deboli. Prima le si
+ * chiedeva quali togliere, ma ne toglieva 3 su 20. Niente durata obiettivo né tetto (simo,
+ * 2026-10-26: 2 ore e mezza portate a 45 minuti esatti era forzato): "taglia il più possibile", ma
+ * solo ciò che è debole ("se non ha più nulla da tagliare lasciamo così", 2026-09-28). Il primo pezzo
+ * (la presentazione) e l'ultimo (il finale) restano. Ritorna i pezzi rimasti, o null se fallisce.
  */
 export async function tightenHighlights(
   input: {
     title: string;
     pieces: Array<HighlightsRange & { text: string }>;
-    targetSeconds: number;
-    /** Tetto assoluto: oltre questo si tolgono anche i pezzi non deboli (vedi sotto). */
-    maxSeconds?: number;
   },
   options: { apiKey: string; model: string },
 ): Promise<HighlightsRange[] | null> {
   const total = input.pieces.reduce((sum, p) => sum + (p.end - p.start), 0);
   const list = input.pieces.map((p, i) => `#${i} [${Math.round(p.end - p.start)} s] ${p.text.trim().slice(0, 1500)}`).join("\n");
-  const text = `Titolo del video: ${input.title}\nDurata attuale: ${Math.round(total / 60)} minuti. Obiettivo: circa ${Math.round(input.targetSeconds / 60)} minuti (togli circa ${Math.round((total - input.targetSeconds) / 60)} minuti).\n\nPezzi tenuti:\n${list}`;
+  const text = `Titolo del video: ${input.title}\nDurata attuale: ${Math.round(total / 60)} minuti.\n\nPezzi tenuti:\n${list}`;
   const usage: ModelTokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 };
   try {
     const client = getAnthropicClient(options.apiKey);
@@ -306,37 +316,11 @@ export async function tightenHighlights(
     if (!parsed?.success) return null;
     const score = new Map(parsed.data.scores.map((x) => [x.piece, x.score]));
     const last = input.pieces.length - 1;
-    // Dal più debole al più forte (a parità, il più lungo prima); la fine del video resta sempre.
-    const order = input.pieces
-      .map((p, i) => ({ i, len: p.end - p.start, score: score.get(i) ?? 5 }))
-      .filter((x) => x.i !== last)
-      .sort((a, b) => a.score - b.score || b.len - a.len);
-    const remove = new Set<number>();
-    let left = total;
-    for (const x of order) {
-      if (left <= input.targetSeconds) break;
-      // Solo pezzi davvero deboli: se non resta niente di debole si lascia così (simo, 2026-09-28:
-      // "se non ha più nulla da tagliare lasciamo così").
-      if (x.score > WEAK_SCORE) break;
-      remove.add(x.i);
-      left -= x.len;
-    }
-    // Tetto assoluto (simo, 2026-10-25: "massimo 45-50 minuti, ma anche meno tranquillamente", su un
-    // Affari Tuoi di 3 ore e mezza): se coi pezzi deboli non basta, si tolgono anche i meno forti, dal
-    // voto più basso, ma mai il primo (la ruota o la scelta del gioco) né l'ultimo (il finale).
-    if (input.maxSeconds !== undefined && left > input.maxSeconds) {
-      for (const x of order) {
-        if (left <= input.targetSeconds) break;
-        if (remove.has(x.i) || x.i === 0) continue;
-        remove.add(x.i);
-        left -= x.len;
-      }
-    }
+    const remove = new Set(input.pieces.map((_, i) => i).filter((i) => i !== 0 && i !== last && (score.get(i) ?? 5) <= WEAK_SCORE));
     const kept = input.pieces.filter((_, i) => !remove.has(i)).map((p) => ({ start: p.start, end: p.end }));
     logger.info("Montaggio da YouTuber: secondo giro per accorciare", {
       prima: Math.round(total),
       dopo: Math.round(kept.reduce((sum, p) => sum + (p.end - p.start), 0)),
-      obiettivo: Math.round(input.targetSeconds),
       tolti: remove.size,
     });
     return kept;

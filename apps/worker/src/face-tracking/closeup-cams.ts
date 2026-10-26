@@ -24,6 +24,8 @@ export interface StreamWebcam {
   rect: CropWindow;
   /** Dov'è di solito la faccia: serve se in quel momento il rilevatore non la trova. */
   face: FaceBox;
+  /** Riquadro stimato dalla faccia (quello vero non si trovava): non è preciso, mai a schermo pieno. */
+  estimated?: boolean;
 }
 
 /** Tasselli alti 1/3 del fotogramma, in 4:3 come l'ingresso del rilevatore, sovrapposti a metà: su 1080p 480x360 ridotti a 320x240, faccia 4 volte più grande che a fotogramma intero. */
@@ -138,19 +140,20 @@ export async function findStreamWebcams(videoPath: string, width: number, height
       }
       rect = camAroundFace(face, width, height);
     }
+    const estimated = rect !== found.rect;
     // Due gruppi di volti dentro lo stesso riquadro (la persona si è spostata molto) sono una webcam sola.
     const same = cams.find((c) => Math.abs(c.rect.x - rect.x) < 12 && Math.abs(c.rect.y - rect.y) < 12);
     if (same) {
       if (g.times.size > same.seen) Object.assign(same, { face, seen: g.times.size });
       continue;
     }
-    cams.push({ rect, face, seen: g.times.size });
+    cams.push({ rect, face, seen: g.times.size, ...(estimated ? { estimated } : {}) });
   }
   logger.info("Primi piani: webcam trovate", {
     momentiGuardati: times.length,
     webcam: cams.map((c) => `${c.rect.x},${c.rect.y} ${c.rect.width}x${c.rect.height} (${c.seen})`),
   });
-  return cams.map(({ rect, face }) => ({ rect, face }));
+  return cams.map(({ seen: _seen, ...cam }) => cam);
 }
 
 /** Riquadro "da webcam" stimato attorno a una faccia, quando quello vero non si trova: 4:3, faccia nel terzo alto. */

@@ -73,11 +73,11 @@ export const LONGFORM_CHUNK_WINDOW_SECONDS = 2700; // 45 minuti
 export const LONGFORM_CHUNK_OVERLAP_SECONDS = 600; // 10 minuti
 
 /**
- * Tetto del montato long-form (simo, 2026-10-25: "massimo 45-50 minuti, ma anche meno
- * tranquillamente"). I video più lunghi si montano da soli e il montaggio li porta sotto i 45 minuti.
+ * Video long-form più lunghi di così si montano da soli (simo, 2026-10-25: un gioco da 3 ore non si
+ * pubblica intero). Non è più un tetto della durata del montato (simo, 2026-10-26: 2 ore e mezza
+ * portate a 45 minuti esatti era forzato): la durata la decide quello che resta di forte.
  */
-export const LONGFORM_EDIT_MAX_SECONDS = 50 * 60;
-export const LONGFORM_EDIT_TARGET_SECONDS = 45 * 60;
+export const LONGFORM_AUTO_EDIT_ABOVE_SECONDS = 50 * 60;
 
 /** Numero massimo di segmenti long-form suggeriti per VOD dopo il ranking. */
 export const MAX_SUGGESTED_LONGFORM_CLIPS = 15;

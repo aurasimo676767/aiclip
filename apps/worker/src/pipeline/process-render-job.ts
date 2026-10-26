@@ -106,6 +106,7 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
                 segments,
                 apiKey: env.ANTHROPIC_API_KEY,
                 model: env.ANTHROPIC_MODEL_LONGFORM_EDIT,
+                phaseModel: env.ANTHROPIC_MODEL_GAME_DETECT === "off" ? undefined : env.ANTHROPIC_MODEL_GAME_DETECT,
                 openaiApiKey: env.OPENAI_API_KEY,
                 games,
               },

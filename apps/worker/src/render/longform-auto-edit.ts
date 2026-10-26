@@ -5,13 +5,14 @@ import { logger } from "../lib/logger.js";
 import type { CropWindow } from "../face-tracking/face-tracker.js";
 import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
 import type { TranscriptSegment } from "@clipforge/shared";
-import { LONGFORM_EDIT_MAX_SECONDS, LONGFORM_EDIT_TARGET_SECONDS } from "@clipforge/shared";
 import { planHighlights, tightenHighlights } from "../providers/ai/longform-highlights.js";
 import { PhraseLocator, type LocatedPhrase } from "./intro-moments.js";
 import { allowedRanges, type GameSegment } from "../providers/ai/game-timeline.js";
 import type { HighlightsPlan } from "../providers/ai/longform-highlights.js";
 import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
-import { findSpeakingWebcam } from "../face-tracking/closeup-cams.js";
+import { findSpeakingWebcam, type StreamWebcam } from "../face-tracking/closeup-cams.js";
+import { describePhases, detectMatchPhases } from "../providers/ai/match-phases.js";
+import { enforceMatchStructure } from "./match-structure.js";
 
 /**
  * Montaggio automatico di un video long-form (opzionale, spento di default: vedi clips.longform_edit).
@@ -48,6 +49,13 @@ const MIN_PUNCH_SPACING_SECONDS = 45;
 const CAM_LOOK_BEFORE_SECONDS = 1.5;
 /** Aria attorno alla webcam nel primo piano: senza, il bordo dell'inserto coincide col bordo dello schermo e sembra un ritaglio. */
 const CAM_ZOOM_MARGIN = 1.04;
+/**
+ * Primo piano a schermo pieno, solo la webcam (simo, 2026-10-26: "se viene omogeneo, dove si vede
+ * bene e non troppo schifoso"): riquadro vero, alto almeno FULL_MIN_HEIGHT_RATIO dello schermo (al
+ * massimo ~3 volte ingrandito) e che riempiendo lo schermo perde al massimo 1 - FULL_MIN_SHARE di sé.
+ */
+const FULL_MIN_HEIGHT_RATIO = 0.3;
+const FULL_MIN_SHARE = 0.85;
 
 export interface TimeRange {
   start: number;
@@ -74,15 +82,14 @@ export interface HighlightsInput {
   segments: TranscriptSegment[];
   apiKey: string;
   model: string;
+  /** Modello che guarda lo schermo per le fasi delle partite (match-phases.ts); assente = montaggio senza fasi. */
+  phaseModel?: string;
   /** Per ritrascrivere con Whisper i pochi secondi dei momenti dell'intro (vedi intro-moments.ts). */
   openaiApiKey: string;
   /** Giochi riconosciuti dallo schermo e quali tenere (vedi game-timeline.ts): tagli precisi al fotogramma. */
   games?: { timeline: GameSegment[]; keep: string[] };
 }
 
-/** Oltre questa quota del video tenuta, secondo giro dell'AI per accorciare fino a TIGHTEN_TARGET. */
-const TIGHTEN_ABOVE = 0.45;
-const TIGHTEN_TARGET = 0.4;
 /** Lunghezza dei pezzi che il secondo giro giudica uno per uno (i tratti più lunghi si spezzano). */
 const TIGHTEN_PIECE_SECONDS = 90;
 
@@ -173,6 +180,14 @@ export async function planLongformEdit(params: {
       .filter((seg) => !byScreen || byScreen.some((r) => seg.end > r.start && seg.start < r.end));
     const loudMoments = runsWhere(bins, (db) => db >= baseline + SCREAM_ABOVE_DB, MIN_SCREAM_SECONDS, 1).map((r) => r.start);
     const hl = params.highlights;
+    // Cosa c'è a schermo (partita, inizio, fine, menu...), solo nei tratti del gioco tenuto: serve al
+    // montaggio per tenere le partite e accorciare i menu (vedi match-phases.ts e match-structure.ts).
+    const phases = hl.phaseModel
+      ? await detectMatchPhases(
+          { sourceVideoPath: params.sourceVideoPath, start: params.start, end: params.end, ranges: byScreen ?? [{ start: 0, end: duration }] },
+          { apiKey: hl.apiKey, model: hl.phaseModel },
+        )
+      : null;
     // Reaction (dal titolo, o nessun gioco a schermo): l'intro mostra i momenti del VIDEO a cui
     // reagiscono, con la loro reazione (simo, 2026-09-28: "è una reaction, avrebbe gasato come clip
     // iniziale le clip del video a cui stanno reagendo").
@@ -193,6 +208,7 @@ export async function planLongformEdit(params: {
           segments,
           loudMoments,
           note: notes.length > 0 ? notes.join("\n\n") : undefined,
+          screen: phases ? describePhases(phases) : undefined,
         },
         { apiKey: hl.apiKey, model: hl.model },
       );
@@ -220,14 +236,9 @@ export async function planLongformEdit(params: {
         });
         try {
           // Dallo schermo i cambi di gioco sono già esatti; senza, si cercano le parole del cambio.
-          let onTopic = byScreen ? byScreen.reduce((sum, r) => sum + (r.end - r.start), 0) : duration;
-          if (!byScreen) {
-            const topic = await applyTopicChanges(chosen, aiPlan.topicChanges, locator, duration);
-            chosen = topic.ranges;
-            // La quota si misura sulla parte in tema: tolto un altro gioco, il resto non va accorciato per compensare.
-            onTopic = duration - topic.removedSeconds;
-          }
-          if (seconds(chosen) > onTopic * TIGHTEN_ABOVE || seconds(chosen) > LONGFORM_EDIT_MAX_SECONDS) {
+          if (!byScreen) chosen = (await applyTopicChanges(chosen, aiPlan.topicChanges, locator, duration)).ranges;
+          // Secondo giro sempre, senza durata obiettivo: via tutti i pezzi deboli (vedi tightenHighlights).
+          {
             // Pezzi lunghi spezzati sui confini delle frasi: se l'AI tiene tratti attaccati (Family
             // Feud, 2026-10-02: 35 tratti diventati 1-2 blocchi da un'ora) il secondo giro non aveva
             // niente da scegliere e non partiva nemmeno.
@@ -239,12 +250,19 @@ export async function planLongformEdit(params: {
               {
                 title: params.highlights.title,
                 pieces,
-                targetSeconds: Math.min(onTopic * TIGHTEN_TARGET, LONGFORM_EDIT_TARGET_SECONDS),
-                maxSeconds: LONGFORM_EDIT_MAX_SECONDS,
               },
               { apiKey: params.highlights.apiKey, model: params.highlights.model },
             );
             if (tightened && seconds(tightened) >= 60) chosen = tightened;
+          }
+          // Struttura garantita dal codice: inizio e fine di ogni partita tenuta, ogni gioco presente,
+          // menu brevi, presentazione corta (match-structure.ts). Va dopo il secondo giro, che a pezzi
+          // da 90 s può togliere proprio la fine di una partita.
+          if (phases) {
+            const strong = [...aiPlan.intro, ...aiPlan.closeups].map((r) => ({ start: r.start, end: r.end }));
+            const structured = enforceMatchStructure({ keep: chosen, phases, segments, duration, strong });
+            logger.info("Montaggio: struttura delle partite", { esito: structured.note });
+            chosen = byScreen ? intersectRanges(structured.keep, byScreen).filter((r) => r.end - r.start >= 1) : structured.keep;
           }
           const merged = intersectRanges(keep, chosen).filter((r) => r.end - r.start >= 1);
           keep.splice(0, keep.length, ...merged);
@@ -315,7 +333,7 @@ export async function planLongformEdit(params: {
       focusFrom: params.start + p.start,
       focusTo: params.start + p.end,
     }).catch(fail("Ricerca di chi parla fallita per un primo piano"));
-    if (found) withCam.push({ ...p, cam: zoomWindow(found.rect, params.sourceWidth, params.sourceHeight) });
+    if (found) withCam.push({ ...p, cam: closeupWindow(found, params.sourceWidth, params.sourceHeight) });
   }
 
   const toOutput = (t: number) => {
@@ -550,6 +568,22 @@ function runsWhere(bins: number[], test: (db: number) => boolean, minSeconds: nu
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)]!;
+}
+
+/**
+ * Inquadratura del primo piano: a schermo pieno solo la webcam quando ingrandita viene bene (vedi
+ * FULL_MIN_*), altrimenti la webcam intera col gioco vero attorno (zoomWindow).
+ */
+export function closeupWindow(cam: StreamWebcam, sourceWidth: number, sourceHeight: number): CropWindow {
+  const r = cam.rect;
+  const width = Math.min(r.width, (r.height * 16) / 9);
+  const height = (width * 9) / 16;
+  const share = (width * height) / (r.width * r.height);
+  if (cam.estimated || share < FULL_MIN_SHARE || height < sourceHeight * FULL_MIN_HEIGHT_RATIO) return zoomWindow(r, sourceWidth, sourceHeight);
+  const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
+  const w = even(width);
+  const h = even(height);
+  return { x: Math.round(r.x + (r.width - w) / 2), y: Math.round(r.y + (r.height - h) / 2), width: w, height: h };
 }
 
 /**

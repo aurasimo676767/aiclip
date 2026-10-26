@@ -46,7 +46,7 @@ import { updateVideoStatus } from "../queue/video-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
 import { isVideoCancelled } from "../lib/cancellation.js";
 import { ensureLongformGames } from "./longform-games.js";
-import { censorText, LONGFORM_EDIT_MAX_SECONDS } from "@clipforge/shared";
+import { censorText, LONGFORM_AUTO_EDIT_ABOVE_SECONDS } from "@clipforge/shared";
 
 // Tentativi automatici prima di arrendersi e marcare FAILED (serve poi il pulsante "Riprova"
 // manuale): stesso numero di default usato da claim_next_video per lo stale-reclaim, così i due
@@ -704,9 +704,9 @@ function buildLongformInsertRow(video: VideoRow, clip: RankedLongformClip): Clip
     badges: clip.badges,
     format: "longform",
   });
-  // Oltre il tetto del montato il video si monta da solo: un gioco da 3 ore non si pubblica intero
-  // (simo, 2026-10-25). Sotto, il montato resta da accendere a mano dal sito come prima.
-  return { ...row, longform_edit: clip.duration > LONGFORM_EDIT_MAX_SECONDS };
+  // Oltre i 50 minuti il video si monta da solo: un gioco da 3 ore non si pubblica intero (simo,
+  // 2026-10-25). Sotto, il montato resta da accendere a mano dal sito come prima.
+  return { ...row, longform_edit: clip.duration > LONGFORM_AUTO_EDIT_ABOVE_SECONDS };
 }
 
 /** Audio mono 16 kHz PCM di un tratto del video (per cercare il respiro prima del gancio). */
