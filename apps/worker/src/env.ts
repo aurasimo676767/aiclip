@@ -35,6 +35,8 @@ const envSchema = z.object({
   // Giochi di una clip long-form riconosciuti dai fotogrammi (providers/ai/game-timeline.ts): un
   // fotogramma ogni 45 s + rifinitura dei cambi, ~2-3 centesimi per un'ora. "off" = mai.
   ANTHROPIC_MODEL_GAME_DETECT: z.string().default("claude-sonnet-5"),
+  // Fasi delle partite a schermo per il montato (providers/ai/match-phases.ts). "off" = montaggio senza fasi.
+  ANTHROPIC_MODEL_MATCH_PHASES: z.string().default("claude-sonnet-5"),
   // Tutte le clip trovate vanno subito in render, per ogni video/VOD (simo, 2026-09-28: "metta a fare
   // TUTTE le clip che ha trovato, direttamente"). "off" = solo i progetti con "Genera più video".
   AUTO_GENERATE_ALL_CLIPS: z.enum(["on", "off"]).default("on"),
@@ -126,7 +128,12 @@ if (data.AI_PROVIDER === "openai") {
   data.ANTHROPIC_MODEL_LONGFORM = strong(data.ANTHROPIC_MODEL_LONGFORM);
   data.ANTHROPIC_MODEL_LONGFORM_BOUNDARIES = strong(data.ANTHROPIC_MODEL_LONGFORM_BOUNDARIES);
   data.ANTHROPIC_MODEL_LONGFORM_EDIT = strong(data.ANTHROPIC_MODEL_LONGFORM_EDIT);
-  data.ANTHROPIC_MODEL_GAME_DETECT = strong(data.ANTHROPIC_MODEL_GAME_DETECT);
+  // Quale gioco c'è a schermo: col modello economico (2026-10-26, provato sulla stessa clip di Switch
+  // Sports: mappa identica a quella del forte, 0,004 $ invece di 0,08). Le fasi delle partite invece
+  // restano sul forte: col economico l'89% dei fotogrammi coincideva, e i menu scambiati per partite
+  // finirebbero nel montato.
+  data.ANTHROPIC_MODEL_GAME_DETECT = data.ANTHROPIC_MODEL_GAME_DETECT === "off" ? "off" : data.OPENAI_MODEL_CHEAP;
+  data.ANTHROPIC_MODEL_MATCH_PHASES = strong(data.ANTHROPIC_MODEL_MATCH_PHASES);
   data.ANTHROPIC_MODEL_CONTENT_FOCUS = strong(data.ANTHROPIC_MODEL_CONTENT_FOCUS);
 }
 

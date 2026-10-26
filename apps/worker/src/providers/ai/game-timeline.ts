@@ -3,7 +3,7 @@ import { computeModelCostUsd, classifyModelTier } from "@clipforge/shared";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { runFfmpegBinary } from "../../lib/ffmpeg.js";
-import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor } from "./anthropic-client.js";
+import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor, createMessageCached } from "./anthropic-client.js";
 import { logger } from "../../lib/logger.js";
 
 /**
@@ -185,14 +185,18 @@ export async function detectGameTimeline(
         content.push({ type: "text", text: `Fotogramma ${from + k} (minuto ${((f.t - input.start) / 60).toFixed(1)}):` });
         content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: f.jpeg } });
       });
-      const message = await client.messages.create({
-        model: options.model,
-        max_tokens: 4000,
-        system: cachedSystemPrompt(SYSTEM_PROMPT),
-        messages: [{ role: "user", content }],
-        tools: [MAP_TOOL],
-        tool_choice: toolChoiceFor(options.model, TOOL_NAME),
-      });
+      const message = await createMessageCached(
+        client,
+        {
+          model: options.model,
+          max_tokens: 4000,
+          system: cachedSystemPrompt(SYSTEM_PROMPT),
+          messages: [{ role: "user", content }],
+          tools: [MAP_TOOL],
+          tool_choice: toolChoiceFor(options.model, TOOL_NAME),
+        },
+        { cache: "mappa-giochi" },
+      );
       track(message);
       const toolUse = message.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === TOOL_NAME);
       const parsed = toolUse ? mapSchema.safeParse(toolUse.input) : null;
@@ -245,14 +249,18 @@ export async function detectGameTimeline(
       }
     }
     if (refineFrames.length > 0 && refineFrames.length <= 95) {
-      const message = await client.messages.create({
-        model: options.model,
-        max_tokens: 2000,
-        system: cachedSystemPrompt(REFINE_PROMPT),
-        messages: [{ role: "user", content: refineContent }],
-        tools: [REFINE_TOOL_SCHEMA],
-        tool_choice: toolChoiceFor(options.model, REFINE_TOOL),
-      });
+      const message = await createMessageCached(
+        client,
+        {
+          model: options.model,
+          max_tokens: 2000,
+          system: cachedSystemPrompt(REFINE_PROMPT),
+          messages: [{ role: "user", content: refineContent }],
+          tools: [REFINE_TOOL_SCHEMA],
+          tool_choice: toolChoiceFor(options.model, REFINE_TOOL),
+        },
+        { cache: "mappa-giochi" },
+      );
       track(message);
       const toolUse = message.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === REFINE_TOOL);
       const parsed = toolUse ? refineSchema.safeParse(toolUse.input) : null;

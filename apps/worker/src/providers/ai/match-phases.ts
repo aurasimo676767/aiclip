@@ -121,7 +121,7 @@ export async function detectMatchPhases(
   input: { sourceVideoPath: string; start: number; end: number; ranges: Array<{ start: number; end: number }> },
   options: { apiKey: string; model: string },
 ): Promise<PhaseSegment[] | null> {
-  const key = crypto.createHash("sha1").update(JSON.stringify([path.resolve(input.sourceVideoPath), input.start, input.end, input.ranges, PHASE_SECONDS])).digest("hex").slice(0, 16);
+  const key = crypto.createHash("sha1").update(JSON.stringify([path.resolve(input.sourceVideoPath), input.start, input.end, input.ranges, PHASE_SECONDS, options.model])).digest("hex").slice(0, 16);
   const cachePath = path.join(env.WORKER_TMP_DIR, "phase-cache", `${key}.json`);
   const cached = await fsp.readFile(cachePath, "utf8").catch(() => null);
   if (cached) return JSON.parse(cached) as PhaseSegment[];

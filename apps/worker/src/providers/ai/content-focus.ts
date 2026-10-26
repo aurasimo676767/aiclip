@@ -2,7 +2,7 @@ import type { TranscriptSegment, ModelTokenUsage } from "@clipforge/shared";
 import { OUTPUT_RESOLUTION, computeModelCostUsd, classifyModelTier } from "@clipforge/shared";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
-import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor } from "./anthropic-client.js";
+import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor, createMessageCached } from "./anthropic-client.js";
 import { runFfmpegBinary } from "../../lib/ffmpeg.js";
 import { logger } from "../../lib/logger.js";
 import type { CropWindow, Layout } from "../../face-tracking/face-tracker.js";
@@ -133,14 +133,19 @@ export async function planContentViews(input: ContentFocusInput, options: Conten
   const usage: ModelTokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 };
   try {
     const client = getAnthropicClient(options.apiKey);
-    const message = await client.messages.create({
-      model: options.model,
-      max_tokens: 6000,
-      system: cachedSystemPrompt(SYSTEM_PROMPT),
-      messages: [{ role: "user", content }],
-      tools: [TOOL_SCHEMA],
-      tool_choice: toolChoiceFor(options.model, TOOL_NAME),
-    });
+    // Su disco: rifare il render dello stesso Short non ripaga la regia (vedi createMessageCached).
+    const message = await createMessageCached(
+      client,
+      {
+        model: options.model,
+        max_tokens: 6000,
+        system: cachedSystemPrompt(SYSTEM_PROMPT),
+        messages: [{ role: "user", content }],
+        tools: [TOOL_SCHEMA],
+        tool_choice: toolChoiceFor(options.model, TOOL_NAME),
+      },
+      { cache: "regia" },
+    );
     usage.calls++;
     usage.input += message.usage.input_tokens;
     usage.output += message.usage.output_tokens;

@@ -116,6 +116,13 @@ export function toResponsesBody(params: Anthropic.MessageCreateParamsNonStreamin
     include: ["reasoning.encrypted_content"],
   };
   if (system) body.instructions = system;
+  // Sconto del 90% sui token del prefisso già visto (istruzioni e strumenti, identici a ogni chiamata
+  // dello stesso tipo): la chiave fa arrivare le richieste uguali alla stessa macchina, dove il prefisso
+  // è in cache. Prima scattava in 8 chiamate su 74 (log del 25-26/10/2026).
+  body.prompt_cache_key = createHash("sha1")
+    .update(JSON.stringify([params.model, system, (params.tools ?? []).map((t) => t.name)]))
+    .digest("hex")
+    .slice(0, 32);
   if (params.tools?.length) {
     body.tools = params.tools.map((tool) => ({
       type: "function",
@@ -175,9 +182,27 @@ export function toAnthropicMessage(res: ResponsesResult, model: string): Anthrop
   } as Anthropic.Message;
 }
 
+/**
+ * Cache del prefisso tenuta 24 ore invece di pochi minuti: le chiamate dello stesso tipo (regia di uno
+ * Short, scelta della copertina) arrivano a distanza di ore. Se il modello non la accetta si toglie e
+ * non la si chiede più fino al riavvio.
+ */
+let longCacheRetention = true;
+
 export async function openaiCreate(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> {
-  const res = await getClient().responses.create(toResponsesBody(params) as never);
-  return toAnthropicMessage(res as unknown as ResponsesResult, params.model);
+  const body = toResponsesBody(params);
+  if (longCacheRetention) body.prompt_cache_retention = "24h";
+  try {
+    const res = await getClient().responses.create(body as never);
+    return toAnthropicMessage(res as unknown as ResponsesResult, params.model);
+  } catch (error) {
+    if (!longCacheRetention || !(error instanceof Error) || !/prompt_cache_retention/i.test(error.message)) throw error;
+    longCacheRetention = false;
+    logger.warn("OpenAI: cache di 24 ore non accettata da questo modello, resta quella normale", { model: params.model, error: error.message.slice(0, 200) });
+    delete body.prompt_cache_retention;
+    const res = await getClient().responses.create(body as never);
+    return toAnthropicMessage(res as unknown as ResponsesResult, params.model);
+  }
 }
 
 /** Quanto si aspetta un batch prima di rinunciare e fare la chiamata normale (a prezzo pieno). */

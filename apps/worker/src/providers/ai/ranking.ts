@@ -1,6 +1,6 @@
 import type { TranscriptSegment, ClipCandidateWindow, RankedClip } from "@clipforge/shared";
 import { rankedClipsResponseSchema, TEMPLATE_NAMES, EDITING_STYLES, CLIP_BADGES, CLIP_DURATION_TARGET } from "@clipforge/shared";
-import { getAnthropicClient, cachedSystemPrompt, logAnthropicCost } from "./anthropic-client.js";
+import { getAnthropicClient, cachedSystemPrompt, logAnthropicCost, createMessage } from "./anthropic-client.js";
 import { formatSegments, segmentsInWindow } from "./transcript-formatting.js";
 import { extractCandidateFrameJpegs } from "./frame-sampler.js";
 import { buildPerformanceFeedback } from "./performance-feedback.js";
@@ -247,15 +247,21 @@ export async function rankAndBuildEdl(
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: userContent }];
 
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const message = await client.messages.create({
-      model: options.model,
-      // Ogni clip restituita sono ~500 token: con "tutte le clip divertenti" 8000 non bastavano più.
-      max_tokens: 16000,
-      system: cachedSystemPrompt(SYSTEM_PROMPT),
-      messages,
-      tools: [RANKING_TOOL_SCHEMA],
-      tool_choice: { type: "tool", name: TOOL_NAME },
-    });
+    // Prima richiesta via batch: metà prezzo, gli Shorts arrivano più tardi (da minuti a qualche ora;
+    // simo, 2026-10-26, va bene). La correzione dopo un output sbagliato va subito, a prezzo pieno.
+    const message = await createMessage(
+      client,
+      {
+        model: options.model,
+        // Ogni clip restituita sono ~500 token: con "tutte le clip divertenti" 8000 non bastavano più.
+        max_tokens: 16000,
+        system: cachedSystemPrompt(SYSTEM_PROMPT),
+        messages,
+        tools: [RANKING_TOOL_SCHEMA],
+        tool_choice: { type: "tool", name: TOOL_NAME },
+      },
+      { batch: attempt === 1, label: "scelta Shorts (ranking)" },
+    );
     logAnthropicCost("scelta Shorts (ranking)", options.model, message.usage);
 
     const toolUseBlock = message.content.find(

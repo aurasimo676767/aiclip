@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { env } from "../../env.js";
 import { isOpenAIModel, openaiCreate, openaiCreateMessage } from "./openai-bridge.js";
+import { withDiskCache } from "./response-cache.js";
 
 let client: Anthropic | null = null;
 
@@ -88,6 +89,29 @@ const BATCH_MAX_WAIT_MS = 2 * 60 * 60 * 1000;
  * L'SDK installato (0.32.1) ha i batch sotto client.beta.messages.batches: i tipi dei parametri sono
  * quelli "Beta", identici nella forma, da qui i cast.
  */
+/**
+ * Come createMessage, ma la risposta si salva su disco per richiesta identica (vedi response-cache.ts):
+ * per i passaggi che rifatti devono dare lo stesso risultato (regia, mappe, metadati), MAI per quelli
+ * che simo rigenera apposta per avere altro (scelta Shorts, scelta copertina).
+ */
+export async function createMessageCached(
+  client: Anthropic,
+  params: Anthropic.MessageCreateParamsNonStreaming,
+  opts: { batch?: boolean; label?: string; cache: string },
+): Promise<Anthropic.Message> {
+  // Si salva solo una risposta usabile (strumento chiamato, non tagliata): una risposta sbagliata
+  // salvata verrebbe riletta a ogni giro successivo.
+  let fresh: Anthropic.Message | null = null;
+  const cached = await withDiskCache(opts.cache, [params], async () => {
+    fresh = await createMessage(client, params, opts);
+    const usable = fresh.stop_reason !== "max_tokens" && (!params.tools?.length || fresh.content.some((b) => b.type === "tool_use"));
+    return usable ? fresh : null;
+  });
+  // Dal disco non si paga niente: i conti dei costi lo devono vedere.
+  if (cached && cached !== fresh) return { ...cached, usage: { ...cached.usage, input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } as Anthropic.Usage };
+  return cached ?? fresh!;
+}
+
 export async function createMessage(client: Anthropic, params: Anthropic.MessageCreateParamsNonStreaming, opts: { batch?: boolean; label?: string } = {}): Promise<Anthropic.Message> {
   if (isOpenAIModel(params.model)) return openaiCreateMessage(params, opts);
   if (!opts.batch) return client.messages.create(params);
