@@ -109,7 +109,10 @@ export async function bestHeadCrops(library: FaceLibraryIndex, label: string, n:
     if (!measured) continue;
     const turn = await faceTurn(out).catch(() => null);
     const score =
-      (face.tags?.includes("ref") ? 3 : 0) + // scelte da simo come riferimento: vincono sempre
+      // Fotogrammi delle live confermati da simo (f1500ed): un vantaggio, non più una vittoria sicura.
+      // Con +3 passavano anche di lato o a testa bassa: Marza tutte dalla stessa live, "le foto
+      // peggiori" per simo (2026-10-27), e Manuxo 7 su 7 con lo sguardo in basso.
+      (face.tags?.includes("ref") ? 1 : 0) +
       Math.min(measured.faceWidth, 260) / 260 + // faccia grande = più dettagli veri
       Math.min(measured.sharpness, 1500) / 1500 - // nitida
       (face.intensity >= 4 ? 0.6 : face.intensity === 3 ? 0.2 : 0) - // smorfie forti deformano

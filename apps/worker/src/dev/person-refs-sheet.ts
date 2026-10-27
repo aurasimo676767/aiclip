@@ -5,9 +5,10 @@ import sharp from "sharp";
 import { readFaceLibrary } from "../lib/face-library.js";
 import { downloadFaces } from "../pipeline/cover-builder.js";
 import { bestHeadCrops } from "../pipeline/face-reference.js";
+import { PERSON_STYLE } from "../pipeline/cover-builder.js";
 
 /**
- * Foglio di controllo delle foto di una persona per le copertine (gratis): sopra i 5 primi piani che
+ * Foglio di controllo delle foto di una persona per le copertine (gratis): sopra i primi piani che
  * GPT Image riceve come riferimento, sotto tutte le foto con quel nome, numerate. Serve a simo per
  * dire se qualcuna è etichettata male: chi è chi lo dice SOLO lui.
  * Uso: tsx src/dev/person-refs-sheet.ts <user_id> <NOME> <out.jpg>
@@ -17,7 +18,7 @@ const dir = path.join("tmp", `refs-${name}`);
 fs.mkdirSync(dir, { recursive: true });
 const library = await readFaceLibrary(userId!, dir);
 const faces = library.faces.filter((f) => f.status === "labeled" && f.label === name && !f.tags?.includes("meme"));
-const crops = await bestHeadCrops(library, name!, 5, dir);
+const crops = await bestHeadCrops(library, name!, PERSON_STYLE[name!]?.refs ?? 5, dir);
 const files = await downloadFaces(faces, dir);
 
 // Il numero sta DENTRO la foto, nell'angolo: con la striscia sopra simo lo leggeva come didascalia
