@@ -3,6 +3,8 @@ import path from "node:path";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import { measureCutout, type CutoutShape } from "../lib/face-library.js";
+import { detectFaces } from "../face-tracking/onnx-face-detector.js";
+import { DETECTOR_INPUT_HEIGHT, DETECTOR_INPUT_WIDTH } from "../face-tracking/frame-extractor.js";
 
 /**
  * Copertina long-form nello stile dei canali di clip su Blur/Marza/Pesh (studiati il 2026-09-25):
@@ -101,13 +103,40 @@ export async function addCoverTitle(params: { imagePath: string; title: string; 
   const image = sharp(params.imagePath);
   const { width = W, height = H } = await image.metadata();
   const vertical = height > width;
-  const title = renderTitle(params.title.toUpperCase(), params.theme, Math.round(width * (vertical ? 0.9 : 0.86)));
-  const left = Math.max(0, Math.round((width - title.width) / 2));
-  const top = vertical ? Math.round(height * 0.6) : Math.max(0, height - title.height + 6);
+  // La scritta non deve coprire le facce (simo, 2026-10-27: "la faccia di blur tagliata dalla
+  // scritta"): se il mento di qualcuno scende sotto la cima della scritta, la scritta si rimpicciolisce
+  // (in orizzontale, appoggiata in basso) o scende (in verticale), fino a un minimo leggibile.
+  const faces = await faceBoxesIn(params.imagePath, width, height).catch(() => []);
+  let maxWidth = Math.round(width * (vertical ? 0.9 : 0.86));
+  let title = renderTitle(params.title.toUpperCase(), params.theme, maxWidth);
+  let left = 0;
+  let top = 0;
+  for (let attempt = 0; ; attempt++) {
+    left = Math.max(0, Math.round((width - title.width) / 2));
+    const titleLeft = left;
+    const titleRight = left + title.width;
+    const chin = Math.max(0, ...faces.filter((f) => f.x < titleRight && f.x + f.width > titleLeft).map((f) => f.y + f.height * 0.95));
+    top = vertical ? Math.min(Math.max(Math.round(height * 0.6), Math.round(chin + 8)), height - title.height) : Math.max(0, height - title.height + 6);
+    if (top >= chin || attempt >= 4) break;
+    maxWidth = Math.round(maxWidth * 0.88);
+    title = renderTitle(params.title.toUpperCase(), params.theme, maxWidth);
+  }
   const w = Math.min(title.width, width - left);
   const h = Math.min(title.height, height - top);
   const input = w < title.width || h < title.height ? await sharp(title.buffer).extract({ left: 0, top: 0, width: w, height: h }).png().toBuffer() : title.buffer;
   await image.composite([{ input, left, top }]).jpeg({ quality: 92 }).toFile(params.outputPath);
+}
+
+/** Riquadri dei volti in un'immagine (pixel dell'immagine). */
+async function faceBoxesIn(imagePath: string, width: number, height: number) {
+  const rgb = await sharp(imagePath).resize(DETECTOR_INPUT_WIDTH, DETECTOR_INPUT_HEIGHT, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  const bgr = Buffer.alloc(rgb.length);
+  for (let i = 0; i < rgb.length; i += 3) {
+    bgr[i] = rgb[i + 2]!;
+    bgr[i + 1] = rgb[i + 1]!;
+    bgr[i + 2] = rgb[i]!;
+  }
+  return detectFaces(bgr, width, height);
 }
 
 interface FaceSlot {
