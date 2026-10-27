@@ -24,8 +24,8 @@ import { faceTurn } from "../face-tracking/face-identity.js";
 const CROP_SIZE = 768;
 /** Quanto allargare il riquadro del volto per tenere capelli, barba, occhiali e cuffie. */
 const HEAD_EXPAND = 2.0;
-/** Candidate scaricate per persona: la libreria ne ha al massimo ~25. */
-const MAX_CANDIDATES = 20;
+/** Candidate scaricate per persona: la libreria ne ha al massimo ~30. */
+const MAX_CANDIDATES = 30;
 
 export interface HeadCrop {
   face: LibraryFace;
@@ -96,7 +96,7 @@ export async function headCrop(pngPath: string, outPath: string, cropSize = CROP
 export async function bestHeadCrops(library: FaceLibraryIndex, label: string, n: number, dir: string, cropSize = CROP_SIZE): Promise<HeadCrop[]> {
   const tag = PERSON_STYLE[label]?.tag;
   const pool = library.faces
-    .filter((f) => f.status === "labeled" && f.label === label && !f.tags?.includes("meme"))
+    .filter((f) => f.status === "labeled" && f.label === label && !f.tags?.includes("meme") && !f.tags?.includes("noref"))
     // Prima quelle confermate da simo come riferimento, poi le meno esagerate.
     .sort((a, b) => Number(Boolean(b.tags?.includes("ref"))) - Number(Boolean(a.tags?.includes("ref"))) || a.intensity - b.intensity)
     .slice(0, MAX_CANDIDATES);
@@ -115,7 +115,8 @@ export async function bestHeadCrops(library: FaceLibraryIndex, label: string, n:
       (face.intensity >= 4 ? 0.6 : face.intensity === 3 ? 0.2 : 0) - // smorfie forti deformano
       // Di lato non si vede quanto è largo il viso (simo, 2026-10-27: Marza "è CICCIONE COSÌ", con 3
       // riferimenti su 5 di profilo): a metà profilo conta come una faccia grande e nitida in meno.
-      Math.min(1.5, (turn ?? 0.25) * 4);
+      // Senza occhi e naso trovati di solito è proprio di lato (la 21 di Marza, girata e con la chat).
+      Math.min(1.5, (turn ?? 0.35) * 4);
     crops.push({ face, path: out, faceWidth: measured.faceWidth, sharpness: measured.sharpness, turn, score });
   }
   crops.sort((a, b) => b.score - a.score);

@@ -30,7 +30,8 @@ export interface LibraryFace {
   /**
    * Cosa si vede nella foto (mai chi è): "redbull" = cappello o cuffie Red Bull (per Blur vanno
    * sempre, chiesto da simo), "meme" = foto ritoccata per scherzo (es. corpo da culturista), da non
-   * usare in copertina.
+   * usare in copertina; "ref" = da usare per prima come riferimento per GPT Image, "noref" = mai
+   * come riferimento (mano davanti alla faccia, urlo): li decide simo.
    */
   tags?: string[];
 }
