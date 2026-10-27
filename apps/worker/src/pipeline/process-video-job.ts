@@ -36,7 +36,7 @@ import { detectLongformCandidates } from "../providers/ai/longform-candidates.js
 import { rankLongformClips } from "../providers/ai/longform-ranking.js";
 import { planLongformVideos, fmt } from "../providers/ai/longform-plan.js";
 import { refineVideoBoundaries } from "../providers/ai/longform-boundaries.js";
-import { describePlannedVideos } from "../providers/ai/longform-metadata.js";
+import { plannedVideosAsClips } from "../providers/ai/longform-metadata.js";
 import { fetchTwitchChapters } from "../lib/twitch-chapters.js";
 import { sanitizeShortClips, alignReactionStarts, addBreathBeforeHook } from "./short-clip-boundaries.js";
 import { detectSceneCuts } from "../face-tracking/scene-detect.js";
@@ -673,14 +673,8 @@ async function planLongformClips(
     });
   }
 
-  const { clips, usage } = await describePlannedVideos(videos, plan.timeline, segments, {
-    apiKey: env.ANTHROPIC_API_KEY,
-    model: env.ANTHROPIC_MODEL_LONGFORM,
-    videoTitle,
-    streamerName: video.streamer_name,
-  });
-  addUsage(usageByModel, env.ANTHROPIC_MODEL_LONGFORM, usage);
-  return clips.slice(0, MAX_SUGGESTED_LONGFORM_CLIPS);
+  // Niente AI per titoli e descrizioni: i titoli li scrive simo, la descrizione è quella fissa.
+  return plannedVideosAsClips(videos).slice(0, MAX_SUGGESTED_LONGFORM_CLIPS);
 }
 
 // editing_style/template/edl sono placeholder inerti: il render long-form (vedi

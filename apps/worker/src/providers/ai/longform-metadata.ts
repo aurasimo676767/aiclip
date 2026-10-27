@@ -214,6 +214,31 @@ export async function describePlannedVideos(
 
 const NEUTRAL_SCORES: ClipScores = { hook: 60, retention: 60, emotion: 60, clarity: 60, payoff: 60, virality: 60 };
 
+/**
+ * I video della mappa come clip, SENZA chiamare l'AI per titoli e descrizioni (simo, 2026-10-27: "i
+ * titoli li mettiamo noi, la descrizione è già pronta"): via batch quel passaggio faceva aspettare
+ * da 10 minuti a 2 ore per niente. Titolo provvisorio = l'attività ("reaction: CiccioGamer e il panino
+ * Halloween"), da cambiare sul sito; sul sito la descrizione dei video lunghi è quella fissa.
+ */
+export function plannedVideosAsClips(videos: PlannedVideo[]): RankedLongformClip[] {
+  return videos.map((v) => {
+    const title = v.activity.slice(0, 100);
+    return {
+      start: v.start,
+      end: v.end,
+      duration: v.end - v.start,
+      title,
+      hook: v.topic.slice(0, 200) || title,
+      reason: "Attività intera della live, tagliata dalla mappa del VOD.",
+      scores: NEUTRAL_SCORES,
+      hashtags: [],
+      caption: v.topic.slice(0, 1000) || title,
+      badges: [],
+      activityKind: v.kind,
+    };
+  });
+}
+
 function describeForPrompt(index: number, v: PlannedVideo, timeline: TimelineBlock[], sorted: TranscriptSegment[]): string {
   const blocks = timeline.filter((b) => b.end > v.start && b.start < v.end).sort((a, b) => a.start - b.start);
   const lines = sorted.filter((s) => s.start >= v.start && s.start < v.end);
