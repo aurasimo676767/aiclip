@@ -199,6 +199,26 @@ export interface PersonReference {
   embeddings: Float32Array[];
 }
 
+/**
+ * Quanto è girata la testa nella foto (0 = di fronte, ~0,5 = quasi di profilo): distanza del naso dal
+ * punto fra gli occhi, in rapporto alla distanza fra gli occhi (YuNet: occhi, naso, angoli della
+ * bocca). null se non c'è un volto. Serve a scegliere le foto di riferimento per le copertine.
+ */
+export async function faceTurn(imagePath: string): Promise<number | null> {
+  const { data, info } = await sharp(imagePath).flatten({ background: "#808080" }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const bgr = Buffer.alloc(data.length);
+  for (let i = 0; i < data.length; i += 3) {
+    bgr[i] = data[i + 2]!;
+    bgr[i + 1] = data[i + 1]!;
+    bgr[i + 2] = data[i]!;
+  }
+  const face = (await detectLandmarks({ data: bgr, width: info.width, height: info.height })).sort((a, b) => b.box.width - a.box.width)[0];
+  if (!face) return null;
+  const [eyeA, eyeB, nose] = face.points as [[number, number], [number, number], [number, number]];
+  const eyes = Math.hypot(eyeA[0] - eyeB[0], eyeA[1] - eyeB[1]);
+  return eyes > 0 ? Math.abs(nose[0] - (eyeA[0] + eyeB[0]) / 2) / eyes : null;
+}
+
 async function embedLibraryFace(face: LibraryFace, workDir: string): Promise<Float32Array | null> {
   const cacheFile = path.join(EMBEDDING_CACHE_DIR, `${face.id}.json`);
   try {

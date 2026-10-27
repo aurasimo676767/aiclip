@@ -7,6 +7,8 @@ interface CoverJob {
   id: string;
   status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
   error: string | null;
+  /** L'ultima modifica non è riuscita: si vede la copertina di prima con questo errore. */
+  editError: string | null;
   url: string | null;
   applyRequested: boolean;
   youtubeSet: boolean;
@@ -219,6 +221,13 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
               <Wand2 size={14} /> Modifica
             </button>
           </div>
+          {job.editError && (
+            <p className="text-xs text-red-300">
+              {job.editError.includes("safety")
+                ? "OpenAI ha rifiutato l'ultima modifica. Scrivila in modo più neutro (es. \"viso più magro\" invece di insulti) e riprova."
+                : `L'ultima modifica non è riuscita: ${job.editError}`}
+            </p>
+          )}
           <p className="text-xs text-faint">Ritocca questa copertina invece di rifarla da zero (circa 2 centesimi).</p>
         </div>
       )}

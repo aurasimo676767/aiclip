@@ -85,15 +85,35 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
 
-  const { data: job } = await supabase
+  const columns = "id, status, error_message, result_storage_path, apply_requested, youtube_thumbnail_set, cover_instructions";
+  const { data: latest } = await supabase
     .from("thumbnail_jobs")
-    .select("id, status, error_message, result_storage_path, apply_requested, youtube_thumbnail_set")
+    .select(columns)
     .eq("clip_id", params.id)
     .is("youtube_url", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!job) return NextResponse.json({ job: null });
+  if (!latest) return NextResponse.json({ job: null });
+  // Una modifica non riuscita non deve far sparire la copertina da cui partiva (simo, 2026-10-27:
+  // "mi ha tolto la copertina che c'era"): si mostra l'ultima riuscita, con l'errore della modifica.
+  let job = latest;
+  let editError: string | null = null;
+  if (latest.status === "FAILED" && latest.cover_instructions?.startsWith("[modifica:")) {
+    const { data: done } = await supabase
+      .from("thumbnail_jobs")
+      .select(columns)
+      .eq("clip_id", params.id)
+      .is("youtube_url", null)
+      .eq("status", "COMPLETED")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (done) {
+      job = done;
+      editError = latest.error_message ?? "errore sconosciuto";
+    }
+  }
 
   const url = job.result_storage_path ? await getPresignedDownloadUrl(job.result_storage_path).catch(() => null) : null;
   // Id del video su YouTube, per aprire la sua pagina di Studio (copertina verticale degli Shorts).
@@ -111,6 +131,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
       id: job.id,
       status: job.status,
       error: job.error_message,
+      editError,
       url,
       applyRequested: job.apply_requested,
       youtubeSet: job.youtube_thumbnail_set,

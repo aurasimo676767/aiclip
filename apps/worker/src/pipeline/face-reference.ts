@@ -4,6 +4,7 @@ import type { FaceLibraryIndex, LibraryFace } from "../lib/face-library.js";
 import { detectFaces } from "../face-tracking/onnx-face-detector.js";
 import { DETECTOR_INPUT_HEIGHT, DETECTOR_INPUT_WIDTH } from "../face-tracking/frame-extractor.js";
 import { downloadFaces, PERSON_STYLE } from "./cover-builder.js";
+import { faceTurn } from "../face-tracking/face-identity.js";
 
 /**
  * Foto di riferimento per far disegnare a GPT Image le facce GIUSTE (simo, 2026-09-30: "sminchia
@@ -31,6 +32,8 @@ export interface HeadCrop {
   path: string;
   /** Larghezza del volto nella foto originale, in pixel. */
   faceWidth: number;
+  /** Quanto è girata la testa (0 = di fronte), vedi faceTurn; null se non misurato. */
+  turn: number | null;
   sharpness: number;
   score: number;
 }
@@ -104,12 +107,16 @@ export async function bestHeadCrops(library: FaceLibraryIndex, label: string, n:
     const out = path.join(dir, `ref-${face.id}-${cropSize}.jpg`);
     const measured = await headCrop(files[i]!, out, cropSize).catch(() => null);
     if (!measured) continue;
+    const turn = await faceTurn(out).catch(() => null);
     const score =
       (face.tags?.includes("ref") ? 3 : 0) + // scelte da simo come riferimento: vincono sempre
       Math.min(measured.faceWidth, 260) / 260 + // faccia grande = più dettagli veri
       Math.min(measured.sharpness, 1500) / 1500 - // nitida
-      (face.intensity >= 4 ? 0.6 : face.intensity === 3 ? 0.2 : 0); // smorfie forti deformano
-    crops.push({ face, path: out, faceWidth: measured.faceWidth, sharpness: measured.sharpness, score });
+      (face.intensity >= 4 ? 0.6 : face.intensity === 3 ? 0.2 : 0) - // smorfie forti deformano
+      // Di lato non si vede quanto è largo il viso (simo, 2026-10-27: Marza "è CICCIONE COSÌ", con 3
+      // riferimenti su 5 di profilo): a metà profilo conta come una faccia grande e nitida in meno.
+      Math.min(1.5, (turn ?? 0.25) * 4);
+    crops.push({ face, path: out, faceWidth: measured.faceWidth, sharpness: measured.sharpness, turn, score });
   }
   crops.sort((a, b) => b.score - a.score);
   const picked = crops.slice(0, n);
