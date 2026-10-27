@@ -13,7 +13,7 @@ import { addCoverTitle, composeCover, COVER_THEMES } from "../render/compose-cov
 import { readFaceLibrary } from "../lib/face-library.js";
 import { participantsFromTitle, pickFaces, downloadFaces, findSteamHero, findSteamLogo, referenceFaces, PERSON_STYLE } from "./cover-builder.js";
 import { bestHeadCrops } from "./face-reference.js";
-import { generateAiCover, type AiCoverParams } from "../providers/ai/cover-image-ai.js";
+import { editCover, generateAiCover, type AiCoverParams } from "../providers/ai/cover-image-ai.js";
 import {
   setYoutubeThumbnail,
   findYoutubeThumbnailUrlBySearch,
@@ -121,6 +121,24 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       }
       await updateThumbnailJobStatus(job.id, "COMPLETED", { youtube_thumbnail_set: set, completed_at: new Date().toISOString() });
       logger.info("Copertina approvata", { jobId: job.id, clipId: clip.id, suYoutube: set });
+      return;
+    }
+
+    // "Modifica" sull'anteprima (simo, 2026-10-27): si ritocca la copertina già fatta invece di rifarla
+    // da zero (~2 centesimi invece di 10-15, vedi editCover). Il job lo dice in cover_instructions:
+    // "[modifica:<id della copertina di partenza>] cosa cambiare".
+    const edit = /^\[modifica:([0-9a-f-]{36})\]\s*([\s\S]*)$/.exec(job.cover_instructions ?? "");
+    if (edit) {
+      const { data: base } = await supabase.from("thumbnail_jobs").select("result_storage_path").eq("id", edit[1]!).eq("clip_id", clip.id).maybeSingle();
+      if (!base?.result_storage_path) throw new Error("La copertina da modificare non c'è più");
+      const basePath = path.join(jobDir, "base.jpg");
+      await storageProvider.downloadToFile(base.result_storage_path, basePath);
+      const editedPath = path.join(jobDir, "edited.jpg");
+      await editCover({ apiKey: env.OPENAI_API_KEY, model: env.COVER_AI_MODEL, quality: env.COVER_AI_QUALITY, basePath, instructions: edit[2]!.trim(), outputPath: editedPath });
+      const resultStoragePath = `thumbnails/${clip.project_id}/${clip.id}-${job.id}.jpg`;
+      await storageProvider.uploadFile(editedPath, resultStoragePath, "image/jpeg");
+      await updateThumbnailJobStatus(job.id, "COMPLETED", { result_storage_path: resultStoragePath, youtube_thumbnail_set: false, completed_at: new Date().toISOString() });
+      logger.info("Copertina modificata", { jobId: job.id, partenza: edit[1], modifica: edit[2] });
       return;
     }
 

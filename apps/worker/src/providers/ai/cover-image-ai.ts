@@ -240,3 +240,83 @@ function splitTitle(text: string, oneLineMax: number): [string, string | undefin
   }
   return best;
 }
+
+/** Differenza media (0-255) oltre la quale un punto della copertina conta come "cambiato" dall'AI. */
+const CHANGED_DIFF = 28;
+/** Oltre questa quota di copertina cambiata la modifica è di tutta l'immagine (es. "più luminosa"): si tiene quella dell'AI. */
+const GLOBAL_EDIT_SHARE = 0.6;
+
+/**
+ * Ritocco di una copertina già fatta (simo, 2026-10-27: "modificarla senza farla rifare da zero, 10-15
+ * centesimi a modifica too much"). A GPT Image va SOLO la copertina: niente foto delle facce, che sono
+ * quelle a costare (~1 cent l'una) e che servivano solo a disegnarle la prima volta. ~2 centesimi.
+ * Poi dove l'AI non doveva cambiare niente si rimettono i pixel originali (keepUnchangedPixels): GPT
+ * ridisegna sempre tutta l'immagine, e le facce potrebbero spostarsi di poco.
+ */
+export async function editCover(params: { apiKey: string; model: string; quality: string; basePath: string; instructions: string; outputPath: string }): Promise<void> {
+  const { width = 1280, height = 720 } = await sharp(params.basePath).metadata();
+  const vertical = height > width;
+  const prompt = [
+    "This is a finished YouTube thumbnail. Edit it following the channel owner's request below and change NOTHING else: same people with exactly the same faces, same poses and expressions, same text and lettering, same colors, same layout and framing.",
+    "",
+    `Request (written in Italian): ${params.instructions}`,
+  ].join("\n");
+  const form = new FormData();
+  form.append("model", params.model);
+  form.append("prompt", prompt);
+  form.append("size", vertical ? "864x1536" : "1536x864");
+  form.append("quality", params.quality);
+  form.append("output_format", "png");
+  form.append("n", "1");
+  form.append("image[]", new Blob([await fsp.readFile(params.basePath)], { type: "image/jpeg" }), "copertina.jpg");
+  const started = Date.now();
+  const res = await fetch("https://api.openai.com/v1/images/edits", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${params.apiKey}` },
+    body: form,
+    signal: AbortSignal.timeout(300_000),
+  });
+  const body = (await res.json()) as { data?: Array<{ b64_json?: string }>; usage?: unknown; error?: { message?: string } };
+  if (!res.ok || !body.data?.[0]?.b64_json) throw new Error(`GPT Image ${res.status}: ${body.error?.message ?? "nessuna immagine"}`);
+  // Pixel grezzi RGB alla misura della copertina di partenza.
+  const edited = await sharp(Buffer.from(body.data[0].b64_json, "base64")).resize(width, height, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  const out = await keepUnchangedPixels(params.basePath, edited, width, height);
+  await fsp.writeFile(params.outputPath, out);
+  logger.info("Copertina ritoccata con GPT Image", { model: params.model, secondi: Math.round((Date.now() - started) / 1000), usage: body.usage });
+}
+
+/**
+ * La copertina dell'AI solo dove è cambiata davvero, l'originale (pixel per pixel) altrove: si
+ * confrontano le due immagini rimpicciolite, la zona cambiata si allarga e si sfuma ai bordi. Se è
+ * cambiata quasi tutta l'immagine si tiene quella dell'AI così com'è.
+ */
+async function keepUnchangedPixels(basePath: string, edited: Buffer, width: number, height: number): Promise<Buffer> {
+  const editedImage = () => sharp(edited, { raw: { width, height, channels: 3 } });
+  const sw = 192;
+  const sh = Math.max(1, Math.round((sw * height) / width));
+  const small = (img: sharp.Sharp) => img.resize(sw, sh, { fit: "fill" }).removeAlpha().blur(1).raw().toBuffer();
+  const [a, b] = await Promise.all([small(sharp(basePath)), small(editedImage())]);
+  const mask = Buffer.alloc(sw * sh);
+  let changed = 0;
+  for (let i = 0; i < sw * sh; i++) {
+    const d = (Math.abs(a[i * 3]! - b[i * 3]!) + Math.abs(a[i * 3 + 1]! - b[i * 3 + 1]!) + Math.abs(a[i * 3 + 2]! - b[i * 3 + 2]!)) / 3;
+    if (d > CHANGED_DIFF) {
+      mask[i] = 255;
+      changed++;
+    }
+  }
+  logger.info("Ritocco copertina: zona cambiata", { quota: (changed / (sw * sh)).toFixed(2) });
+  if (changed / (sw * sh) > GLOBAL_EDIT_SHARE) return editedImage().jpeg({ quality: 92 }).toBuffer();
+  // Sfocata e poi moltiplicata la maschera si allarga; ingrandita e sfocata ancora, i bordi sfumano.
+  const alpha = await sharp(mask, { raw: { width: sw, height: sh, channels: 1 } })
+    .blur(2)
+    .linear(4, 0)
+    .resize(width, height, { kernel: "cubic" })
+    .blur(8)
+    // sharp torna a 3 canali durante le operazioni: per la trasparenza ne serve uno.
+    .extractChannel(0)
+    .raw()
+    .toBuffer();
+  const editedRgba = await editedImage().joinChannel(alpha, { raw: { width, height, channels: 1 } }).png().toBuffer();
+  return sharp(basePath).resize(width, height, { fit: "fill" }).composite([{ input: editedRgba }]).jpeg({ quality: 92 }).toBuffer();
+}

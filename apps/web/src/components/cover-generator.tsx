@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, ExternalLink, Image as ImageIcon, Loader2, RefreshCw, Upload } from "lucide-react";
+import { Check, ExternalLink, Image as ImageIcon, Loader2, RefreshCw, Upload, Wand2 } from "lucide-react";
 
 interface CoverJob {
   id: string;
@@ -25,6 +25,7 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
   const [chosen, setChosen] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [instructions, setInstructions] = useState("");
+  const [change, setChange] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +61,28 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Avvio fallito");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Errore imprevisto");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Ritocca la copertina mostrata invece di rifarla da zero: circa 2 centesimi. */
+  async function modify() {
+    if (!job) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/clips/${clipId}/cover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ editOf: job.id, edit: change.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Avvio fallito");
+      setChange("");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore imprevisto");
@@ -148,7 +171,7 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
       {working && (
         <p className="flex items-center gap-2 text-xs text-muted">
           <Loader2 size={14} className="animate-spin text-brand-300" />
-          {job?.applyRequested ? "Carico la copertina…" : "Genero la copertina… (circa mezzo minuto)"}
+          {job?.applyRequested ? "Carico la copertina…" : "Preparo la copertina… (circa mezzo minuto)"}
         </p>
       )}
 
@@ -183,6 +206,20 @@ export function CoverGenerator({ clipId, isShort }: { clipId: string; isShort: b
               </a>
             </div>
           )}
+          <div className="flex gap-2">
+            <input
+              value={change}
+              maxLength={500}
+              onChange={(e) => setChange(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && change.trim().length >= 2 && !busy && void modify()}
+              placeholder="Cosa cambiare? Es. Blur più grande, scritta gialla"
+              className="input min-w-0 flex-1 text-sm"
+            />
+            <button onClick={modify} disabled={busy || change.trim().length < 2} className="btn btn-secondary btn-sm shrink-0">
+              <Wand2 size={14} /> Modifica
+            </button>
+          </div>
+          <p className="text-xs text-faint">Ritocca questa copertina invece di rifarla da zero (circa 2 centesimi).</p>
         </div>
       )}
 

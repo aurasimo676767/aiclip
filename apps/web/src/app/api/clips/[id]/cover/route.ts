@@ -16,6 +16,9 @@ const bodySchema = z.object({
   text: z.string().trim().max(40).optional(),
   /** Istruzioni libere per l'AI (gioco, scritte, stile): vincono sulle regole standard. */
   instructions: z.string().trim().max(1000).optional(),
+  /** "Modifica": la copertina già fatta da ritoccare (id del suo job) e cosa cambiare. */
+  editOf: z.string().uuid().optional(),
+  edit: z.string().trim().min(2).max(500).optional(),
 });
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
@@ -31,6 +34,26 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const { data: clip } = await supabase.from("clips").select("id, status").eq("id", params.id).maybeSingle();
   if (!clip) return NextResponse.json({ error: "Clip non trovata" }, { status: 404 });
   if (clip.status !== "COMPLETED") return NextResponse.json({ error: "Prima serve il video renderizzato" }, { status: 409 });
+
+  // Ritocco di una copertina già fatta (simo, 2026-10-27): il worker la riconosce dal prefisso nelle
+  // istruzioni e manda all'AI solo quella (~2 centesimi invece di 10-15, vedi editCover nel worker).
+  if (parsed.data.editOf) {
+    if (!parsed.data.edit) return NextResponse.json({ error: "Scrivi cosa cambiare" }, { status: 400 });
+    const { data: base } = await supabase
+      .from("thumbnail_jobs")
+      .select("id, result_storage_path")
+      .eq("id", parsed.data.editOf)
+      .eq("clip_id", clip.id)
+      .maybeSingle();
+    if (!base?.result_storage_path) return NextResponse.json({ error: "Copertina da modificare non trovata" }, { status: 404 });
+    const { data: editJob, error: editError } = await supabase
+      .from("thumbnail_jobs")
+      .insert({ clip_id: clip.id, cover_instructions: `[modifica:${base.id}] ${parsed.data.edit}` })
+      .select("id")
+      .single();
+    if (editError || !editJob) return NextResponse.json({ error: `Avvio fallito: ${editError?.message}` }, { status: 500 });
+    return NextResponse.json({ ok: true, jobId: editJob.id });
+  }
 
   const people = parsed.data.people?.map((p) => p.toUpperCase());
   const text = parsed.data.text?.toUpperCase();
