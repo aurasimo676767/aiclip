@@ -40,7 +40,7 @@ export interface ComposeCoverParams {
   kind: "reaction" | "game";
   /** PNG scontornati, il più importante per primo (2-4 per i giochi, 1-2 per le reaction). */
   faces: string[];
-  /** 1-3 parole, verranno messe in maiuscolo. */
+  /** 1-3 parole, verranno messe in maiuscolo. Vuota = bozza senza scritta (vedi addCoverTitle). */
   title: string;
   theme: CoverTheme;
   outputPath: string;
@@ -74,7 +74,9 @@ export async function composeCover(params: ComposeCoverParams): Promise<void> {
     layers.push(...(await clampOverlay(face.buffer, face.width, face.height, left, top)));
   }
 
-  if (params.kind === "reaction") {
+  if (!params.title.trim()) {
+    // Nessuna scritta.
+  } else if (params.kind === "reaction") {
     // Reaction: "<STREAMER> REACTION". Con una sola faccia (a destra) la scritta sta in basso a
     // sinistra sopra un'ombra che copre il testo della copertina originale; con due facce (negli
     // angoli) sta al centro fra le due.
@@ -88,6 +90,24 @@ export async function composeCover(params: ComposeCoverParams): Promise<void> {
   }
 
   await sharp(background).composite(layers).jpeg({ quality: 92 }).toFile(params.outputPath);
+}
+
+/**
+ * Solo la scritta, con la grafica delle copertine montate, sopra un'immagine già fatta: la copertina
+ * di GPT Image rifatta SENZA scritta quando il filtro di OpenAI rifiutava quella con la scritta (vedi
+ * process-thumbnail-job.ts). In basso al centro; in verticale (Short) a 3/5 dell'altezza, sul petto.
+ */
+export async function addCoverTitle(params: { imagePath: string; title: string; theme: CoverTheme; outputPath: string }): Promise<void> {
+  const image = sharp(params.imagePath);
+  const { width = W, height = H } = await image.metadata();
+  const vertical = height > width;
+  const title = renderTitle(params.title.toUpperCase(), params.theme, Math.round(width * (vertical ? 0.9 : 0.86)));
+  const left = Math.max(0, Math.round((width - title.width) / 2));
+  const top = vertical ? Math.round(height * 0.6) : Math.max(0, height - title.height + 6);
+  const w = Math.min(title.width, width - left);
+  const h = Math.min(title.height, height - top);
+  const input = w < title.width || h < title.height ? await sharp(title.buffer).extract({ left: 0, top: 0, width: w, height: h }).png().toBuffer() : title.buffer;
+  await image.composite([{ input, left, top }]).jpeg({ quality: 92 }).toFile(params.outputPath);
 }
 
 interface FaceSlot {

@@ -9,11 +9,11 @@ import { supabase } from "../lib/supabase.js";
 import { storageProvider } from "../lib/providers.js";
 import { runFfmpeg, probeVideo } from "../lib/ffmpeg.js";
 import { selectThumbnailAssets } from "../providers/ai/thumbnail-selection.js";
-import { composeCover, COVER_THEMES } from "../render/compose-cover.js";
+import { addCoverTitle, composeCover, COVER_THEMES } from "../render/compose-cover.js";
 import { readFaceLibrary } from "../lib/face-library.js";
 import { participantsFromTitle, pickFaces, downloadFaces, findSteamHero, findSteamLogo, referenceFaces, PERSON_STYLE } from "./cover-builder.js";
 import { bestHeadCrops } from "./face-reference.js";
-import { generateAiCover } from "../providers/ai/cover-image-ai.js";
+import { generateAiCover, type AiCoverParams } from "../providers/ai/cover-image-ai.js";
 import {
   setYoutubeThumbnail,
   findYoutubeThumbnailUrlBySearch,
@@ -252,12 +252,13 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     logger.info("Copertina", { jobId: job.id, tipo: isShort ? "short" : isReaction ? "reaction" : "gioco", gioco: selection.gameName, persone: people, facce: chosenFaces.map((f) => `${f.label}:${f.expression}`), scritta: title });
 
     const draftPath = isShort ? null : path.join(jobDir, "thumbnail-draft.jpg");
+    const theme = COVER_THEMES[selection.coverColor] ?? COVER_THEMES.giallo!;
     if (draftPath) await composeCover({
       backgroundPath: backgroundFullPath,
       kind: isReaction ? "reaction" : "game",
       faces: facePaths,
       title,
-      theme: COVER_THEMES[selection.coverColor] ?? COVER_THEMES.giallo!,
+      theme,
       outputPath: draftPath,
     });
 
@@ -279,7 +280,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
         // Logo vero del gioco (come nelle copertine di AvraiAuraBooter), anche negli Short di gioco.
         const logoPath = !isReaction && selection.gameName ? await findSteamLogo(selection.gameName, path.join(jobDir, "logo.png")) : null;
         const aiPath = path.join(jobDir, "thumbnail-ai.jpg");
-        await generateAiCover({
+        const aiParams: AiCoverParams = {
           apiKey: env.OPENAI_API_KEY,
           model: env.COVER_AI_MODEL,
           quality: env.COVER_AI_QUALITY,
@@ -296,7 +297,26 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           videoTitle: clip.title,
           userInstructions: coverInstructions,
           outputPath: aiPath,
-        });
+        };
+        try {
+          await generateAiCover(aiParams);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (!/safety system/i.test(message)) throw err;
+          // Filtro di sicurezza di OpenAI: è la scritta (2026-10-27, "HANNO TRUFFATO MICHAEL JACKSON",
+          // una persona famosa vera + un'accusa, rifiutata due volte; tutte le altre copertine passavano).
+          // Si rifà l'immagine SENZA scritta (anche la bozza, che la conteneva) e la scritta di simo si
+          // aggiunge dopo con la grafica delle copertine montate. Se il motivo era un altro, il secondo
+          // rifiuto fa restare la copertina montata come prima.
+          logger.warn("GPT Image ha rifiutato la copertina: la rifaccio senza scritta e la aggiungo dopo", { jobId: job.id, scritta: title });
+          const draftNoText = draftPath ? path.join(jobDir, "thumbnail-draft-notext.jpg") : null;
+          if (draftNoText) {
+            await composeCover({ backgroundPath: backgroundFullPath, kind: isReaction ? "reaction" : "game", faces: facePaths, title: "", theme, outputPath: draftNoText });
+          }
+          const aiNoText = path.join(jobDir, "thumbnail-ai-notext.jpg");
+          await generateAiCover({ ...aiParams, draftPath: draftNoText, noText: true, outputPath: aiNoText });
+          await addCoverTitle({ imagePath: aiNoText, title, theme, outputPath: aiPath });
+        }
         composedPath = aiPath;
       } catch (err) {
         logger.warn("Rifinitura GPT Image fallita, resta la copertina montata", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });

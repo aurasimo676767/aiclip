@@ -45,6 +45,8 @@ export interface AiCoverParams {
   videoTitle?: string;
   /** Istruzioni scritte da simo nel sito: vincono sulle regole qui sotto (scritte, bigliettini, stile). */
   userInstructions?: string;
+  /** Immagine SENZA scritta (la si aggiunge dopo, vedi addCoverTitle): quando il filtro di OpenAI rifiuta la scritta. */
+  noText?: boolean;
   outputPath: string;
 }
 
@@ -142,11 +144,13 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     "Visual style: like the top Italian clip channels (e.g. \"Avrai Aura Booter\"): a dense, busy, hyper-saturated composition, glossy and dramatic, strong rim light and colored glow around the people, subtle vignette, bright complementary colors (blue/orange, purple/yellow, red/yellow). The people fill most of the frame, big faces close together, slightly overlapping, the main one biggest.",
     "When it fits the video and is funny, dress the people for the theme (e.g. hard hats for a building game, costumes for a party game) and add a few themed props from the game or the topic around them.",
     "",
-    line2
+    params.noText
+      ? `NO title text in the image: leave the area where a title usually goes (${textPlace}) clean, a big title will be added there afterwards.`
+      : line2
       ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. First line white with a light grey gradient, second line in one bold color that fits the video (red, yellow-orange, purple, green or blue gradient with a glossy highlight), thick dark outline, 3D extrusion and drop shadow, soft glow.`
       : `Text: exactly "${line1}", spelled exactly, one line. Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. One bold color that fits the video (red, yellow-orange, purple, green or blue gradient with a glossy highlight), thick dark outline, 3D extrusion and drop shadow, soft glow.`,
     // simo, 2026-10-25: "ci sono delle scritte nella copertina, 3 quadratini, non voglio che proprio ci siano".
-    "Apart from the title and the game logo there is NO other text anywhere: no stickers, no paper notes, no labels, no speech bubbles, no captions, no small words, no channel logos, no watermarks, no borders. Very sharp.",
+    `Apart from ${params.noText ? "" : "the title and "}the game logo there is NO other text anywhere: no stickers, no paper notes, no labels, no speech bubbles, no captions, no small words, no channel logos, no watermarks, no borders. Very sharp.`,
     // simo, 2026-09-29: "voglio poter dire all'ia come farle". Le sue istruzioni (in italiano) vincono.
     ...(params.userInstructions
       ? ["", `INSTRUCTIONS FROM THE CHANNEL OWNER (written in Italian; they have the HIGHEST priority and override any rule above about the text, how many texts, stickers, game, layout and style; the faces must still stay the real people): ${params.userInstructions}`]
