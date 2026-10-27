@@ -133,12 +133,23 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       if (!base?.result_storage_path) throw new Error("La copertina da modificare non c'è più");
       const basePath = path.join(jobDir, "base.jpg");
       await storageProvider.downloadToFile(base.result_storage_path, basePath);
+      // Chi è nominato nella richiesta ("Marza più magro"): le sue foto vanno all'AI, se no non sa chi è.
+      const request = edit[2]!.trim();
+      const library = project ? await readFaceLibrary(project.user_id, jobDir) : { faces: [] };
+      const labels = [...new Set(library.faces.filter((f) => f.status === "labeled" && f.label).map((f) => f.label!))];
+      const words = new Set(request.toUpperCase().split(/[^\p{L}\p{N}]+/u));
+      const named = labels.filter((label) => words.has(label.toUpperCase()));
+      const people = [];
+      for (const label of named) {
+        const crops = await bestHeadCrops(library, label, PERSON_STYLE[label]?.refs ?? 5, jobDir).catch(() => []);
+        if (crops.length > 0) people.push({ name: label, photos: crops.map((c) => c.path), styleNote: PERSON_STYLE[label]?.note });
+      }
       const editedPath = path.join(jobDir, "edited.jpg");
-      await editCover({ apiKey: env.OPENAI_API_KEY, model: env.COVER_AI_MODEL, quality: env.COVER_AI_QUALITY, basePath, instructions: edit[2]!.trim(), outputPath: editedPath });
+      await editCover({ apiKey: env.OPENAI_API_KEY, model: env.COVER_AI_MODEL, quality: env.COVER_AI_QUALITY, basePath, instructions: request, people, outputPath: editedPath });
       const resultStoragePath = `thumbnails/${clip.project_id}/${clip.id}-${job.id}.jpg`;
       await storageProvider.uploadFile(editedPath, resultStoragePath, "image/jpeg");
       await updateThumbnailJobStatus(job.id, "COMPLETED", { result_storage_path: resultStoragePath, youtube_thumbnail_set: false, completed_at: new Date().toISOString() });
-      logger.info("Copertina modificata", { jobId: job.id, partenza: edit[1], modifica: edit[2] });
+      logger.info("Copertina modificata", { jobId: job.id, partenza: edit[1], modifica: request, persone: named });
       return;
     }
 

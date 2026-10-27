@@ -241,8 +241,12 @@ function splitTitle(text: string, oneLineMax: number): [string, string | undefin
   return best;
 }
 
-/** Differenza media (0-255) oltre la quale un punto della copertina conta come "cambiato" dall'AI. */
-const CHANGED_DIFF = 28;
+/**
+ * Differenza media (0-255) oltre la quale un punto della copertina conta come "cambiato" dall'AI. A 28
+ * una testa resa più magra (bordi spostati di pochi pixel) restava sotto soglia e tornava com'era
+ * (simo, 2026-10-27: "non riesco a sistemare le facce").
+ */
+const CHANGED_DIFF = 14;
 /** Oltre questa quota di copertina cambiata la modifica è di tutta l'immagine (es. "più luminosa"): si tiene quella dell'AI. */
 const GLOBAL_EDIT_SHARE = 0.6;
 
@@ -250,16 +254,43 @@ const GLOBAL_EDIT_SHARE = 0.6;
  * Ritocco di una copertina già fatta (simo, 2026-10-27: "modificarla senza farla rifare da zero, 10-15
  * centesimi a modifica too much"). A GPT Image va SOLO la copertina: niente foto delle facce, che sono
  * quelle a costare (~1 cent l'una) e che servivano solo a disegnarle la prima volta. ~2 centesimi.
+ * Le foto si mandano solo delle persone NOMINATE nella richiesta ("Marza più magro"): senza, l'AI non
+ * sa chi è Marza nella copertina e non cambiava niente. ~1 centesimo in più a persona.
  * Poi dove l'AI non doveva cambiare niente si rimettono i pixel originali (keepUnchangedPixels): GPT
  * ridisegna sempre tutta l'immagine, e le facce potrebbero spostarsi di poco.
  */
-export async function editCover(params: { apiKey: string; model: string; quality: string; basePath: string; instructions: string; outputPath: string }): Promise<void> {
+export async function editCover(params: {
+  apiKey: string;
+  model: string;
+  quality: string;
+  basePath: string;
+  instructions: string;
+  /** Persone nominate nella richiesta, coi primi piani di riferimento (vedi sopra). */
+  people?: AiCoverPerson[];
+  outputPath: string;
+}): Promise<void> {
   const { width = 1280, height = 720 } = await sharp(params.basePath).metadata();
   const vertical = height > width;
+  const refs: Array<{ path: string; line: string }> = [];
+  for (const person of params.people ?? []) {
+    const photo = person.photos.length > 1 ? await buildCollage(person.photos, path.join(path.dirname(params.outputPath), `ritocco-${person.name}.jpg`)) : person.photos[0];
+    if (!photo) continue;
+    refs.push({
+      path: photo,
+      line:
+        `- image ${refs.length + 2}: close-up reference photos of the SAME real streamer nicknamed "${person.name}": use them to know which person in the thumbnail is "${person.name}" and what his real face and build look like.` +
+        (person.styleNote ? ` In the thumbnail "${person.name}" is ${person.styleNote}.` : ""),
+    });
+  }
   const prompt = [
-    "This is a finished YouTube thumbnail. Edit it following the channel owner's request below and change NOTHING else: same people with exactly the same faces, same poses and expressions, same text and lettering, same colors, same layout and framing.",
+    "Edit a finished YouTube thumbnail following the channel owner's request below, and change NOTHING else: same people with exactly the same faces, same poses and expressions, same text and lettering, same colors, same layout and framing.",
+    "",
+    "Input images:",
+    "- image 1: the thumbnail to edit.",
+    ...refs.map((r) => r.line),
     "",
     `Request (written in Italian): ${params.instructions}`,
+    "The requested change must be clearly visible. When it is about someone's face or body, make it match their real look in the reference photos.",
   ].join("\n");
   const form = new FormData();
   form.append("model", params.model);
@@ -269,6 +300,7 @@ export async function editCover(params: { apiKey: string; model: string; quality
   form.append("output_format", "png");
   form.append("n", "1");
   form.append("image[]", new Blob([await fsp.readFile(params.basePath)], { type: "image/jpeg" }), "copertina.jpg");
+  for (const r of refs) form.append("image[]", new Blob([await fsp.readFile(r.path)], { type: "image/jpeg" }), path.basename(r.path));
   const started = Date.now();
   const res = await fetch("https://api.openai.com/v1/images/edits", {
     method: "POST",
@@ -309,8 +341,8 @@ async function keepUnchangedPixels(basePath: string, edited: Buffer, width: numb
   if (changed / (sw * sh) > GLOBAL_EDIT_SHARE) return editedImage().jpeg({ quality: 92 }).toBuffer();
   // Sfocata e poi moltiplicata la maschera si allarga; ingrandita e sfocata ancora, i bordi sfumano.
   const alpha = await sharp(mask, { raw: { width: sw, height: sh, channels: 1 } })
-    .blur(2)
-    .linear(4, 0)
+    .blur(3)
+    .linear(5, 0)
     .resize(width, height, { kernel: "cubic" })
     .blur(8)
     // sharp torna a 3 canali durante le operazioni: per la trasparenza ne serve uno.
