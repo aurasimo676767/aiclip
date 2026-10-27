@@ -12,7 +12,7 @@ const instructions = fs.readFileSync(instructionsFile!, "utf8").trim();
 if (instructions.length > 1000) throw new Error(`Istruzioni troppo lunghe per il sito: ${instructions.length} caratteri (max 1000)`);
 const { data, error } = await supabase
   .from("thumbnail_jobs")
-  .insert({ clip_id: clipId, cover_people: people!.split(",").map((p) => p.trim().toUpperCase()), cover_text: text!.toUpperCase(), cover_instructions: instructions })
+  .insert({ clip_id: clipId!, cover_people: people!.split(",").map((p) => p.trim().toUpperCase()), cover_text: text!.toUpperCase(), cover_instructions: instructions })
   .select("id")
   .single();
 if (error) throw new Error(error.message);
