@@ -11,7 +11,7 @@ import { redownloadSourceVideo } from "../lib/redownload-source.js";
 import { isRenderPlan, renderClip } from "../render/render-clip.js";
 import { planContentViews } from "../providers/ai/content-focus.js";
 import { renderLongformClip } from "../render/render-longform-clip.js";
-import { runFfmpeg } from "../lib/ffmpeg.js";
+import { FFmpegCancelledError, runFfmpeg, withFfmpegCancel } from "../lib/ffmpeg.js";
 import { updateRenderJobStatus } from "../queue/render-queue.js";
 import { withNetworkRetry } from "../lib/retry.js";
 import { isRenderJobCancelled } from "../lib/cancellation.js";
@@ -19,7 +19,24 @@ import { ensureLongformGames, gamesToKeep } from "./longform-games.js";
 import { peopleHintForVideo } from "../face-tracking/face-identity.js";
 import type { PeopleHint } from "../face-tracking/face-tracker.js";
 
+/** Ogni quanto si guarda se l'utente ha premuto "Annulla" mentre ffmpeg lavora. */
+const CANCEL_POLL_MS = 5_000;
+
 export async function processRenderJob(job: RenderJobRow): Promise<void> {
+  const controller = new AbortController();
+  const poll = setInterval(() => {
+    void isRenderJobCancelled(job.id)
+      .then((requested) => requested && controller.abort())
+      .catch(() => undefined);
+  }, CANCEL_POLL_MS);
+  try {
+    await withFfmpegCancel(controller.signal, () => renderJob(job));
+  } finally {
+    clearInterval(poll);
+  }
+}
+
+async function renderJob(job: RenderJobRow): Promise<void> {
   const jobDir = path.join(env.WORKER_TMP_DIR, `render-${job.id}`);
   await fsp.mkdir(jobDir, { recursive: true });
 
@@ -203,6 +220,11 @@ export async function processRenderJob(job: RenderJobRow): Promise<void> {
     await updateRenderJobStatus(job.id, "COMPLETED", { stage: "done", progress: 100, completed_at: new Date().toISOString() });
     logger.info("Render clip completato", { clipId: clipRow.id, jobId: job.id });
   } catch (err) {
+    // Annullato dal sito: render_job e clip sono già FAILED con "Annullato dall'utente", non si sovrascrivono.
+    if (err instanceof FFmpegCancelledError) {
+      logger.info("Render annullato dall'utente: ffmpeg fermato", { jobId: job.id });
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     logger.error("Render clip fallito", { jobId: job.id, error: message, clipMarkedCompleted });
 

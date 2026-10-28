@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "./logger.js";
 
 export class FFmpegError extends Error {
@@ -12,6 +13,37 @@ export class FFmpegError extends Error {
   }
 }
 
+/** ffmpeg fermato perché l'utente ha annullato il lavoro (vedi withFfmpegCancel): non va ritentato. */
+export class FFmpegCancelledError extends FFmpegError {
+  constructor(stderr: string) {
+    super("ffmpeg fermato: lavoro annullato dall'utente", null, stderr);
+    this.name = "FFmpegCancelledError";
+  }
+}
+
+/**
+ * Ogni ffmpeg lanciato dentro fn si spegne appena signal scatta. Prima "Annulla" si vedeva solo fra
+ * un passaggio e l'altro: la codifica finale di un montato da 4 ore andava avanti, e spenta a mano
+ * ripartiva con la CPU (simo, 2026-10-28).
+ */
+const cancelScope = new AsyncLocalStorage<AbortSignal>();
+export function withFfmpegCancel<T>(signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  return cancelScope.run(signal, fn);
+}
+
+/** Spegne child se il lavoro corrente viene annullato; restituisce chi lo controlla e chi stacca l'ascolto. */
+function watchCancel(child: ChildProcess): { cancelled: () => boolean; stop: () => void } {
+  const signal = cancelScope.getStore();
+  let cancelled = false;
+  const onAbort = () => {
+    cancelled = true;
+    child.kill("SIGKILL");
+  };
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener("abort", onAbort, { once: true });
+  return { cancelled: () => cancelled, stop: () => signal?.removeEventListener("abort", onAbort) };
+}
+
 interface RunOptions {
   timeoutMs?: number;
 }
@@ -22,6 +54,7 @@ function run(bin: "ffmpeg" | "ffprobe", args: string[], options: RunOptions = {}
 
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { windowsHide: true });
+    const cancel = watchCancel(child);
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -45,6 +78,11 @@ function run(bin: "ffmpeg" | "ffprobe", args: string[], options: RunOptions = {}
 
     child.on("close", (code) => {
       clearTimeout(timer);
+      cancel.stop();
+      if (cancel.cancelled()) {
+        reject(new FFmpegCancelledError(stderr));
+        return;
+      }
       if (timedOut) {
         reject(new FFmpegError(`${bin} ha superato il timeout di ${timeoutMs}ms ed è stato terminato`, code, stderr));
         return;
@@ -81,6 +119,7 @@ export function runFfmpegBinary(args: string[], options: RunOptions = {}): Promi
 
   return new Promise((resolve, reject) => {
     const child = spawn("ffmpeg", args, { windowsHide: true });
+    const cancel = watchCancel(child);
     const stdoutChunks: Buffer[] = [];
     let stderr = "";
     let timedOut = false;
@@ -104,6 +143,11 @@ export function runFfmpegBinary(args: string[], options: RunOptions = {}): Promi
 
     child.on("close", (code) => {
       clearTimeout(timer);
+      cancel.stop();
+      if (cancel.cancelled()) {
+        reject(new FFmpegCancelledError(stderr));
+        return;
+      }
       if (timedOut) {
         reject(new FFmpegError(`ffmpeg ha superato il timeout di ${timeoutMs}ms ed è stato terminato`, code, stderr));
         return;

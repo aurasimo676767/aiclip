@@ -1,6 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { runFfmpeg } from "../lib/ffmpeg.js";
+import { FFmpegCancelledError, runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import type { CropWindow } from "../face-tracking/face-tracker.js";
 import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
@@ -538,6 +538,7 @@ export async function renderEditedLongform(params: {
       { timeoutMs },
     );
   } catch (error) {
+    if (error instanceof FFmpegCancelledError) throw error;
     logger.warn("Codifica con la GPU fallita, riprovo con la CPU", { error: error instanceof Error ? error.message.slice(-300) : String(error) });
     await runFfmpeg([...input, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", ...audio, ...tail], { timeoutMs: timeoutMs * 2 });
   }
