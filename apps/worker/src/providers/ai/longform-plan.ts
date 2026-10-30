@@ -69,8 +69,10 @@ export interface LongformPlanResult {
 
 const TOOL_NAME = "return_vod_timeline";
 
-/** Sotto questa durata un gioco/reaction/argomento non regge da solo come video. */
+/** Sotto questa durata un gioco/reaction/argomento si unisce a quelli brevi vicini. */
 export const MIN_VIDEO_SECONDS = 8 * 60;
+/** Sotto questa durata, anche uniti, non c'è abbastanza per un video. */
+const MIN_SHORT_VIDEO_SECONDS = 3 * 60;
 /**
  * Due tratti della stessa attività separati da meno di così (chiacchiere, una pausa) sono lo
  * stesso video: "se lasciano il gioco per pochi minuti e poi lo riprendono è lo stesso video".
@@ -264,7 +266,10 @@ interface ActivityGroup {
  * - un video per attività: i suoi blocchi consecutivi (anche interrotti da meno di
  *   SAME_ACTIVITY_GAP_SECONDS di altro) sono un video solo;
  * - setup e ruota ne fanno parte perché hanno la sua attività: il video comincia dalla ruota;
- * - un'attività sotto MIN_VIDEO_SECONDS (o fatta solo di preparazione) non diventa un video;
+ * - le attività sotto MIN_VIDEO_SECONDS una dopo l'altra diventano un video solo, i giochi con i giochi
+ *   e reaction e argomenti fra loro (simo, 2026-10-30: "skippa alcune cose", nella serata sportiva
+ *   erano spariti gli highlights di Napoli-Inter e 7 minigiochi di fila). Da sola, un'attività
+ *   regge da MIN_SHORT_VIDEO_SECONDS; quella fatta solo di preparazione non diventa un video;
  * - mai divisa in parti, anche se dura ore: la accorcia il montaggio (simo, 2026-10-25: "se UN SOLO
  *   argomento dura tanto, lo deve far durare tutto unico");
  * - un torneo diventa un video per gioco (splitTournamentByGame).
@@ -293,6 +298,20 @@ export function buildVideosFromTimeline(timeline: TimelineBlock[]): PlannedVideo
   }
 
   const videos: PlannedVideo[] = [];
+  let shorts: Array<{ group: ActivityGroup; kind: PlannedVideoKind }> = [];
+  const flushShorts = () => {
+    const blocks = shorts.flatMap((s) => s.group.blocks);
+    const seconds = blocks.length > 0 ? blocks[blocks.length - 1]!.end - blocks[0]!.start : 0;
+    const activity = shorts.map((s) => s.group.activity).join(" + ");
+    if (seconds >= MIN_SHORT_VIDEO_SECONDS) {
+      const kinds = shorts.map((s) => s.kind);
+      const kind = kinds.some(isGameKind) ? "game" : kinds.includes("reaction") ? "reaction" : "talk";
+      videos.push(toVideo({ activity, blocks }, blocks, kind));
+    } else if (shorts.length > 0) {
+      logger.info("Attività troppo corta per un video", { activity, seconds: Math.round(seconds) });
+    }
+    shorts = [];
+  };
   for (const group of groups) {
     const kinds = new Set(group.blocks.map((b) => b.kind));
     const kind: PlannedVideoKind | null = kinds.has("tournament_game")
@@ -312,13 +331,21 @@ export function buildVideosFromTimeline(timeline: TimelineBlock[]): PlannedVideo
       continue;
     }
     if (duration < MIN_VIDEO_SECONDS) {
-      logger.info("Attività troppo corta per un video", { activity: group.activity, seconds: Math.round(duration) });
+      const previous = shorts[shorts.length - 1];
+      const previousEnd = previous ? previous.group.blocks[previous.group.blocks.length - 1]!.end : first.start;
+      const sameFamily = !previous || isGameKind(previous.kind) === isGameKind(kind);
+      if (!sameFamily || first.start - previousEnd > SAME_ACTIVITY_GAP_SECONDS) flushShorts();
+      shorts.push({ group, kind });
       continue;
     }
+    flushShorts();
     videos.push(...(kind === "tournament" ? splitTournamentByGame(group) : [toVideo(group, group.blocks, kind)]));
   }
+  flushShorts();
   return videos;
 }
+
+const isGameKind = (kind: PlannedVideoKind) => kind === "game" || kind === "tournament";
 
 /** Il gioco di una partita, dalla descrizione del blocco ("Fortnite: secondo round" → "Fortnite"). */
 const gameOf = (block: TimelineBlock) => block.what.split(/[(:,—-]/)[0]!.trim();
