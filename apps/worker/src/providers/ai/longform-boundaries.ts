@@ -61,6 +61,7 @@ Per un INIZIO scegli la riga da cui il video deve partire. Leggi la finestra DAL
 - il video comincia dove comincia l'attività, PREPARAZIONE INCLUSA: l'annuncio ("ora giochiamo a...", "adesso guardiamo..."), la scelta del gioco, il giro della ruota, il download, la lobby, la creazione di squadre/classi/clan, la spiegazione delle regole. Tutto questo fa parte del video.
 - per una reaction: da quando annunciano o aprono la cosa da guardare, o dalla PRIMA riga in cui si sentono le voci del video reagito (persone che si presentano, un narratore, dialoghi che non sono dello streamer) o in cui commentano quello che stanno guardando — anche se la mappa lo mette più avanti.
 - NON va dentro: chiacchiere su altro che vengono prima, la fine dell'attività precedente, i saluti di inizio live.
+- una riga può cominciare a metà della frase della riga prima (succede a ogni multiplo di 600 secondi: [600], [1200]...): se sta solo finendo il discorso di prima, il video non parte da lì ma dalla riga dopo.
 - nel dubbio fra due righe, scegli quella PRIMA: meglio qualche secondo di troppo che l'inizio tagliato.
 
 Per una FINE scegli l'ULTIMA riga in cui si parla ancora DI QUESTA attività:

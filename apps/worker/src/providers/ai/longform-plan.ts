@@ -78,6 +78,8 @@ const MIN_SHORT_VIDEO_SECONDS = 3 * 60;
  * stesso video: "se lasciano il gioco per pochi minuti e poi lo riprendono è lo stesso video".
  */
 const SAME_ACTIVITY_GAP_SECONDS = 5 * 60;
+/** Fin dove un'attività ripresa dopo un'altra cosa resta un video solo (vedi mergeResumedActivities). */
+const MAX_DIGRESSION_SECONDS = 15 * 60;
 
 const TIMELINE_TOOL_SCHEMA = {
   name: TOOL_NAME,
@@ -264,7 +266,8 @@ interface ActivityGroup {
 /**
  * Dalla timeline ai video, con le regole di simo:
  * - un video per attività: i suoi blocchi consecutivi (anche interrotti da meno di
- *   SAME_ACTIVITY_GAP_SECONDS di altro) sono un video solo;
+ *   SAME_ACTIVITY_GAP_SECONDS di altro) sono un video solo, e così se la riprendono dopo una
+ *   divagazione fino a MAX_DIGRESSION_SECONDS (mergeResumedActivities);
  * - setup e ruota ne fanno parte perché hanno la sua attività: il video comincia dalla ruota;
  * - le attività sotto MIN_VIDEO_SECONDS una dopo l'altra diventano un video solo, i giochi con i giochi
  *   e reaction e argomenti fra loro (simo, 2026-10-30: "skippa alcune cose", nella serata sportiva
@@ -312,7 +315,7 @@ export function buildVideosFromTimeline(timeline: TimelineBlock[]): PlannedVideo
     }
     shorts = [];
   };
-  for (const group of groups) {
+  for (const group of mergeResumedActivities(groups)) {
     const kinds = new Set(group.blocks.map((b) => b.kind));
     const kind: PlannedVideoKind | null = kinds.has("tournament_game")
       ? "tournament"
@@ -346,6 +349,45 @@ export function buildVideosFromTimeline(timeline: TimelineBlock[]): PlannedVideo
 }
 
 const isGameKind = (kind: PlannedVideoKind) => kind === "game" || kind === "tournament";
+
+/**
+ * Un'attività interrotta e poi RIPRESA resta un video solo, interruzione compresa (simo, 2026-11-05:
+ * clip "in mezzo alla discussione, a video già iniziato"). Nel VOD Manchester-Roma il Reborn di Joker
+ * partiva alle 2:49, dopo 4 minuti si fermavano 12 minuti a parlare della partita e poi lo
+ * riprendevano: il video cominciava a reaction già iniziata e il suo inizio finiva in un altro video.
+ * La partita era spezzata in due dai 6 minuti di chiacchiere dell'intervallo, e il secondo tempo
+ * partiva a metà discorso. La divagazione resta dentro (le reaction non si montano) e non diventa un
+ * video a parte. Non si unisce quando nell'interruzione comincia un'altra attività che va avanti anche
+ * dopo la ripresa (l'attività vera è quella: il ritorno è una discussione a parte dentro di lei), né
+ * quando nell'interruzione giocano a un altro gioco, che ha il suo video.
+ */
+function mergeResumedActivities(groups: ActivityGroup[]): ActivityGroup[] {
+  const startOf = (g: ActivityGroup) => g.blocks[0]!.start;
+  const endOf = (g: ActivityGroup) => g.blocks[g.blocks.length - 1]!.end;
+  const absorbed = new Set<ActivityGroup>();
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i]!;
+    if (absorbed.has(group)) continue;
+    const key = activityKey(group.activity);
+    for (let j = i + 1; j < groups.length; j++) {
+      const resumed = groups[j]!;
+      if (absorbed.has(resumed) || activityKey(resumed.activity) !== key) continue;
+      if (startOf(resumed) - endOf(group) > MAX_DIGRESSION_SECONDS) break;
+      const between = groups.slice(i + 1, j).filter((g) => !absorbed.has(g));
+      const otherGame = between.some((g) => g.blocks.some((b) => b.kind === "game" || b.kind === "tournament_game"));
+      const crossing = between.some((g) => {
+        const other = activityKey(g.activity);
+        const firstOfItsActivity = groups.find((h) => activityKey(h.activity) === other) === g;
+        return firstOfItsActivity && groups.slice(j + 1).some((h) => activityKey(h.activity) === other);
+      });
+      if (otherGame || crossing) break;
+      group.blocks.push(...resumed.blocks);
+      absorbed.add(resumed);
+      for (const g of between) absorbed.add(g);
+    }
+  }
+  return groups.filter((g) => !absorbed.has(g));
+}
 
 /** Il gioco di una partita, dalla descrizione del blocco ("Fortnite: secondo round" → "Fortnite"). */
 const gameOf = (block: TimelineBlock) => block.what.split(/[(:,—-]/)[0]!.trim();
