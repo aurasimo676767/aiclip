@@ -1,6 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { FFmpegCancelledError, runFfmpeg } from "../lib/ffmpeg.js";
+import { exactSeekInput, exactSeekTrim, FFmpegCancelledError, runFfmpeg, seekPreroll } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import type { CropWindow } from "../face-tracking/face-tracker.js";
 import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
@@ -487,7 +487,9 @@ export async function renderEditedLongform(params: {
   const { plan } = params;
   const banners = params.banner?.times ?? [];
   const between = (ranges: TimeRange[]) => ranges.map((r) => `between(t,${r.start.toFixed(3)},${r.end.toFixed(3)})`).join("+");
-  const keepExpr = between(plan.keep);
+  // Il sorgente si apre SEEK_PREROLL_SECONDS prima (vedi exactSeekInput): i tratti si spostano di tanto.
+  const pre = seekPreroll(params.start);
+  const keepExpr = between(plan.keep.map((r) => ({ start: r.start + pre, end: r.end + pre })));
 
   // Ogni stacco è un INGRESSO a parte che legge solo il suo secondo e mezzo di sorgente, ingrandisce
   // la webcam e viene sovrapposto al video montato dal suo istante in poi. Prima un ramo per webcam
@@ -504,7 +506,7 @@ export async function renderEditedLongform(params: {
   plan.punches.forEach((p, i) => {
     const c = p.cam;
     steps.push(
-      `[${i + 1}:v]crop=${c.width}:${c.height}:${c.x}:${c.y},scale=1920:1080:flags=lanczos,unsharp=5:5:0.9:5:5:0.0,setsar=1,setpts=PTS-STARTPTS+${p.start.toFixed(3)}/TB[p${i}]`,
+      `[${i + 1}:v]${exactSeekTrim(params.start + p.sourceStart, p.end - p.start, "v")},crop=${c.width}:${c.height}:${c.x}:${c.y},scale=1920:1080:flags=lanczos,unsharp=5:5:0.9:5:5:0.0,setsar=1,setpts=PTS+${p.start.toFixed(3)}/TB[p${i}]`,
       `[l${i}][p${i}]overlay=0:0:eof_action=pass[${i === last - 1 ? mainV : `l${i + 1}`}]`,
     );
   });
@@ -533,13 +535,14 @@ export async function renderEditedLongform(params: {
       const { tail, head } = transitionFilters();
       const c = opening.cam;
       const zoom = c ? `crop=${c.width}:${c.height}:${c.x}:${c.y},scale=1920:1080:flags=lanczos,unsharp=5:5:0.9:5:5:0.0` : "scale=1920:1080:flags=lanczos";
-      introInputs.push("-threads", "1", "-ss", (params.start + opening.start).toFixed(3), "-t", seconds.toFixed(3), "-i", params.sourceVideoPath);
+      const openAt = params.start + opening.start;
+      introInputs.push("-threads", "1", ...exactSeekInput(params.sourceVideoPath, openAt, seconds));
       const body = (seconds - TAIL_SECONDS).toFixed(3);
       steps.push(
-        `[${nextInput}:v]setpts=PTS-STARTPTS,${zoom},setsar=1,split=2[ob][ot]`,
+        `[${nextInput}:v]${exactSeekTrim(openAt, seconds, "v")},${zoom},setsar=1,split=2[ob][ot]`,
         `[ob]trim=0:${body},setpts=PTS-STARTPTS[obv]`,
         `[ot]trim=${body}:${seconds.toFixed(3)},setpts=PTS-STARTPTS,${tail},setsar=1[otv]`,
-        `[${nextInput}:a]asetpts=PTS-STARTPTS,aresample=44100[oa]`,
+        `[${nextInput}:a]${exactSeekTrim(openAt, seconds, "a")},aresample=44100[oa]`,
         `[vmain]split=2[mh][mb]`,
         `[mh]trim=0:${HEAD_SECONDS},setpts=PTS-STARTPTS,${head},setsar=1[mhv]`,
         `[mb]trim=${HEAD_SECONDS},setpts=PTS-STARTPTS[mbv]`,
@@ -601,15 +604,10 @@ export async function renderEditedLongform(params: {
 
   // Un thread a testa per i pezzetti (2-8 s): con il decoder a thread automatici (20 sul PC di simo)
   // 49 ingressi dello stesso VOD hanno finito la memoria e ucciso il worker (Affari Tuoi, 2026-10-25).
-  const punchInputs = plan.punches.flatMap((p) => ["-threads", "1", "-ss", (params.start + p.sourceStart).toFixed(3), "-t", (p.end - p.start).toFixed(3), "-i", params.sourceVideoPath]);
+  const punchInputs = plan.punches.flatMap((p) => ["-threads", "1", ...exactSeekInput(params.sourceVideoPath, params.start + p.sourceStart, p.end - p.start)]);
   const input = [
     "-y",
-    "-ss",
-    String(params.start),
-    "-to",
-    String(params.end),
-    "-i",
-    params.sourceVideoPath,
+    ...exactSeekInput(params.sourceVideoPath, params.start, params.end - params.start),
     ...punchInputs,
     ...introInputs,
     ...bannerInputs,
@@ -650,10 +648,11 @@ async function introSteps(
   const { plan } = params;
   const seconds = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0);
   plan.intro.forEach((r, i) => {
-    inputs.push("-threads", "1", "-ss", (params.start + r.start).toFixed(3), "-t", (r.end - r.start).toFixed(3), "-i", params.sourceVideoPath);
+    const at = params.start + r.start;
+    inputs.push("-threads", "1", ...exactSeekInput(params.sourceVideoPath, at, r.end - r.start));
     steps.push(
-      `[${base + i}:v]scale=1920:1080:flags=lanczos,setsar=1,setpts=PTS-STARTPTS[iv${i}]`,
-      `[${base + i}:a]aresample=44100,asetpts=PTS-STARTPTS[ia${i}]`,
+      `[${base + i}:v]${exactSeekTrim(at, r.end - r.start, "v")},scale=1920:1080:flags=lanczos,setsar=1[iv${i}]`,
+      `[${base + i}:a]${exactSeekTrim(at, r.end - r.start, "a")},aresample=44100[ia${i}]`,
     );
   });
   const n = plan.intro.length;

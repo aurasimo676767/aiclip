@@ -100,6 +100,39 @@ function run(bin: "ffmpeg" | "ffprobe", args: string[], options: RunOptions = {}
   });
 }
 
+/**
+ * Salto PRECISO in un sorgente (2026-11-06, simo: zoom "completamente desyncati"). Nei .ts dei VOD
+ * Twitch, `-ss X -i file` fa ripartire il video solo dal fotogramma chiave dopo X: misurato sul VOD
+ * Manchester-Roma, il primo fotogramma era il contenuto di X+1,13 s (con il tempo giusto, 1,13), mentre
+ * l'audio partiva da X. Chi rimetteva i tempi a zero (setpts=PTS-STARTPTS) o contava i fotogrammi dal
+ * primo spostava il video di 1,1 s: zoom fuori sincrono e il modello chi-parla che confrontava labbra
+ * e voce di momenti diversi. Qui si salta SEEK_PREROLL_SECONDS prima e si taglia sui tempi veri.
+ */
+export const SEEK_PREROLL_SECONDS = 3;
+
+/** Ingresso da `at` (per `duration` secondi, se data) con il margine prima: da usare con exactSeekTrim. */
+export function exactSeekInput(file: string, at: number, duration?: number): string[] {
+  const from = Math.max(0, at - SEEK_PREROLL_SECONDS);
+  return ["-ss", from.toFixed(3), ...(duration !== undefined ? ["-t", (duration + (at - from)).toFixed(3)] : []), "-i", file];
+}
+
+/** Il margine effettivo prima di `at` (minore vicino all'inizio del file). */
+export function seekPreroll(at: number): number {
+  return at - Math.max(0, at - SEEK_PREROLL_SECONDS);
+}
+
+/** Filtri che tolgono il margine: il video (o l'audio) comincia esattamente da `at`, coi tempi da zero. */
+export function exactSeekTrim(at: number, duration: number | undefined, kind: "v" | "a"): string {
+  const pre = seekPreroll(at).toFixed(3);
+  const len = duration !== undefined ? `:duration=${duration.toFixed(3)}` : "";
+  return kind === "v" ? `trim=start=${pre}${len},setpts=PTS-STARTPTS` : `atrim=start=${pre}${len},asetpts=PTS-STARTPTS`;
+}
+
+/** Un solo fotogramma esattamente a `at`: il salto in uscita (dopo -i) usa i tempi veri dei fotogrammi. */
+export function exactFrameArgs(file: string, at: number): string[] {
+  return [...exactSeekInput(file, at), "-ss", seekPreroll(at).toFixed(3)];
+}
+
 export function runFfmpeg(args: string[], options?: RunOptions): Promise<{ stdout: string; stderr: string }> {
   logger.info("ffmpeg", { args: args.join(" ") });
   return run("ffmpeg", args, options);

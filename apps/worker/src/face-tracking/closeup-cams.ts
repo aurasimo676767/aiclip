@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { runFfmpegBinary } from "../lib/ffmpeg.js";
+import { exactFrameArgs, runFfmpegBinary } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import { scoreActiveSpeakers } from "./active-speaker.js";
 import type { CropWindow } from "./face-tracker.js";
@@ -67,7 +67,7 @@ const STATIC_FACE_DIFF = 2;
 const PATCH_SIZE = 24;
 
 async function frameBGR(videoPath: string, at: number, width: number, height: number): Promise<Buffer> {
-  return runFfmpegBinary(["-ss", String(Math.max(0, at)), "-i", videoPath, "-frames:v", "1", "-s", `${width}x${height}`, "-pix_fmt", "bgr24", "-f", "rawvideo", "-"]);
+  return runFfmpegBinary([...exactFrameArgs(videoPath, Math.max(0, at)), "-frames:v", "1", "-s", `${width}x${height}`, "-pix_fmt", "bgr24", "-f", "rawvideo", "-"]);
 }
 
 /** Volti in una zona del fotogramma (già in memoria a piena risoluzione), in coordinate del sorgente. */

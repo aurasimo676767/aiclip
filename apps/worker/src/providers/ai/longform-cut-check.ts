@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { ModelTokenUsage, TranscriptSegment } from "@clipforge/shared";
 import { classifyModelTier, computeModelCostUsd } from "@clipforge/shared";
-import { runFfmpegBinary } from "../../lib/ffmpeg.js";
+import { exactFrameArgs, runFfmpegBinary } from "../../lib/ffmpeg.js";
 import { logger } from "../../lib/logger.js";
 import { PhraseLocator, type Word } from "../../render/intro-moments.js";
 import { cachedSystemPrompt, createMessage, getAnthropicClient, readCacheUsage, toolChoiceFor } from "./anthropic-client.js";
@@ -107,7 +107,7 @@ type Answer = z.infer<typeof answerSchema>;
 async function frameJpeg(videoPath: string, t: number): Promise<string | null> {
   try {
     const buffer = await runFfmpegBinary(
-      ["-ss", t.toFixed(2), "-i", videoPath, "-frames:v", "1", "-vf", `scale=${FRAME_WIDTH}:-2`, "-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
+      [...exactFrameArgs(videoPath, t), "-frames:v", "1", "-vf", `scale=${FRAME_WIDTH}:-2`, "-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
       { timeoutMs: 30 * 1000 },
     );
     return buffer.length > 0 ? buffer.toString("base64") : null;

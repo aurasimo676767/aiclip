@@ -1,6 +1,6 @@
 import path from "node:path";
 import * as ort from "onnxruntime-node";
-import { runFfmpegBinary } from "../lib/ffmpeg.js";
+import { exactSeekInput, exactSeekTrim, runFfmpegBinary } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import type { FaceBox } from "./onnx-face-detector.js";
 
@@ -108,20 +108,23 @@ async function scoreWindow(
     const c = faceCrop(f, sourceWidth, sourceHeight);
     return `crop=${c.side}:${c.side}:${c.x}:${c.y},scale=${FACE_SIZE}:${FACE_SIZE}:flags=area,format=gray`;
   });
+  // Salto preciso: senza, nei .ts di Twitch il video partiva 1,1 s dopo l'audio (vedi exactSeekInput).
+  const at = Math.max(0, startSeconds);
+  const trimV = exactSeekTrim(at, durationSeconds, "v");
   const graph =
     n === 1
-      ? `[0:v]fps=${VIDEO_FPS},${crops[0]}[out]`
-      : `[0:v]fps=${VIDEO_FPS},split=${n}${faces.map((_, k) => `[s${k}]`).join("")};` +
+      ? `[0:v]${trimV},fps=${VIDEO_FPS},${crops[0]}[out]`
+      : `[0:v]${trimV},fps=${VIDEO_FPS},split=${n}${faces.map((_, k) => `[s${k}]`).join("")};` +
         crops.map((c, k) => `[s${k}]${c}[m${k}]`).join(";") +
         `;${faces.map((_, k) => `[m${k}]`).join("")}hstack=inputs=${n}[out]`;
   const timeoutMs = Math.max(60_000, durationSeconds * 2000);
   const [raw, pcm] = await Promise.all([
     runFfmpegBinary(
-      ["-ss", String(Math.max(0, startSeconds)), "-t", String(durationSeconds), "-i", videoPath, "-filter_complex", graph, "-map", "[out]", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+      [...exactSeekInput(videoPath, at, durationSeconds), "-filter_complex", graph, "-map", "[out]", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
       { timeoutMs },
     ),
     runFfmpegBinary(
-      ["-ss", String(Math.max(0, startSeconds)), "-t", String(durationSeconds), "-i", videoPath, "-vn", "-ac", "1", "-ar", String(AUDIO_RATE), "-f", "s16le", "-"],
+      [...exactSeekInput(videoPath, at, durationSeconds), "-vn", "-af", exactSeekTrim(at, durationSeconds, "a"), "-ac", "1", "-ar", String(AUDIO_RATE), "-f", "s16le", "-"],
       { timeoutMs },
     ),
   ]);

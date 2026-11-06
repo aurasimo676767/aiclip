@@ -2,7 +2,7 @@ import type { ModelTokenUsage } from "@clipforge/shared";
 import { computeModelCostUsd, classifyModelTier } from "@clipforge/shared";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
-import { runFfmpegBinary } from "../../lib/ffmpeg.js";
+import { exactFrameArgs, runFfmpegBinary } from "../../lib/ffmpeg.js";
 import { getAnthropicClient, cachedSystemPrompt, readCacheUsage, toolChoiceFor, createMessageCached } from "./anthropic-client.js";
 import { logger } from "../../lib/logger.js";
 
@@ -131,7 +131,7 @@ const REFINE_TOOL_SCHEMA: Anthropic.Tool = {
 async function frameJpeg(videoPath: string, t: number): Promise<string | null> {
   try {
     const buffer = await runFfmpegBinary(
-      ["-ss", t.toFixed(2), "-i", videoPath, "-frames:v", "1", "-vf", `scale=${FRAME_WIDTH}:-2`, "-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
+      [...exactFrameArgs(videoPath, t), "-frames:v", "1", "-vf", `scale=${FRAME_WIDTH}:-2`, "-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
       { timeoutMs: 30 * 1000 },
     );
     return buffer.length > 0 ? buffer.toString("base64") : null;
