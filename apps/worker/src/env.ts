@@ -29,6 +29,10 @@ const envSchema = z.object({
   // transcript attorno a ogni confine, quindi pochi token. Opus perché al test sullo stesso VOD è
   // stato più costante di Sonnet (Sonnet cambiava idea fra un giro e l'altro).
   ANTHROPIC_MODEL_LONGFORM_BOUNDARIES: z.string().default("claude-opus-5-5"),
+  // Controllo dei tagli dei video lunghi guardando lo schermo e leggendo il parlato attorno a ogni
+  // inizio e fine (providers/ai/longform-cut-check.ts): alla nascita dei video e prima di ogni render
+  // di una clip non ancora controllata. ~30-40 fotogrammi piccoli a confine. "off" = mai.
+  ANTHROPIC_MODEL_LONGFORM_CUT_CHECK: z.string().default("claude-sonnet-5"),
   // Montaggio "da YouTuber" dei video long-form con "Montato" acceso (providers/ai/longform-highlights.ts):
   // una chiamata con tutta la trascrizione del pezzo, ~10 centesimi per un'ora con Sonnet 5.
   ANTHROPIC_MODEL_LONGFORM_EDIT: z.string().default("claude-sonnet-5"),
@@ -127,6 +131,7 @@ if (data.AI_PROVIDER === "openai") {
   data.ANTHROPIC_MODEL_STRONG = strong(data.ANTHROPIC_MODEL_STRONG);
   data.ANTHROPIC_MODEL_LONGFORM = strong(data.ANTHROPIC_MODEL_LONGFORM);
   data.ANTHROPIC_MODEL_LONGFORM_BOUNDARIES = strong(data.ANTHROPIC_MODEL_LONGFORM_BOUNDARIES);
+  data.ANTHROPIC_MODEL_LONGFORM_CUT_CHECK = strong(data.ANTHROPIC_MODEL_LONGFORM_CUT_CHECK);
   data.ANTHROPIC_MODEL_LONGFORM_EDIT = strong(data.ANTHROPIC_MODEL_LONGFORM_EDIT);
   // Quale gioco c'è a schermo: col modello economico (2026-10-26, provato sulla stessa clip di Switch
   // Sports: mappa identica a quella del forte, 0,004 $ invece di 0,08). Le fasi delle partite invece

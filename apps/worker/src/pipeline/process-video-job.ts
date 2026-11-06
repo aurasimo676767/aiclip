@@ -35,6 +35,7 @@ import { rankAndBuildEdl } from "../providers/ai/ranking.js";
 import { detectLongformCandidates } from "../providers/ai/longform-candidates.js";
 import { rankLongformClips } from "../providers/ai/longform-ranking.js";
 import { planLongformVideos, fmt } from "../providers/ai/longform-plan.js";
+import { checkCuts, cutCheckMark } from "../providers/ai/longform-cut-check.js";
 import { refineVideoBoundaries } from "../providers/ai/longform-boundaries.js";
 import { plannedVideosAsClips } from "../providers/ai/longform-metadata.js";
 import { fetchTwitchChapters } from "../lib/twitch-chapters.js";
@@ -240,7 +241,7 @@ export async function processVideoJob(video: VideoRow): Promise<void> {
     let longformTimeline: VideoUsageStats["longformTimeline"];
     let discardedShorts: DiscardedShort[] = [];
     if (isLongform) {
-      const result = await buildLongformClipsToInsert(video, transcript.segments, transcript.durationSeconds, videoTitle);
+      const result = await buildLongformClipsToInsert(video, transcript.segments, transcript.durationSeconds, videoTitle, localVideoPath);
       clipsToInsert = result.clipsToInsert;
       usageByModel = result.usageByModel;
       longformTimeline = result.timeline;
@@ -587,6 +588,7 @@ async function buildLongformClipsToInsert(
   segments: TranscriptSegment[],
   videoDurationSeconds: number,
   videoTitle: string,
+  localVideoPath: string | null,
 ): Promise<LongformClipsResult> {
   const usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>> = {};
 
@@ -594,10 +596,12 @@ async function buildLongformClipsToInsert(
   // della ruota) → rifinitura dei tagli di inizio/fine → titoli. Se qualcosa si rompe si torna al
   // vecchio percorso candidati + ranking, così il VOD produce comunque dei video.
   try {
-    const planned: { timeline?: VideoUsageStats["longformTimeline"] } = {};
-    const rankedClips = await planLongformClips(video, segments, videoDurationSeconds, videoTitle, usageByModel, planned);
+    const planned: { timeline?: VideoUsageStats["longformTimeline"]; cutChecked?: boolean } = {};
+    const rankedClips = await planLongformClips(video, segments, videoDurationSeconds, videoTitle, usageByModel, planned, localVideoPath);
     if (rankedClips.length > 0) {
-      return { clipsToInsert: rankedClips.map((clip) => buildLongformInsertRow(video, clip)), usageByModel, timeline: planned.timeline };
+      // Tagli già controllati a schermo: il render non li ricontrolla (vedi longform-cut-check.ts).
+      const rows = rankedClips.map((clip) => ({ ...buildLongformInsertRow(video, clip), ...(planned.cutChecked ? { render_plan: cutCheckMark(clip.start, clip.end) } : {}) }));
+      return { clipsToInsert: rows, usageByModel, timeline: planned.timeline };
     }
     logger.warn("La mappa del VOD non ha prodotto video, si usa il vecchio percorso", { videoId: video.id });
   } catch (error) {
@@ -636,7 +640,8 @@ async function planLongformClips(
   videoDurationSeconds: number,
   videoTitle: string,
   usageByModel: Partial<Record<ModelUsageKey, ModelTokenUsage>>,
-  planned: { timeline?: VideoUsageStats["longformTimeline"] },
+  planned: { timeline?: VideoUsageStats["longformTimeline"]; cutChecked?: boolean },
+  localVideoPath: string | null,
 ): Promise<RankedLongformClip[]> {
   const chapters = await fetchTwitchChapters(video.source_url);
   const plan = await planLongformVideos(segments, {
@@ -671,6 +676,25 @@ async function planLongformClips(
       videoId: video.id,
       error: error instanceof Error ? error.message : String(error),
     });
+  }
+
+  // Ultimo controllo guardando lo schermo: risultati finali, attività già iniziata, frasi spezzate.
+  if (localVideoPath && env.ANTHROPIC_MODEL_LONGFORM_CUT_CHECK !== "off") {
+    try {
+      const checked = await checkCuts(videos, {
+        apiKey: env.ANTHROPIC_API_KEY,
+        model: env.ANTHROPIC_MODEL_LONGFORM_CUT_CHECK,
+        openaiApiKey: env.OPENAI_API_KEY,
+        sourceVideoPath: localVideoPath,
+        segments,
+        videoDurationSeconds,
+      });
+      addUsage(usageByModel, env.ANTHROPIC_MODEL_LONGFORM_CUT_CHECK, checked.usage);
+      videos = checked.videos;
+      planned.cutChecked = true;
+    } catch (error) {
+      logger.warn("Controllo tagli a schermo fallito, restano i tagli rifiniti", { videoId: video.id, error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   // Niente AI per titoli e descrizioni: i titoli li scrive simo, la descrizione è quella fissa.

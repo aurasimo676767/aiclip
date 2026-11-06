@@ -43,7 +43,7 @@ export interface LocatedPhrase {
   quote: string;
 }
 
-interface Word {
+export interface Word {
   word: string;
   start: number;
   end: number;
@@ -147,6 +147,11 @@ export class PhraseLocator {
     const words = raw.map((w) => ({ word: w.word, start: w.start + from, end: w.end + from }));
     this.windows.push({ from, to, words });
     return words;
+  }
+
+  /** Le parole dette fra due istanti (secondi dal pezzo), coi loro tempi: per tagliare fra una frase e l'altra. */
+  async words(from: number, to: number): Promise<Word[]> {
+    return this.wordsBetween(Math.max(0, from), Math.min(this.params.clipDuration, to));
   }
 
   /** La frase nel suo intorno, o null se le parole non si trovano. */

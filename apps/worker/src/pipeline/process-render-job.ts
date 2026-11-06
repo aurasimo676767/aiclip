@@ -17,6 +17,7 @@ import { withNetworkRetry } from "../lib/retry.js";
 import { isRenderJobCancelled } from "../lib/cancellation.js";
 import { ensureLongformGames, gamesToKeep } from "./longform-games.js";
 import { peopleHintForVideo } from "../face-tracking/face-identity.js";
+import { checkCuts, cutCheckMark, isCutChecked } from "../providers/ai/longform-cut-check.js";
 import type { PeopleHint } from "../face-tracking/face-tracker.js";
 
 /** Ogni quanto si guarda se l'utente ha premuto "Annulla" mentre ffmpeg lavora. */
@@ -101,6 +102,10 @@ async function renderJob(job: RenderJobRow): Promise<void> {
       // Long-form: solo taglio, oppure montaggio "da YouTuber" se acceso sulla clip (vedi
       // render-longform-clip.ts e longform-highlights.ts): lì serve la trascrizione. Niente sottotitoli.
       // Colonna aggiunta dalla migrazione 0024: prima della migrazione non c'è e vale "spento".
+      // Tagli controllati a schermo prima del render, se non lo sono già (vedi longform-cut-check.ts).
+      const range = await ensureCutsChecked(clipRow, localSourcePath);
+      clipRow.start_time = range.start;
+      clipRow.end_time = range.end;
       const edited = (clipRow as { longform_edit?: boolean }).longform_edit === true;
       const segments = edited ? ((await fetchTranscript(clipRow.video_id)).segments as TranscriptSegment[]) : [];
       // Giochi riconosciuti dallo schermo (colonne della migrazione 0029): se mancano si riconoscono ora.
@@ -247,6 +252,46 @@ async function renderJob(job: RenderJobRow): Promise<void> {
     await fsp.rm(jobDir, { recursive: true, force: true }).catch(() => undefined);
     // Il sorgente NON viene più ripulito automaticamente da qui: vedi cleanup-source.ts — è
     // l'utente a decidere quando liberare lo spazio, dal tasto "Elimina sorgente" in dashboard.
+  }
+}
+
+/**
+ * Controlla inizio e fine di un video lungo guardando lo schermo, se non è già stato fatto per questi
+ * tagli (clip vecchie, aggiunte a mano o spostate): un video che parte a partita iniziata o finisce
+ * prima del risultato si sistema qui, prima del render, invece di arrivare così a simo. Non entra mai
+ * nei tratti delle altre clip dello stesso VOD. Se qualcosa va storto restano i tagli che c'erano.
+ */
+async function ensureCutsChecked(clip: ClipRow, sourcePath: string): Promise<{ start: number; end: number }> {
+  const current = { start: clip.start_time, end: clip.end_time };
+  if (env.ANTHROPIC_MODEL_LONGFORM_CUT_CHECK === "off" || isCutChecked(clip.render_plan, current.start, current.end)) return current;
+  try {
+    const transcript = await fetchTranscript(clip.video_id);
+    const segments = transcript.segments as TranscriptSegment[];
+    const { data: others } = await supabase.from("clips").select("id,start_time,end_time").eq("video_id", clip.video_id).eq("format", "longform").neq("id", clip.id);
+    const duration = Math.max(clip.end_time, ...segments.map((s) => s.end));
+    const lower = Math.max(0, ...(others ?? []).filter((o) => o.end_time <= current.start + 1).map((o) => o.end_time));
+    const upper = Math.min(duration, ...(others ?? []).filter((o) => o.start_time >= current.end - 1).map((o) => o.start_time));
+    const kind = /reaction|reagisc/i.test(clip.title) ? "reaction" : /^talk:/i.test(clip.title) ? "talk" : "game";
+    const checked = await checkCuts([{ ...current, activity: clip.title, kind }], {
+      apiKey: env.ANTHROPIC_API_KEY,
+      model: env.ANTHROPIC_MODEL_LONGFORM_CUT_CHECK,
+      openaiApiKey: env.OPENAI_API_KEY,
+      sourceVideoPath: sourcePath,
+      segments,
+      videoDurationSeconds: duration,
+      limits: [{ lower, upper }],
+    });
+    const next = { start: checked.videos[0]!.start, end: checked.videos[0]!.end };
+    const { error } = await supabase
+      .from("clips")
+      .update({ start_time: next.start, end_time: next.end, duration: next.end - next.start, render_plan: cutCheckMark(next.start, next.end) })
+      .eq("id", clip.id);
+    if (error) throw new Error(error.message);
+    if (checked.changes.length > 0) logger.info("Tagli della clip corretti prima del render", { clipId: clip.id, modifiche: checked.changes });
+    return next;
+  } catch (error) {
+    logger.warn("Controllo tagli prima del render fallito: restano quelli di prima", { clipId: clip.id, error: error instanceof Error ? error.message : String(error) });
+    return current;
   }
 }
 
