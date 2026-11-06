@@ -10,7 +10,8 @@ import { PhraseLocator, type LocatedPhrase } from "./intro-moments.js";
 import { allowedRanges, type GameSegment } from "../providers/ai/game-timeline.js";
 import type { HighlightsPlan } from "../providers/ai/longform-highlights.js";
 import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
-import { findSpeakingWebcam, type StreamWebcam } from "../face-tracking/closeup-cams.js";
+import { findSpeakingWebcam, sameWebcam, scoreWebcamSpeakers, type StreamWebcam, type WebcamSpeakers } from "../face-tracking/closeup-cams.js";
+import { voiceGroups } from "../face-tracking/voice-check.js";
 import { describePhases, detectMatchPhases, gameShare } from "../providers/ai/match-phases.js";
 import { enforceMatchStructure } from "./match-structure.js";
 import { BANNER_BOTTOM_MARGIN } from "./subscribe-banner.js";
@@ -135,7 +136,8 @@ const TOPIC_EXTEND_SECONDS = 90;
 const ZOOM_MIN_SECONDS = 1.3;
 const ZOOM_MAX_SECONDS = 4.5;
 const ZOOM_SPACING_SECONDS = 8;
-const ZOOM_PRIORITY: Record<string, number> = { sclero: 0, risata: 1, battuta: 2, affermazione: 3 };
+// Niente zoom sulle sole risate (simo, 2026-11-06): "risata" resta solo per leggere i piani vecchi.
+const ZOOM_PRIORITY: Record<string, number> = { sclero: 0, battuta: 1, affermazione: 2 };
 /** Dopo l'ultima parola: una risata o uno sclero hanno bisogno di qualche decimo in più per chiudersi. */
 const ZOOM_TAIL_SECONDS: Record<string, number> = { sclero: 0.6, risata: 0.9, battuta: 0.5, affermazione: 0.5 };
 
@@ -358,19 +360,7 @@ export async function planLongformEdit(params: {
     logger.warn(what, { error: error instanceof Error ? error.message : String(error) });
     return null;
   };
-  const withCam: Array<TimeRange & { cam: CropWindow }> = [];
-  for (const p of chosen) {
-    const found = await findSpeakingWebcam({
-      videoPath: params.sourceVideoPath,
-      width: params.sourceWidth,
-      height: params.sourceHeight,
-      from: params.start + Math.max(0, p.start - CAM_LOOK_BEFORE_SECONDS),
-      to: params.start + p.end + 0.5,
-      focusFrom: params.start + p.start,
-      focusTo: params.start + p.end,
-    }).catch(fail("Ricerca di chi parla fallita per un primo piano"));
-    if (found) withCam.push({ ...p, cam: closeupWindow(found, params.sourceWidth, params.sourceHeight) });
-  }
+  const withCam = (await assignZoomCams(chosen, params, fail)).map((z) => ({ ...z, cam: closeupWindow(z.webcam, params.sourceWidth, params.sourceHeight) }));
 
   const toOutput = (t: number) => {
     let out = 0;
@@ -812,6 +802,99 @@ async function applyTopicChanges(
   }
   return { ranges: out.filter((r) => r.end - r.start >= 1), removedSeconds };
 }
+
+/**
+ * A chi va ogni zoom: a chi ha DETTO la frase, non a chi muove la bocca (simo, 2026-11-06, Mimic
+ * Party: "quelli su Pesh un po' meno... solo la risata così no, negli ultimi è quasi in silenzio"). Il
+ * modello chi-parla guarda se una bocca si muove a tempo con l'audio, e chi ride mentre parla un altro
+ * lo inganna. Qui le frasi si raggruppano per VOCE (voice-check.ts) e ogni voce va alla webcam che il
+ * modello indica di più sulle sue frasi; lo zoom va su quella webcam solo se in quel momento la sua
+ * faccia si vede e la sua bocca non è ferma. Senza voce (nessuno parla davvero) o con una voce che non
+ * è di nessuna webcam (chi è in call senza camera, il gioco), niente zoom. Una voce sentita una volta
+ * sola vale solo se il modello da solo era sicuro.
+ */
+async function assignZoomCams(
+  zooms: TimeRange[],
+  params: { sourceVideoPath: string; sourceWidth: number; sourceHeight: number; start: number },
+  fail: (what: string) => (error: unknown) => null,
+): Promise<Array<TimeRange & { webcam: StreamWebcam }>> {
+  const scored: Array<WebcamSpeakers | null> = [];
+  for (const p of zooms) {
+    scored.push(
+      await scoreWebcamSpeakers({
+        videoPath: params.sourceVideoPath,
+        width: params.sourceWidth,
+        height: params.sourceHeight,
+        from: params.start + Math.max(0, p.start - CAM_LOOK_BEFORE_SECONDS),
+        to: params.start + p.end + 0.5,
+        focusFrom: params.start + p.start,
+        focusTo: params.start + p.end,
+      }).catch(fail("Ricerca di chi parla fallita per uno zoom")),
+    );
+  }
+  // Le webcam di tutti i momenti in un elenco solo (i riquadri cambiano di poco da un momento all'altro).
+  const all: CropWindow[] = [];
+  const globalIndex = (rect: CropWindow) => {
+    const k = all.findIndex((r) => sameWebcam(r, rect));
+    if (k >= 0) return k;
+    all.push(rect);
+    return all.length - 1;
+  };
+  const local = scored.map((s) => (s ? s.cams.map((c) => globalIndex(c.rect)) : []));
+  const voices = await voiceGroups(
+    params.sourceVideoPath,
+    zooms.map((p) => ({ start: params.start + p.start, end: params.start + p.end })),
+  ).catch((error) => {
+    fail("Raggruppamento per voce fallito: zoom solo col modello chi-parla")(error);
+    return null;
+  });
+
+  // Ogni voce alla webcam col punteggio medio più alto sulle sue frasi.
+  const voiceOwner = new Map<number, number | null>();
+  for (const v of new Set((voices ?? []).filter((x) => x >= 0))) {
+    const members = zooms.map((_, i) => i).filter((i) => voices![i] === v && scored[i]);
+    const sums = new Map<number, { sum: number; n: number }>();
+    for (const i of members) {
+      scored[i]!.means.forEach((m, k) => {
+        if (!Number.isFinite(m)) return;
+        const g = local[i]![k]!;
+        const acc = sums.get(g) ?? { sum: 0, n: 0 };
+        sums.set(g, { sum: acc.sum + m, n: acc.n + 1 });
+      });
+    }
+    const ranked = [...sums.entries()].map(([g, a]) => ({ g, avg: a.sum / a.n })).sort((a, b) => b.avg - a.avg);
+    const top = ranked[0];
+    const single = members.length === 1 ? scored[members[0]!] : null;
+    const owner = top && top.avg >= VOICE_MIN_MEAN && (!single || (single.ok && local[members[0]!]![single.best] === top.g)) ? top.g : null;
+    voiceOwner.set(v, owner);
+  }
+
+  const out: Array<TimeRange & { webcam: StreamWebcam }> = [];
+  zooms.forEach((p, i) => {
+    const s = scored[i];
+    if (!s) return;
+    let k: number;
+    if (!voices) {
+      if (!s.ok) return;
+      k = s.best;
+    } else {
+      const owner = voices[i]! >= 0 ? voiceOwner.get(voices[i]!) : null;
+      if (owner === null || owner === undefined) return;
+      k = local[i]!.indexOf(owner);
+      // La webcam di quella voce deve esserci, con la faccia visibile e la bocca che si muove.
+      if (k < 0 || !s.visible[k] || !(s.means[k]! > 0)) return;
+    }
+    out.push({ ...p, webcam: s.cams[k]! });
+  });
+  logger.info("Zoom assegnati per voce", {
+    zoom: zooms.map((p, i) => `${p.start.toFixed(1)}:voce${voices?.[i] ?? "?"}→${out.some((o) => o.start === p.start) ? `webcam${voices && voices[i]! >= 0 ? voiceOwner.get(voices[i]!) : "?"}` : "niente"}`).join(" "),
+    webcam: all.map((r, g) => `${g}=${r.x},${r.y}`).join(" "),
+  });
+  return out;
+}
+
+/** Punteggio medio minimo del modello chi-parla sulle frasi di una voce perché sia di quella webcam. */
+const VOICE_MIN_MEAN = 0.5;
 
 /** Dalla frase d'apertura all'inizio del gioco si saltano al massimo tanti secondi di video tenuto. */
 const MAX_SKIPPED_TO_GAME_SECONDS = 180;

@@ -191,6 +191,29 @@ function clusterVoices(embs: Array<Float32Array | null>): number[] {
 }
 
 /**
+ * Raggruppa per VOCE dei tratti sparsi di un video (secondi del sorgente): stessa etichetta = stessa
+ * voce, -1 = nessuna voce abbastanza forte (nessuno parla davvero). Per gli zoom dei video lunghi.
+ */
+export async function voiceGroups(videoPath: string, ranges: Array<{ start: number; end: number }>): Promise<number[]> {
+  const embs: Array<Float32Array | null> = [];
+  for (const r of ranges) {
+    const from = Math.max(0, r.start - PAD_SECONDS);
+    const pcm = await runFfmpegBinary(["-ss", from.toFixed(3), "-t", (r.end + PAD_SECONDS - from).toFixed(3), "-i", videoPath, "-vn", "-ac", "1", "-ar", String(RATE), "-f", "s16le", "-"]).catch(() => null);
+    if (!pcm || pcm.length < RATE) {
+      embs.push(null);
+      continue;
+    }
+    const samples = new Int16Array(pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + Math.floor(pcm.length / 2) * 2));
+    let energy = 0;
+    for (let i = 0; i < samples.length; i++) energy += samples[i]! * samples[i]!;
+    const rmsDb = 20 * Math.log10(Math.sqrt(energy / Math.max(1, samples.length)) / 32768 + 1e-9);
+    const feats = rmsDb > -45 ? fbank(samples, 0, samples.length) : null;
+    embs.push(feats ? await embed(feats) : null);
+  }
+  return clusterVoices(embs);
+}
+
+/**
  * Ritorna le scelte di `chosen` dove un passaggio a una webcam diversa dal proprietario resta solo
  * se la voce di quel tratto è attribuita a quella webcam; gli altri tornano al proprietario.
  * `means[i][k]`: punteggio medio del modello chi-parla della webcam k nel tratto i.

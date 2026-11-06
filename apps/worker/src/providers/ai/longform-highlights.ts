@@ -75,10 +75,9 @@ Proponi 4 momenti candidati (ne verranno usati 2) per l'intro: le REAZIONI più 
 ZOOM SULLA WEBCAM (primi piani)
 Lo stacco a schermo pieno sulla webcam di CHI STA PARLANDO, come negli edit dei grandi canali. simo (2026-11-05) ne vuole TANTI, ma ognuno con un senso. Vanno su:
 - "sclero": rage, urla, "NOOO", "MA COME", insulti o bestemmie urlati per qualcosa appena successo;
-- "risata": quando uno esplode a ridere;
 - "battuta": la battuta che fa ridere, sulla PUNCHLINE (non sulla premessa);
 - "affermazione": una frase forte, assurda o sbruffona detta con convinzione ("sono il più forte d'Italia", "questo gioco è una merda", una presa in giro diretta a un altro).
-MAI su: spiegazioni, domande normali, commenti tecnici, quando leggono la chat, quando parla il video reagito, il gioco o un personaggio, o quando nessuno parla. Chi fa l'azione deve essere uno streamer in call.
+MAI su una risata da sola (simo, 2026-11-06: "solo la risata così no"): lo zoom è su chi DICE qualcosa. MAI su: spiegazioni, domande normali, commenti tecnici, quando leggono la chat, quando parla il video reagito, il gioco o un personaggio, o quando nessuno parla. Chi fa l'azione deve essere uno streamer in call.
 Quanti: dove c'è materiale, in media uno ogni 20-40 secondi di video TENUTO; mai due a meno di 8 secondi; SOLO dentro i tratti che tieni. In un pezzo tranquillo meno, in un pezzo di scleri di più.
 Per ognuno: kind, "quote" con le parole ESATTE dette da chi fa l'azione (3-12 parole consecutive della trascrizione, dall'inizio della reazione), "who" chi le dice se si capisce (nome), start/end i tempi della riga.
 
@@ -139,7 +138,7 @@ const TOOL_SCHEMA: Anthropic.Tool = {
           properties: {
             start: { type: "number", description: "Inizio della riga della trascrizione." },
             end: { type: "number" },
-            kind: { type: "string", enum: ["sclero", "risata", "battuta", "affermazione"] },
+            kind: { type: "string", enum: ["sclero", "battuta", "affermazione"] },
             quote: { type: "string", description: "Le parole esatte di chi fa l'azione, dal suo inizio." },
             who: { type: "string", description: "Chi le dice, se si capisce." },
           },

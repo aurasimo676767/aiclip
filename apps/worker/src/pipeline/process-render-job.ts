@@ -114,7 +114,7 @@ async function renderJob(job: RenderJobRow): Promise<void> {
       const timeline = edited
         ? await ensureLongformGames({ id: clipRow.id, start_time: clipRow.start_time, end_time: clipRow.end_time, longform_games: gameRow.longform_games }, localSourcePath)
         : null;
-      const games = timeline ? { timeline, keep: gamesToKeep(timeline, gameRow.longform_keep_games) } : undefined;
+      const games = timeline ? { timeline, keep: gamesToKeep(timeline, gameRow.longform_keep_games, /torneo/i.test(clipRow.title)) } : undefined;
       if (games) logger.info("Montaggio: giochi tenuti", { clipId: clipRow.id, keep: games.keep });
       // Banner "iscriviti" col canale YouTube collegato, solo nel montato (il taglio semplice copia il video senza ricodificarlo).
       const branding = edited ? await channelBrandingForProject(clipRow.project_id).catch(() => null) : null;

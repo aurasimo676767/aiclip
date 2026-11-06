@@ -29,10 +29,12 @@ export async function ensureLongformGames(
 }
 
 /** I giochi da tenere: quelli scelti da simo sul sito, o il gioco che dura di più. */
-export function gamesToKeep(timeline: GameSegment[], chosen: unknown): string[] {
+export function gamesToKeep(timeline: GameSegment[], chosen: unknown, wholeTournament = false): string[] {
   const names = new Set(timeline.map((s) => (s.kind === "altro" ? "Altro" : s.name)));
   const picked = Array.isArray(chosen) ? (chosen as string[]).filter((n) => names.has(n)) : [];
   if (picked.length > 0) return picked;
+  // Un torneo è un video solo con tutti i suoi giochi: di default si tengono tutti (non solo il più lungo).
+  if (wholeTournament) return [...names].filter((n) => n !== "Altro");
   const main = mainGame(timeline);
   return main ? [main] : [];
 }

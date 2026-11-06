@@ -247,6 +247,32 @@ export async function findSpeakingWebcam(params: {
   focusFrom: number;
   focusTo: number;
 }): Promise<StreamWebcam | null> {
+  const scored = await scoreWebcamSpeakers(params);
+  return scored?.ok ? scored.cams[scored.best]! : null;
+}
+
+/** Il risultato completo del modello chi-parla su un momento: per abbinare le voci alle webcam (vedi assignZoomCams). */
+export interface WebcamSpeakers {
+  cams: StreamWebcam[];
+  /** Punteggio medio di ogni webcam nel momento. */
+  means: number[];
+  /** Se la faccia di ogni webcam si vede in quel momento. */
+  visible: boolean[];
+  best: number;
+  leadShare: number;
+  /** true se il modello da solo è sicuro di chi parla. */
+  ok: boolean;
+}
+
+export async function scoreWebcamSpeakers(params: {
+  videoPath: string;
+  width: number;
+  height: number;
+  from: number;
+  to: number;
+  focusFrom: number;
+  focusTo: number;
+}): Promise<WebcamSpeakers | null> {
   const { videoPath, width, height } = params;
   const span = { from: Math.max(0, params.focusFrom - DISCOVERY_SPAN_SECONDS), to: params.focusTo + DISCOVERY_SPAN_SECONDS };
   const times = Array.from({ length: DISCOVERY_FRAMES }, (_, i) => span.from + ((span.to - span.from) * (i + 0.5)) / DISCOVERY_FRAMES);
@@ -291,5 +317,10 @@ export async function findSpeakingWebcam(params: {
     inTesta: leadShare.toFixed(2),
     scelta: ok ? `${cams[best]!.rect.x},${cams[best]!.rect.y}` : "nessuno",
   });
-  return ok ? cams[best]! : null;
+  return { cams, means, visible, best, leadShare, ok };
+}
+
+/** Stessa webcam fra due momenti (la ricerca delle webcam si rifà a ogni zoom e i riquadri cambiano di poco). */
+export function sameWebcam(a: CropWindow, b: CropWindow): boolean {
+  return overlapShare(a, b) > 0.5;
 }

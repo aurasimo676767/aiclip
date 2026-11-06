@@ -342,7 +342,9 @@ export function buildVideosFromTimeline(timeline: TimelineBlock[]): PlannedVideo
       continue;
     }
     flushShorts();
-    videos.push(...(kind === "tournament" ? splitTournamentByGame(group) : [toVideo(group, group.blocks, kind)]));
+    // Torneo = un video solo, intero, poi montato (simo, 2026-11-06: "mi rimangio tutto, voglio che il
+    // torneo sia tutto intero, in una sola clip"). splitTournamentByGame resta per tornare indietro.
+    videos.push(toVideo(group, group.blocks, kind));
   }
   flushShorts();
   return videos;
