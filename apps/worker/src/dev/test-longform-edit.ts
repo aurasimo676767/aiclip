@@ -6,11 +6,13 @@ import { probeVideo } from "../lib/ffmpeg.js";
 import { supabase } from "../lib/supabase.js";
 import { env } from "../env.js";
 import { planLongformEdit, renderEditedLongform, type HighlightsInput } from "../render/longform-auto-edit.js";
+import { bannerTimes, channelBrandingForProject, ensureBannerSfx, renderSubscribeBanner } from "../render/subscribe-banner.js";
 
 /**
  * Prova il montaggio long-form su un pezzo di un sorgente locale.
  * Uso: tsx src/dev/test-longform-edit.ts <sorgente> <inizio s> <fine s> <out.mp4> [intro=a-b,c-d] [ai=<videoId>]
  * - intro=...: intro finta (secondi dall'inizio del pezzo) per provare il render, GRATIS;
+ * - banner=<projectId>: banner "iscriviti" del canale del progetto;
  * - ai=<videoId>: piano "da YouTuber" vero con la trascrizione del video, A PAGAMENTO (chiedere a simo).
  */
 const [source, startArg, endArg, outArg, ...opts] = process.argv.slice(2);
@@ -23,7 +25,7 @@ const aiVideo = opt("ai");
 if (aiVideo) {
   const { data } = await supabase.from("transcripts").select("segments").eq("video_id", aiVideo).single();
   const title = opt("title") ?? "video";
-  highlights = { title, segments: data!.segments as TranscriptSegment[], apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_LONGFORM_EDIT, openaiApiKey: env.OPENAI_API_KEY };
+  highlights = { title, segments: data!.segments as TranscriptSegment[], apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL_LONGFORM_EDIT, phaseModel: env.ANTHROPIC_MODEL_MATCH_PHASES, openaiApiKey: env.OPENAI_API_KEY };
 }
 const probe = await probeVideo(source);
 const t0 = Date.now();
@@ -34,6 +36,15 @@ const t1 = Date.now();
 const workDir = path.join(path.dirname(path.resolve(outArg)), "edit-work");
 await fsp.mkdir(workDir, { recursive: true });
 await fsp.writeFile(path.resolve(outArg) + ".plan.json", JSON.stringify(plan, null, 1));
-await renderEditedLongform({ sourceVideoPath: source, start, end, plan, workDir, outputPath: path.resolve(outArg) });
+// banner=<projectId>: banner "iscriviti" del canale collegato (gratis).
+const bannerProject = opt("banner");
+const branding = bannerProject ? await channelBrandingForProject(bannerProject) : null;
+const bannerVideo = branding ? await renderSubscribeBanner(branding) : null;
+const introSeconds = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0);
+let cursor = introSeconds;
+const cuts = plan.keep.map((k) => (cursor += k.end - k.start));
+const busy = [...plan.punches.flatMap((p) => [introSeconds + p.start, introSeconds + p.end]), ...cuts];
+const banner = bannerVideo ? { path: bannerVideo.path, times: bannerTimes(introSeconds + plan.outputDuration, introSeconds, busy), sfx: await ensureBannerSfx() } : undefined;
+await renderEditedLongform({ sourceVideoPath: source, start, end, plan, workDir, outputPath: path.resolve(outArg), banner });
 const t2 = Date.now();
-console.log(JSON.stringify({ analisiSec: Math.round((t1 - t0) / 1000), renderSec: Math.round((t2 - t1) / 1000), durataIn: end - start, durataOut: Math.round(plan.outputDuration), tratti: plan.keep.length, intro: plan.intro, stacchi: plan.punches.length }));
+console.log(JSON.stringify({ analisiSec: Math.round((t1 - t0) / 1000), renderSec: Math.round((t2 - t1) / 1000), durataIn: end - start, durataOut: Math.round(plan.outputDuration), tratti: plan.keep.length, intro: plan.intro, zoom: plan.punches.length, banner: banner?.times }));

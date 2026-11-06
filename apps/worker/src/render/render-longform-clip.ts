@@ -4,6 +4,7 @@ import { probeVideo, runFfmpeg } from "../lib/ffmpeg.js";
 import { logger } from "../lib/logger.js";
 import { planLongformEdit, renderEditedLongform, type HighlightsInput } from "./longform-auto-edit.js";
 import { findMutedRanges, piecesWithoutMuted } from "./muted-ranges.js";
+import { bannerTimes, ensureBannerSfx } from "./subscribe-banner.js";
 
 // Target audio comune al segmento estratto — l'audio viene comunque ri-codificato per il
 // loudnorm, quindi tanto vale fissare qui dei parametri stabili.
@@ -16,7 +17,7 @@ export interface RenderLongformClipParams {
   end: number;
   workDir: string;
   /** Montaggio automatico (clips.longform_edit): tempi morti tagliati e stacchi sulle urla. Serve il tracker per trovare le webcam. */
-  autoEdit?: { highlights?: HighlightsInput };
+  autoEdit?: { highlights?: HighlightsInput; banner?: { path: string } };
   outputPath: string;
 }
 
@@ -54,9 +55,17 @@ export async function renderLongformClip(params: RenderLongformClipParams): Prom
       end,
       highlights: params.autoEdit.highlights,
     });
-    await renderEditedLongform({ sourceVideoPath, start, end, plan, workDir: params.workDir, outputPath });
+    const introSeconds = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0);
+    // Istanti da cui il banner di metà video sta lontano: zoom e stacchi del montaggio (tempi del video finale).
+    let cursor = introSeconds;
+    const cuts = plan.keep.map((k) => (cursor += k.end - k.start));
+    const busy = [...plan.punches.flatMap((p) => [introSeconds + p.start, introSeconds + p.end]), ...cuts];
+    const banner = params.autoEdit.banner
+      ? { path: params.autoEdit.banner.path, times: bannerTimes(introSeconds + plan.outputDuration, introSeconds, busy), sfx: await ensureBannerSfx() }
+      : undefined;
+    await renderEditedLongform({ sourceVideoPath, start, end, plan, workDir: params.workDir, outputPath, banner });
     const editedProbe = await probeVideo(outputPath);
-    logger.info("Video long-form montato", { durata: Math.round(end - start), montato: Math.round(editedProbe.durationSeconds), stacchi: plan.punches.length, intro: plan.intro.length });
+    logger.info("Video long-form montato", { durata: Math.round(end - start), montato: Math.round(editedProbe.durationSeconds), zoom: plan.punches.length, intro: plan.intro.length, banner: banner?.times.length ?? 0 });
     return { durationSeconds: editedProbe.durationSeconds };
   }
 

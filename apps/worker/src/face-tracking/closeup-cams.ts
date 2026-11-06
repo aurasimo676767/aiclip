@@ -51,6 +51,18 @@ const DISCOVERY_FRAMES = 8;
 const DISCOVERY_SPAN_SECONDS = 8;
 /** Punteggio minimo del modello chi-parla (>0 = parla) per dare il primo piano: sotto, nel dubbio niente. */
 const MIN_SPEAKING_SCORE = 0.5;
+/**
+ * Di quanto chi parla deve staccare il secondo (simo, 2026-11-05: "deve essere sicura l'IA di chi
+ * zoomare"): con due facce quasi pari lo zoom poteva finire su chi stava zitto. Sotto, niente zoom.
+ */
+const MIN_SPEAKING_MARGIN = 0.6;
+/**
+ * Una webcam vera cambia sempre un po' fra un fotogramma e l'altro (la persona si muove, sbatte gli
+ * occhi, la compressione); il ritratto di un personaggio nel gioco o un'immagine fissa no. Differenza
+ * media (0-255) sul volto rimpicciolito sotto cui il volto è un'immagine ferma, non una persona.
+ */
+const STATIC_FACE_DIFF = 2;
+const PATCH_SIZE = 24;
 
 async function frameBGR(videoPath: string, at: number, width: number, height: number): Promise<Buffer> {
   return runFfmpegBinary(["-ss", String(Math.max(0, at)), "-i", videoPath, "-frames:v", "1", "-s", `${width}x${height}`, "-pix_fmt", "bgr24", "-f", "rawvideo", "-"]);
@@ -99,7 +111,7 @@ async function facesInFrame(frame: Buffer, width: number, height: number): Promi
  * (stessi controlli del pannello degli Shorts).
  */
 export async function findStreamWebcams(videoPath: string, width: number, height: number, times: number[]): Promise<StreamWebcam[]> {
-  const groups: Array<{ faces: FaceBox[]; times: Set<number> }> = [];
+  const groups: Array<{ faces: FaceBox[]; times: Set<number>; patches: Buffer[] }> = [];
   for (const t of times) {
     let frame: Buffer;
     try {
@@ -108,11 +120,13 @@ export async function findStreamWebcams(videoPath: string, width: number, height
       continue;
     }
     for (const f of await facesInFrame(frame, width, height)) {
+      const patch = await facePatch(frame, width, height, f).catch(() => null);
       const group = groups.find((g) => distance(g.faces[0]!, f) < SAME_CAM_DISTANCE_PX);
       if (group) {
         group.faces.push(f);
         group.times.add(t);
-      } else groups.push({ faces: [f], times: new Set([t]) });
+        if (patch) group.patches.push(patch);
+      } else groups.push({ faces: [f], times: new Set([t]), patches: patch ? [patch] : [] });
     }
   }
   const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]!;
@@ -125,6 +139,12 @@ export async function findStreamWebcams(videoPath: string, width: number, height
       height: median(g.faces.map((f) => f.height)),
       score: median(g.faces.map((f) => f.score)),
     };
+    // Un volto che resta identico in tutti i fotogrammi è un'immagine (personaggio del gioco, foto), non una webcam.
+    const motion = maxPatchDiff(g.patches);
+    if (g.patches.length >= 2 && motion < STATIC_FACE_DIFF) {
+      logger.info("Primi piani: volto fermo scartato (immagine, non una persona)", { face: { x: Math.round(face.x), y: Math.round(face.y) }, movimento: motion.toFixed(2) });
+      continue;
+    }
     const samples = [...g.times].sort((a, b) => a - b);
     const picks = samples.length <= 10 ? samples : Array.from({ length: 10 }, (_, i) => samples[Math.round((i * (samples.length - 1)) / 9)]!);
     const found = await detectWebcamRectDebug(videoPath, picks, face, width, height);
@@ -142,9 +162,18 @@ export async function findStreamWebcams(videoPath: string, width: number, height
     }
     const estimated = rect !== found.rect;
     // Due gruppi di volti dentro lo stesso riquadro (la persona si è spostata molto) sono una webcam sola.
-    const same = cams.find((c) => Math.abs(c.rect.x - rect.x) < 12 && Math.abs(c.rect.y - rect.y) < 12);
+    // Anche un riquadro stimato che si sovrappone a uno vero, o che contiene la stessa faccia: era la
+    // stessa persona contata due volte (Mimic Party, 2026-11-06: "0,860=1.3" e "129,791=1.3"), e col
+    // pareggio lo zoom non partiva mai.
+    const same = cams.find(
+      (c) => (Math.abs(c.rect.x - rect.x) < 12 && Math.abs(c.rect.y - rect.y) < 12) || overlapShare(c.rect, rect) > 0.4 || contains(c.rect, center(face)) || contains(rect, center(c.face)),
+    );
     if (same) {
-      if (g.times.size > same.seen) Object.assign(same, { face, seen: g.times.size });
+      // Vince il riquadro vero su quello stimato; a parità, la faccia vista più spesso.
+      if ((same.estimated && !estimated) || (!!same.estimated === estimated && g.times.size > same.seen)) {
+        Object.assign(same, { rect, face, seen: g.times.size });
+        if (!estimated) delete same.estimated;
+      }
       continue;
     }
     cams.push({ rect, face, seen: g.times.size, ...(estimated ? { estimated } : {}) });
@@ -154,6 +183,39 @@ export async function findStreamWebcams(videoPath: string, width: number, height
     webcam: cams.map((c) => `${c.rect.x},${c.rect.y} ${c.rect.width}x${c.rect.height} (${c.seen})`),
   });
   return cams.map(({ seen: _seen, ...cam }) => cam);
+}
+
+/** Quota del riquadro più piccolo coperta dall'altro. */
+function overlapShare(a: CropWindow, b: CropWindow): number {
+  const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  if (w <= 0 || h <= 0) return 0;
+  return (w * h) / Math.min(a.width * a.height, b.width * b.height);
+}
+
+const contains = (r: CropWindow, p: { x: number; y: number }) => p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
+
+/** Il volto rimpicciolito in grigio, per capire se fra un fotogramma e l'altro cambia. */
+async function facePatch(frame: Buffer, width: number, height: number, f: FaceBox): Promise<Buffer> {
+  const left = Math.max(0, Math.round(f.x));
+  const top = Math.max(0, Math.round(f.y));
+  return sharp(frame, { raw: { width, height, channels: 3 } })
+    .extract({ left, top, width: Math.max(8, Math.min(width - left, Math.round(f.width))), height: Math.max(8, Math.min(height - top, Math.round(f.height))) })
+    .resize(PATCH_SIZE, PATCH_SIZE, { fit: "fill" })
+    .greyscale()
+    .raw()
+    .toBuffer();
+}
+
+/** La differenza media più grande fra il primo volto e gli altri (0-255). */
+function maxPatchDiff(patches: Buffer[]): number {
+  let max = 0;
+  for (let k = 1; k < patches.length; k++) {
+    let sum = 0;
+    for (let i = 0; i < patches[0]!.length; i++) sum += Math.abs(patches[0]![i]! - patches[k]![i]!);
+    max = Math.max(max, sum / patches[0]!.length);
+  }
+  return max;
 }
 
 /** Riquadro "da webcam" stimato attorno a una faccia, quando quello vero non si trova: 4:3, faccia nel terzo alto. */
@@ -190,9 +252,11 @@ export async function findSpeakingWebcam(params: {
   if (cams.length === 0) return null;
   const frame = await frameBGR(videoPath, (params.focusFrom + params.focusTo) / 2, width, height);
   const faces: FaceBox[] = [];
+  const visible: boolean[] = [];
   for (const cam of cams) {
     const inCam = (await facesIn(frame, width, height, cam.rect)).sort((a, b) => b.width * b.height - a.width * a.height);
     faces.push(inCam[0] ?? cam.face);
+    visible.push(!!inCam[0]);
   }
   const { scores, fps } = await scoreActiveSpeakers(videoPath, params.from, params.to - params.from, faces, width, height);
   const a = Math.max(0, Math.floor((params.focusFrom - params.from) * fps));
@@ -202,7 +266,9 @@ export async function findSpeakingWebcam(params: {
     return part.length > 0 ? part.reduce((sum, v) => sum + v, 0) / part.length : -Infinity;
   });
   const best = means.indexOf(Math.max(...means));
-  const ok = best >= 0 && means[best]! >= MIN_SPEAKING_SCORE;
+  const second = Math.max(-Infinity, ...means.filter((_, k) => k !== best));
+  // Zoom solo se è sicuro: parla davvero, stacca gli altri, e la sua faccia in quel momento si vede.
+  const ok = best >= 0 && means[best]! >= MIN_SPEAKING_SCORE && means[best]! - second >= MIN_SPEAKING_MARGIN && visible[best] === true;
   logger.info("Primo piano: chi parla", {
     a: params.focusFrom.toFixed(1),
     webcam: cams.map((c, k) => `${c.rect.x},${c.rect.y}=${means[k]!.toFixed(1)}`),

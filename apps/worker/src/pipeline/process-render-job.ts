@@ -18,6 +18,7 @@ import { isRenderJobCancelled } from "../lib/cancellation.js";
 import { ensureLongformGames, gamesToKeep } from "./longform-games.js";
 import { peopleHintForVideo } from "../face-tracking/face-identity.js";
 import { checkCuts, cutCheckMark, isCutChecked } from "../providers/ai/longform-cut-check.js";
+import { channelBrandingForProject, renderSubscribeBanner } from "../render/subscribe-banner.js";
 import type { PeopleHint } from "../face-tracking/face-tracker.js";
 
 /** Ogni quanto si guarda se l'utente ha premuto "Annulla" mentre ffmpeg lavora. */
@@ -115,6 +116,9 @@ async function renderJob(job: RenderJobRow): Promise<void> {
         : null;
       const games = timeline ? { timeline, keep: gamesToKeep(timeline, gameRow.longform_keep_games) } : undefined;
       if (games) logger.info("Montaggio: giochi tenuti", { clipId: clipRow.id, keep: games.keep });
+      // Banner "iscriviti" col canale YouTube collegato, solo nel montato (il taglio semplice copia il video senza ricodificarlo).
+      const branding = edited ? await channelBrandingForProject(clipRow.project_id).catch(() => null) : null;
+      const banner = branding ? await renderSubscribeBanner(branding) : null;
       await renderLongformClip({
         sourceVideoPath: localSourcePath,
         start: clipRow.start_time,
@@ -132,6 +136,7 @@ async function renderJob(job: RenderJobRow): Promise<void> {
                 openaiApiKey: env.OPENAI_API_KEY,
                 games,
               },
+              banner: banner ? { path: banner.path } : undefined,
             }
           : undefined,
       });

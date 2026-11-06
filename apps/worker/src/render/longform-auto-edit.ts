@@ -13,6 +13,7 @@ import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
 import { findSpeakingWebcam, type StreamWebcam } from "../face-tracking/closeup-cams.js";
 import { describePhases, detectMatchPhases, gameShare } from "../providers/ai/match-phases.js";
 import { enforceMatchStructure } from "./match-structure.js";
+import { BANNER_BOTTOM_MARGIN } from "./subscribe-banner.js";
 
 /**
  * Montaggio automatico di un video long-form (opzionale, spento di default: vedi clips.longform_edit).
@@ -115,15 +116,22 @@ function splitLongRanges(ranges: Array<{ start: number; end: number }>, segments
 /** Sul cambio di gioco: se il pezzo tenuto prima finisce al massimo così tanto prima, lo si allunga fino al cambio. */
 const TOPIC_EXTEND_SECONDS = 90;
 /**
- * Primi piani dell'AI (simo, 2026-10-26: "zoom senza senso" su frasi normali): solo reazioni forti,
- * fra 1,5 e 4 s, ben distanziati. Niente controllo sul volume: misurato sul VOD di Blur, sopra
- * l'audio del gioco "Ma coglione sei una merda umana" arrivava a +5,8 dB sul livello abituale e
- * "È il riscaldamento questo", detta piatta, a +7,7 dB. Decide l'AI sul testo (vedi
- * longform-highlights.ts); chi va inquadrato lo decide il modello chi-parla.
+ * Zoom sulla webcam, rifatti il 2026-11-05 (simo: "zoomma poco, e nei momenti dove a volte stanno
+ * muti, e in momenti a caso, voglio che zoomi di più, ma con senso, in affermazioni, battute,
+ * scleri, urla... DEVE ESSERE LUI CHE FA L'AZIONE"). Nel montato di Dub Together l'AI ne proponeva 4
+ * (solo urla) e ne restava 1 in 17 minuti. Ora: scleri, risate, battute e affermazioni forti, sulle
+ * parole esatte ritrovate nell'audio (quindi qualcuno sta parlando davvero), da poco prima della prima
+ * parola a poco dopo l'ultima, a 8 s l'uno dall'altro al minimo; nei conflitti vince prima lo sclero,
+ * poi la risata, la battuta, l'affermazione. Niente soglia sul volume: sopra l'audio del gioco un
+ * insulto urlato e una frase piatta misuravano uguale (2026-10-26). Chi inquadrare lo decide il
+ * modello chi-parla, e solo se è sicuro (closeup-cams.ts).
  */
-const CLOSEUP_MIN_SECONDS = 1.5;
-const CLOSEUP_MAX_SECONDS = 4;
-const CLOSEUP_SPACING_SECONDS = 20;
+const ZOOM_MIN_SECONDS = 1.3;
+const ZOOM_MAX_SECONDS = 4.5;
+const ZOOM_SPACING_SECONDS = 8;
+const ZOOM_PRIORITY: Record<string, number> = { sclero: 0, risata: 1, battuta: 2, affermazione: 3 };
+/** Dopo l'ultima parola: una risata o uno sclero hanno bisogno di qualche decimo in più per chiudersi. */
+const ZOOM_TAIL_SECONDS: Record<string, number> = { sclero: 0.6, risata: 0.9, battuta: 0.5, affermazione: 0.5 };
 
 /** Sotto questa quota di tempo passato a giocare (partita, inizio, fine) le regole delle partite non valgono. */
 const MIN_GAME_SHARE = 0.25;
@@ -258,6 +266,7 @@ export async function planLongformEdit(params: {
               {
                 title: params.highlights.title,
                 pieces,
+                protect: [...aiPlan.intro, ...aiPlan.closeups].map((r) => ({ start: r.start, end: r.end })),
               },
               { apiKey: params.highlights.apiKey, model: params.highlights.model },
             );
@@ -436,8 +445,11 @@ export async function renderEditedLongform(params: {
   plan: LongformEditPlan;
   workDir: string;
   outputPath: string;
+  /** Banner "iscriviti" (video con trasparenza, vedi subscribe-banner.ts) e quando farlo comparire (secondi del video finale). */
+  banner?: { path: string; times: number[]; sfx?: string | null };
 }): Promise<void> {
   const { plan } = params;
+  const banners = params.banner?.times ?? [];
   const between = (ranges: TimeRange[]) => ranges.map((r) => `between(t,${r.start.toFixed(3)},${r.end.toFixed(3)})`).join("+");
   const keepExpr = between(plan.keep);
 
@@ -447,7 +459,9 @@ export async function renderEditedLongform(params: {
   // lavoro (10 minuti di video non finivano in 9 minuti di render).
   const last = plan.punches.length;
   const hasIntro = plan.intro.length > 0;
-  const mainV = hasIntro ? "vmain" : "vout";
+  // Col banner, l'uscita del montaggio passa ancora dalle sovrapposizioni del banner prima di [vout].
+  const outV = banners.length > 0 ? "vedit" : "vout";
+  const mainV = hasIntro ? "vmain" : outV;
   const steps = [`[0:v]select='${keepExpr}',setpts=N/FRAME_RATE/TB,scale=1920:1080:flags=lanczos,setsar=1[${last === 0 ? mainV : "l0"}]`];
   plan.punches.forEach((p, i) => {
     const c = p.cam;
@@ -498,9 +512,38 @@ export async function renderEditedLongform(params: {
     }
     steps.push(
       `[${introV}][${introA}][vmain][amain]concat=n=2:v=1:a=1[vcat][acat]`,
-      "[vcat]null[vout]",
+      `[vcat]null[${outV}]`,
       "[acat]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[aout]",
     );
+  }
+
+  const bannerInputs: string[] = [];
+  if (banners.length > 0) {
+    const first = plan.punches.length + 1 + inputCount(introInputs);
+    banners.forEach((t, i) => {
+      bannerInputs.push("-i", params.banner!.path);
+      const from = i === 0 ? outV : `vb${i}`;
+      const to = i === banners.length - 1 ? "vout" : `vb${i + 1}`;
+      steps.push(
+        `[${first + i}:v]setpts=PTS-STARTPTS+${t.toFixed(3)}/TB[bn${i}]`,
+        `[${from}][bn${i}]overlay=x=(W-w)/2:y=H-h-${BANNER_BOTTOM_MARGIN}:eof_action=pass[${to}]`,
+      );
+    });
+  }
+
+  // Suono del banner: un ingresso per comparsa, spostato al suo istante e mescolato sotto l'audio finale.
+  const sfx = params.banner?.sfx;
+  if (banners.length > 0 && sfx) {
+    const first = plan.punches.length + 1 + inputCount(introInputs) + banners.length;
+    const finalA = steps.findIndex((st) => st.endsWith("[aout]"));
+    steps[finalA] = steps[finalA]!.replace(/\[aout\]$/, "[amain0]");
+    banners.forEach((t, i) => {
+      bannerInputs.push("-i", sfx);
+      const ms = Math.round(t * 1000);
+      steps.push(`[${first + i}:a]aresample=44100,adelay=${ms}|${ms}[bs${i}]`);
+    });
+    const labels = banners.map((_, i) => `[bs${i}]`).join("");
+    steps.push(`[amain0]${labels}amix=inputs=${banners.length + 1}:duration=first:dropout_transition=0:normalize=0[aout]`);
   }
 
   // Lo script su file: con centinaia di tagli la riga di comando supererebbe il limite di Windows.
@@ -520,6 +563,7 @@ export async function renderEditedLongform(params: {
     params.sourceVideoPath,
     ...punchInputs,
     ...introInputs,
+    ...bannerInputs,
     "-/filter_complex",
     scriptPath,
     "-map",
@@ -542,6 +586,11 @@ export async function renderEditedLongform(params: {
     logger.warn("Codifica con la GPU fallita, riprovo con la CPU", { error: error instanceof Error ? error.message.slice(-300) : String(error) });
     await runFfmpeg([...input, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", ...audio, ...tail], { timeoutMs: timeoutMs * 2 });
   }
+}
+
+/** Quanti ingressi (-i) ci sono in una lista di argomenti ffmpeg. */
+function inputCount(args: string[]): number {
+  return args.filter((a) => a === "-i").length;
 }
 
 /** Da finestre di 50ms a finestre di BIN_SECONDS, media in potenza (non in dB). */
@@ -671,12 +720,9 @@ async function applyTopicChanges(
 }
 
 /**
- * Primi piani dell'AI: l'AI li sceglie dal testo (solo reazioni forti), qui si controlla che la
- * reazione si SENTA e si mette il primo piano sulla parte forte. Prima partivano 0,3 s prima della
- * frase e duravano tutta la frase: cadevano sulla premessa, e su frasi dette a voce normale ("Oh Davi
- * fai bravo eh", "Ma come cazzo si gioca?") che simo ha trovato senza senso (2026-10-26). Il volume
- * da solo non basta a sceglierli (musica della lobby, spari): serve a confermare la scelta dell'AI.
- * Ogni primo piano resta dentro un tratto tenuto.
+ * Zoom dell'AI messi sulle parole vere (vedi ZOOM_*): ogni candidato si ritrova nell'audio (se le
+ * parole non ci sono, niente zoom: è il caso dei "momenti in cui stanno muti"), resta dentro un
+ * tratto tenuto, e fra due vicini vince il più forte.
  */
 async function locateCloseups(
   closeups: HighlightsPlan["closeups"],
@@ -684,20 +730,24 @@ async function locateCloseups(
   keep: TimeRange[],
   duration: number,
 ): Promise<TimeRange[]> {
-  const out: TimeRange[] = [];
+  const candidates: Array<TimeRange & { priority: number; loudness: number }> = [];
   for (const c of closeups) {
-    if (c.kind !== "sclero") continue;
+    const priority = ZOOM_PRIORITY[c.kind];
+    if (priority === undefined) continue;
     const f = await locator.locate(c);
     if (!f) continue;
-    const start = Math.max(0, f.start - 0.3);
-    let end = Math.min(duration, Math.max(start + CLOSEUP_MIN_SECONDS, Math.min(f.end + 0.4, start + CLOSEUP_MAX_SECONDS)));
+    const start = Math.max(0, f.start - 0.25);
     const k = keep.find((r) => start >= r.start && start < r.end);
     if (!k) continue;
-    end = Math.min(end, k.end);
-    if (end - start < 1.2) continue;
-    if (out.some((o) => start < o.end + CLOSEUP_SPACING_SECONDS && end > o.start - CLOSEUP_SPACING_SECONDS)) continue;
-    out.push({ start, end });
+    const end = Math.min(k.end, duration, Math.max(start + ZOOM_MIN_SECONDS, Math.min(f.end + (ZOOM_TAIL_SECONDS[c.kind] ?? 0.5), start + ZOOM_MAX_SECONDS)));
+    if (end - start < 1) continue;
+    candidates.push({ start, end, priority, loudness: f.loudness });
   }
-  logger.info("Primi piani dell'AI collocati", { proposti: closeups.length, messi: out.length });
+  const out: TimeRange[] = [];
+  for (const c of candidates.sort((a, b) => a.priority - b.priority || b.loudness - a.loudness)) {
+    if (out.some((o) => c.start < o.end + ZOOM_SPACING_SECONDS && c.end > o.start - ZOOM_SPACING_SECONDS)) continue;
+    out.push({ start: c.start, end: c.end });
+  }
+  logger.info("Zoom dell'AI collocati", { proposti: closeups.length, trovatiNellAudio: candidates.length, messi: out.length });
   return out.sort((a, b) => a.start - b.start);
 }
