@@ -29,7 +29,11 @@ if (aiVideo) {
 }
 const probe = await probeVideo(source);
 const t0 = Date.now();
-const plan = await planLongformEdit({ sourceVideoPath: source, sourceWidth: probe.width!, sourceHeight: probe.height!, start, end, highlights });
+// plan=<file.plan.json>: rifà solo il render da un piano già salvato (gratis, niente analisi).
+const savedPlan = opt("plan");
+const plan: Awaited<ReturnType<typeof planLongformEdit>> = savedPlan
+  ? JSON.parse(await fsp.readFile(savedPlan, "utf8"))
+  : await planLongformEdit({ sourceVideoPath: source, sourceWidth: probe.width!, sourceHeight: probe.height!, start, end, highlights });
 const fakeIntro = opt("intro");
 if (fakeIntro) plan.intro = fakeIntro.split(",").map((r) => { const [a, b] = r.split("-").map(Number); return { start: a!, end: b! }; });
 const t1 = Date.now();
@@ -40,11 +44,12 @@ await fsp.writeFile(path.resolve(outArg) + ".plan.json", JSON.stringify(plan, nu
 const bannerProject = opt("banner");
 const branding = bannerProject ? await channelBrandingForProject(bannerProject) : null;
 const bannerVideo = branding ? await renderSubscribeBanner(branding) : null;
-const introSeconds = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0);
+// Prima del montato: intro "IN QUESTO VIDEO" e frase d'apertura.
+const introSeconds = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0) + (plan.opening ? plan.opening.end - plan.opening.start : 0);
 let cursor = introSeconds;
 const cuts = plan.keep.map((k) => (cursor += k.end - k.start));
 const busy = [...plan.punches.flatMap((p) => [introSeconds + p.start, introSeconds + p.end]), ...cuts];
 const banner = bannerVideo ? { path: bannerVideo.path, times: bannerTimes(introSeconds + plan.outputDuration, introSeconds, busy), sfx: await ensureBannerSfx() } : undefined;
 await renderEditedLongform({ sourceVideoPath: source, start, end, plan, workDir, outputPath: path.resolve(outArg), banner });
 const t2 = Date.now();
-console.log(JSON.stringify({ analisiSec: Math.round((t1 - t0) / 1000), renderSec: Math.round((t2 - t1) / 1000), durataIn: end - start, durataOut: Math.round(plan.outputDuration), tratti: plan.keep.length, intro: plan.intro, zoom: plan.punches.length, banner: banner?.times }));
+console.log(JSON.stringify({ analisiSec: Math.round((t1 - t0) / 1000), renderSec: Math.round((t2 - t1) / 1000), durataIn: end - start, durataOut: Math.round(plan.outputDuration), tratti: plan.keep.length, intro: plan.intro, apertura: plan.opening, zoom: plan.punches.length, banner: banner?.times }));

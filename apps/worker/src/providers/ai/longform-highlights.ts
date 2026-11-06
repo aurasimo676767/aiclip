@@ -25,6 +25,10 @@ export interface HighlightsRange {
 export interface HighlightsPlan {
   /** Tratti da tenere, in ordine, in secondi dall'inizio del video long-form. */
   keep: HighlightsRange[];
+  /** Frase con cui lo streamer lancia il video, messa dopo l'intro con lo zoom e la transizione; null se non c'è. */
+  opening?: (HighlightsRange & { quote: string }) | null;
+  /** Dove comincia davvero l'attività (lobby, caricamento, ruota): dopo la frase d'apertura il video riparte da qui. */
+  gameStart?: number | null;
   /** Candidati per l'intro (fino a 4), con le parole esatte della reazione: vedi render/intro-moments.ts. */
   intro: Array<HighlightsRange & { quote: string }>;
   /** Pezzi in cui passano a un altro argomento, con le parole esatte di quando se ne vanno e di quando tornano. */
@@ -55,6 +59,11 @@ COSA TENERE E COSA TOGLIERE
 - DURATA: NESSUN numero di minuti da raggiungere (simo, 2026-10-26: un video di 2 ore e mezza portato a 45 minuti esatti era forzato). Tieni solo quello che è forte o che serve a capire, e taglia il più possibile il resto: se c'è poco di forte il video viene corto, ed è giusto così. Su un pezzo lungo tieni i momenti forti distribuiti su tutto il gioco (come comincia, i momenti migliori, come va a finire). Se togli un pezzo in cui fanno altro, NON tagliare il resto per compensare.
 - TAGLI PULITI: ogni tratto inizia all'inizio di una frase e finisce alla fine di una frase (usa i tempi delle righe). Ogni tratto dura almeno 8 secondi; due tratti separati da meno di 4 secondi uniscili.
 - CAMBI DI ARGOMENTO: quando togli un pezzo in cui fanno altro (un altro gioco, altro), il taglio parte ESATTAMENTE dove lasciano il gioco del video (la frase in cui lanciano l'altro gioco o cambiano discorso) e riprende esattamente dove ci tornano. Non tagliare anche la fine della partita prima del cambio, se non è davvero morta. Elenca ogni cambio in "topicChanges" con le parole esatte di quando se ne vanno e di quando tornano (se non tornano più, il video finisce lì e basta).
+
+FRASE D'APERTURA E INIZIO DEL GIOCO (simo, 2026-11-06)
+Dopo l'intro il video mostra per qualche secondo lo streamer (quasi sempre Blur) che LANCIA il video, poi una transizione veloce e il gioco che comincia.
+- "opening": la frase con cui introduce cosa stanno per fare, detta con energia: "dai è il momento del...", "giochiamo a sto gioco del cazzo", "mega enorme reaction", "signori, 2v2 su...". In "quote" le parole ESATTE (3-15 consecutive), start/end i tempi della riga. Deve stare all'inizio del pezzo (prima che il gioco parta). Se una frase così non c'è, lascialo vuoto: niente frase inventata o presa a caso.
+- "gameStart": il secondo in cui comincia davvero l'attività: lobby, caricamento, scelta della modalità, giro della ruota, o la prima partita se partono subito. Dopo la frase d'apertura il video riparte da lì: le chiacchiere in mezzo si saltano.
 
 INTRO "IN QUESTO VIDEO"
 Proponi 4 momenti candidati (ne verranno usati 2) per l'intro: le REAZIONI più folli del video, dove qualcuno URLA, insulta, bestemmia, sclera o ride fortissimo. Devono colpire anche senza contesto e venire da punti diversi del video, SOLO da tratti che tieni (se un momento è così forte da finire nell'intro, quel pezzo va tenuto).
@@ -138,6 +147,17 @@ const TOOL_SCHEMA: Anthropic.Tool = {
         },
       },
       endReason: { type: "string", description: "Perché il video finisce dove finisce." },
+      opening: {
+        type: "object",
+        description: "La frase con cui lo streamer lancia il video. Ometti se non c'è.",
+        properties: {
+          start: { type: "number", description: "Inizio della riga della trascrizione." },
+          end: { type: "number" },
+          quote: { type: "string", description: "Le parole esatte, 3-15 consecutive." },
+        },
+        required: ["start", "end", "quote"],
+      },
+      gameStart: { type: "number", description: "Secondo in cui comincia davvero l'attività (lobby, caricamento, ruota, prima partita)." },
       gameStyle: { type: "string", description: "Che gioco è, cos'è un round e dove sta il divertimento (prima di montare)." },
     },
     required: ["keep", "intro", "topicChanges", "closeups"],
@@ -179,6 +199,8 @@ const responseSchema = z.object({
     .default([]),
   endReason: z.string().optional(),
   gameStyle: z.string().optional(),
+  opening: z.preprocess(parseJsonText, introSchema.nullable().optional()).catch(null),
+  gameStart: z.coerce.number().nullable().optional().catch(null),
 });
 
 /**
@@ -246,6 +268,8 @@ async function planHighlightsUncached(
       intro: parsed.data.intro.filter((r) => r.quote.trim()).map((r) => ({ start: r.start, end: r.end, quote: r.quote })),
       topicChanges: parsed.data.topicChanges,
       closeups: parsed.data.closeups.filter((r) => r.quote.trim()).map((r) => ({ start: r.start, end: r.end, quote: r.quote, kind: r.kind })),
+      opening: parsed.data.opening?.quote.trim() ? { start: parsed.data.opening.start, end: parsed.data.opening.end, quote: parsed.data.opening.quote } : null,
+      gameStart: parsed.data.gameStart ?? null,
     };
   } catch (error) {
     logger.warn("Montaggio da YouTuber fallito", { error: error instanceof Error ? error.message : String(error) });

@@ -55,7 +55,8 @@ export async function renderLongformClip(params: RenderLongformClipParams): Prom
       end,
       highlights: params.autoEdit.highlights,
     });
-    const introSeconds = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0);
+    // Prima del montato: intro "IN QUESTO VIDEO" e frase d'apertura.
+    const introSeconds = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0) + (plan.opening ? plan.opening.end - plan.opening.start : 0);
     // Istanti da cui il banner di metà video sta lontano: zoom e stacchi del montaggio (tempi del video finale).
     let cursor = introSeconds;
     const cuts = plan.keep.map((k) => (cursor += k.end - k.start));

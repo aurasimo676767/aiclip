@@ -14,6 +14,7 @@ import { findSpeakingWebcam, type StreamWebcam } from "../face-tracking/closeup-
 import { describePhases, detectMatchPhases, gameShare } from "../providers/ai/match-phases.js";
 import { enforceMatchStructure } from "./match-structure.js";
 import { BANNER_BOTTOM_MARGIN } from "./subscribe-banner.js";
+import { ensureTransitionSfx, HEAD_SECONDS, TAIL_SECONDS, transitionFilters } from "./opening-transition.js";
 
 /**
  * Montaggio automatico di un video long-form (opzionale, spento di default: vedi clips.longform_edit).
@@ -75,6 +76,11 @@ export interface LongformEditPlan {
   outputDuration: number;
   /** Momenti dell'intro "IN QUESTO VIDEO", in tempi del segmento (vuoto = nessuna intro). */
   intro: TimeRange[];
+  /**
+   * Frase d'apertura dello streamer dopo l'intro (tempi del segmento), con lo zoom sulla sua webcam
+   * (null = a schermo intero), seguita dalla transizione verso l'inizio del gioco.
+   */
+  opening?: TimeRange & { cam: CropWindow | null };
 }
 
 /** Montaggio "da YouTuber" con l'AI: serve la trascrizione del video (tempi del VOD) e il titolo. */
@@ -178,6 +184,8 @@ export async function planLongformEdit(params: {
   let intro: TimeRange[] = [];
   // Primi piani scelti dall'AI sulle parole (null = nessun piano AI: stacchi sulle urla come prima).
   let aiCloseups: TimeRange[] | null = null;
+  // Frase d'apertura ritrovata nell'audio (la webcam di chi la dice si cerca più sotto).
+  let openingRange: TimeRange | null = null;
   if (params.highlights) {
     // Con i giochi riconosciuti dallo schermo si tengono solo le parti dei giochi scelti da simo:
     // all'AI arriva solo la loro trascrizione, e i tagli sui cambi di gioco sono quelli dei fotogrammi.
@@ -283,6 +291,17 @@ export async function planLongformEdit(params: {
           }
           const merged = intersectRanges(keep, chosen).filter((r) => r.end - r.start >= 1);
           keep.splice(0, keep.length, ...merged);
+          // Frase d'apertura dopo l'intro, poi il video riparte da dove comincia il gioco.
+          openingRange = await locateOpening(aiPlan, locator, duration);
+          if (openingRange) {
+            const from = Math.max(openingRange.end, aiPlan.gameStart ?? openingRange.end);
+            const dropped = keep.reduce((sum, k) => sum + Math.max(0, Math.min(k.end, from) - k.start), 0);
+            // Un inizio del gioco troppo avanti è quasi certamente sbagliato: lì si salta solo la frase.
+            const to = from <= Math.min(duration * 0.3, 600) && dropped <= MAX_SKIPPED_TO_GAME_SECONDS ? from : openingRange.end;
+            const trimmed = keep.map((k) => ({ start: Math.max(k.start, to), end: k.end })).filter((k) => k.end - k.start >= 1);
+            keep.splice(0, keep.length, ...trimmed);
+            logger.info("Frase d'apertura e inizio del gioco", { frase: `${openingRange.start.toFixed(1)}-${openingRange.end.toFixed(1)}`, riparteDa: to.toFixed(1), saltati: Math.round(dropped) });
+          }
           const located: LocatedPhrase[] = [];
           for (const c of aiPlan.intro) {
             const f = await locator.locate(c);
@@ -370,7 +389,24 @@ export async function planLongformEdit(params: {
     stacchi: punches.length,
     webcamDiverse: new Set(punches.map((p) => camKey(p.cam))).size,
   });
-  return { keep, punches, removedSeconds: duration - outputDuration, outputDuration, intro };
+  // Zoom della frase d'apertura su chi la dice, con le stesse regole degli altri zoom; se non è
+  // sicuro di chi parla, la frase resta a schermo intero.
+  let opening: LongformEditPlan["opening"];
+  if (openingRange) {
+    const found = await findSpeakingWebcam({
+      videoPath: params.sourceVideoPath,
+      width: params.sourceWidth,
+      height: params.sourceHeight,
+      from: params.start + Math.max(0, openingRange.start - CAM_LOOK_BEFORE_SECONDS),
+      to: params.start + openingRange.end + 0.5,
+      focusFrom: params.start + openingRange.start,
+      focusTo: params.start + openingRange.end,
+    }).catch(fail("Ricerca di chi dice la frase d'apertura fallita"));
+    opening = { ...openingRange, cam: found ? closeupWindow(found, params.sourceWidth, params.sourceHeight) : null };
+    logger.info("Frase d'apertura", { zoom: found ? camKey(opening.cam!) : "schermo intero" });
+  }
+
+  return { keep, punches, removedSeconds: duration - outputDuration, outputDuration, intro, opening };
 }
 
 /**
@@ -459,9 +495,11 @@ export async function renderEditedLongform(params: {
   // lavoro (10 minuti di video non finivano in 9 minuti di render).
   const last = plan.punches.length;
   const hasIntro = plan.intro.length > 0;
+  const opening = plan.opening && plan.opening.end - plan.opening.start > TAIL_SECONDS + 0.5 ? plan.opening : undefined;
+  const hasPrefix = hasIntro || !!opening;
   // Col banner, l'uscita del montaggio passa ancora dalle sovrapposizioni del banner prima di [vout].
   const outV = banners.length > 0 ? "vedit" : "vout";
-  const mainV = hasIntro ? "vmain" : outV;
+  const mainV = hasPrefix ? "vmain" : outV;
   const steps = [`[0:v]select='${keepExpr}',setpts=N/FRAME_RATE/TB,scale=1920:1080:flags=lanczos,setsar=1[${last === 0 ? mainV : "l0"}]`];
   plan.punches.forEach((p, i) => {
     const c = p.cam;
@@ -471,52 +509,63 @@ export async function renderEditedLongform(params: {
     );
   });
   const introInputs: string[] = [];
-  if (!hasIntro) {
+  if (!hasPrefix) {
     steps.push(`[0:a]aselect='${keepExpr}',asetpts=N/SR/TB,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[aout]`);
   } else {
-    // Intro "IN QUESTO VIDEO": i momenti scelti (ognuno un ingresso a parte), la scritta bianca
-    // grande in basso al centro che entra con un pop, il whoosh; poi il video montato. Il volume
-    // si normalizza una volta sola sul risultato finale.
+    // Prima del video montato: l'intro "IN QUESTO VIDEO" (se c'è) e la frase d'apertura con la
+    // transizione. Video e audio si uniscono separatamente: la transizione taglia in due la coda
+    // della frase e la testa del montato solo nel video.
     steps.push(`[0:a]aselect='${keepExpr}',asetpts=N/SR/TB,aresample=44100[amain]`);
-    const base = plan.punches.length + 1;
-    const introDuration = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0);
-    plan.intro.forEach((r, i) => {
-      introInputs.push("-threads", "1", "-ss", (params.start + r.start).toFixed(3), "-t", (r.end - r.start).toFixed(3), "-i", params.sourceVideoPath);
+    const videoParts: string[] = [];
+    const audioParts: string[] = [];
+    let nextInput = plan.punches.length + 1;
+    let prefixSeconds = 0;
+    if (hasIntro) {
+      const intro = await introSteps(params, nextInput, steps, introInputs);
+      nextInput = intro.nextInput;
+      videoParts.push(intro.video);
+      audioParts.push(intro.audio);
+      prefixSeconds += intro.seconds;
+    }
+    let transitionAt: number | null = null;
+    if (opening) {
+      const seconds = opening.end - opening.start;
+      const { tail, head } = transitionFilters();
+      const c = opening.cam;
+      const zoom = c ? `crop=${c.width}:${c.height}:${c.x}:${c.y},scale=1920:1080:flags=lanczos,unsharp=5:5:0.9:5:5:0.0` : "scale=1920:1080:flags=lanczos";
+      introInputs.push("-threads", "1", "-ss", (params.start + opening.start).toFixed(3), "-t", seconds.toFixed(3), "-i", params.sourceVideoPath);
+      const body = (seconds - TAIL_SECONDS).toFixed(3);
       steps.push(
-        `[${base + i}:v]scale=1920:1080:flags=lanczos,setsar=1,setpts=PTS-STARTPTS[iv${i}]`,
-        `[${base + i}:a]aresample=44100,asetpts=PTS-STARTPTS[ia${i}]`,
+        `[${nextInput}:v]setpts=PTS-STARTPTS,${zoom},setsar=1,split=2[ob][ot]`,
+        `[ob]trim=0:${body},setpts=PTS-STARTPTS[obv]`,
+        `[ot]trim=${body}:${seconds.toFixed(3)},setpts=PTS-STARTPTS,${tail},setsar=1[otv]`,
+        `[${nextInput}:a]asetpts=PTS-STARTPTS,aresample=44100[oa]`,
+        `[vmain]split=2[mh][mb]`,
+        `[mh]trim=0:${HEAD_SECONDS},setpts=PTS-STARTPTS,${head},setsar=1[mhv]`,
+        `[mb]trim=${HEAD_SECONDS},setpts=PTS-STARTPTS[mbv]`,
       );
-    });
-    const n = plan.intro.length;
-    steps.push(`${plan.intro.map((_, i) => `[iv${i}][ia${i}]`).join("")}concat=n=${n}:v=1:a=1[introv][introa]`);
-    let introV = "introv";
-    let introA = "introa";
-    const textPath = path.join(params.workDir, "in-questo-video.png");
-    const text = await renderHeadlinePng("IN QUESTO VIDEO", textPath, { allWhite: true, baseSize: 150, maxWidth: 1500 });
-    let nextInput = base + n;
-    if (text) {
-      introInputs.push("-loop", "1", "-t", introDuration.toFixed(3), "-i", textPath);
-      const sExpr = "if(lt(t,0.12),0.9+1.83*t,if(lt(t,0.25),1.12-0.92*(t-0.12),1))";
-      steps.push(
-        `[${nextInput}:v]format=rgba,scale=w='max(2,trunc(${text.width}*${sExpr}/2)*2)':h=-2:eval=frame[qv]`,
-        `[introv][qv]overlay=x='(W-w)/2':y='H-h-90':eval=frame:shortest=1[introvt]`,
-      );
-      introV = "introvt";
       nextInput++;
+      videoParts.push("[obv]", "[otv]");
+      audioParts.push("[oa]");
+      transitionAt = prefixSeconds + seconds - TAIL_SECONDS;
+      prefixSeconds += seconds;
+      videoParts.push("[mhv]", "[mbv]");
+    } else {
+      videoParts.push("[vmain]");
     }
-    const sfx = await ensureHeadlineSfx((a) => runFfmpeg(a));
-    if (sfx) {
-      introInputs.push("-i", sfx);
-      steps.push(`[introa][${nextInput}:a]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[introas]`);
-      introA = "introas";
+    audioParts.push("[amain]");
+    steps.push(`${videoParts.join("")}concat=n=${videoParts.length}:v=1:a=0[${outV}]`, `${audioParts.join("")}concat=n=${audioParts.length}:v=0:a=1[acat]`);
+    const whoosh = transitionAt !== null ? await ensureTransitionSfx() : null;
+    if (whoosh && transitionAt !== null) {
+      introInputs.push("-i", whoosh);
+      const ms = Math.max(0, Math.round((transitionAt - 0.05) * 1000));
+      steps.push(`[${nextInput}:a]aresample=44100,adelay=${ms}|${ms}[tsfx]`, "[acat][tsfx]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[acatx]");
+      nextInput++;
+      steps.push("[acatx]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[aout]");
+    } else {
+      steps.push("[acat]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[aout]");
     }
-    steps.push(
-      `[${introV}][${introA}][vmain][amain]concat=n=2:v=1:a=1[vcat][acat]`,
-      `[vcat]null[${outV}]`,
-      "[acat]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100[aout]",
-    );
   }
-
   const bannerInputs: string[] = [];
   if (banners.length > 0) {
     const first = plan.punches.length + 1 + inputCount(introInputs);
@@ -586,6 +635,52 @@ export async function renderEditedLongform(params: {
     logger.warn("Codifica con la GPU fallita, riprovo con la CPU", { error: error instanceof Error ? error.message.slice(-300) : String(error) });
     await runFfmpeg([...input, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", ...audio, ...tail], { timeoutMs: timeoutMs * 2 });
   }
+}
+
+/**
+ * Intro "IN QUESTO VIDEO": i momenti scelti (ognuno un ingresso a parte), la scritta bianca grande in
+ * basso al centro che entra con un pop, il whoosh. Restituisce le etichette del suo video e audio.
+ */
+async function introSteps(
+  params: { sourceVideoPath: string; start: number; plan: LongformEditPlan; workDir: string },
+  base: number,
+  steps: string[],
+  inputs: string[],
+): Promise<{ video: string; audio: string; seconds: number; nextInput: number }> {
+  const { plan } = params;
+  const seconds = plan.intro.reduce((sum, r) => sum + (r.end - r.start), 0);
+  plan.intro.forEach((r, i) => {
+    inputs.push("-threads", "1", "-ss", (params.start + r.start).toFixed(3), "-t", (r.end - r.start).toFixed(3), "-i", params.sourceVideoPath);
+    steps.push(
+      `[${base + i}:v]scale=1920:1080:flags=lanczos,setsar=1,setpts=PTS-STARTPTS[iv${i}]`,
+      `[${base + i}:a]aresample=44100,asetpts=PTS-STARTPTS[ia${i}]`,
+    );
+  });
+  const n = plan.intro.length;
+  steps.push(`${plan.intro.map((_, i) => `[iv${i}][ia${i}]`).join("")}concat=n=${n}:v=1:a=1[introv][introa]`);
+  let video = "[introv]";
+  let audio = "[introa]";
+  let nextInput = base + n;
+  const textPath = path.join(params.workDir, "in-questo-video.png");
+  const text = await renderHeadlinePng("IN QUESTO VIDEO", textPath, { allWhite: true, baseSize: 150, maxWidth: 1500 });
+  if (text) {
+    inputs.push("-loop", "1", "-t", seconds.toFixed(3), "-i", textPath);
+    const sExpr = "if(lt(t,0.12),0.9+1.83*t,if(lt(t,0.25),1.12-0.92*(t-0.12),1))";
+    steps.push(
+      `[${nextInput}:v]format=rgba,scale=w='max(2,trunc(${text.width}*${sExpr}/2)*2)':h=-2:eval=frame[qv]`,
+      `[introv][qv]overlay=x='(W-w)/2':y='H-h-90':eval=frame:shortest=1[introvt]`,
+    );
+    video = "[introvt]";
+    nextInput++;
+  }
+  const sfx = await ensureHeadlineSfx((a) => runFfmpeg(a));
+  if (sfx) {
+    inputs.push("-i", sfx);
+    steps.push(`[introa][${nextInput}:a]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[introas]`);
+    audio = "[introas]";
+    nextInput++;
+  }
+  return { video, audio, seconds, nextInput };
 }
 
 /** Quanti ingressi (-i) ci sono in una lista di argomenti ffmpeg. */
@@ -717,6 +812,26 @@ async function applyTopicChanges(
     logger.info("Cambio di argomento tagliato sulle parole", { da: cutStart.toFixed(1), a: cutEnd.toFixed(1), esce: c.leaveQuote, torna: back ? c.returnQuote : null });
   }
   return { ranges: out.filter((r) => r.end - r.start >= 1), removedSeconds };
+}
+
+/** Dalla frase d'apertura all'inizio del gioco si saltano al massimo tanti secondi di video tenuto. */
+const MAX_SKIPPED_TO_GAME_SECONDS = 180;
+/** La frase d'apertura dura fra queste due misure (secondi). */
+const OPENING_MIN_SECONDS = 1.2;
+const OPENING_MAX_SECONDS = 7;
+
+/**
+ * La frase d'apertura sulle parole vere: un attimo prima della prima parola fino a poco dopo
+ * l'ultima. Solo nella prima parte del pezzo (deve lanciare il video, non stare a metà).
+ */
+async function locateOpening(plan: HighlightsPlan, locator: PhraseLocator, duration: number): Promise<TimeRange | null> {
+  const o = plan.opening;
+  if (!o || o.start > Math.min(duration * 0.3, 600)) return null;
+  const f = await locator.locate(o);
+  if (!f) return null;
+  const start = Math.max(0, f.start - 0.3);
+  const end = Math.min(duration, start + OPENING_MAX_SECONDS, f.end + 0.45);
+  return end - start >= OPENING_MIN_SECONDS ? { start, end } : null;
 }
 
 /**

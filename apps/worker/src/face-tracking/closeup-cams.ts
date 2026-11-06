@@ -56,6 +56,8 @@ const MIN_SPEAKING_SCORE = 0.5;
  * zoomare"): con due facce quasi pari lo zoom poteva finire su chi stava zitto. Sotto, niente zoom.
  */
 const MIN_SPEAKING_MARGIN = 0.6;
+/** ...oppure deve essere il più "parlante" in almeno questa quota dei fotogrammi dello zoom. */
+const MIN_LEAD_SHARE = 0.7;
 /**
  * Una webcam vera cambia sempre un po' fra un fotogramma e l'altro (la persona si muove, sbatte gli
  * occhi, la compressione); il ritratto di un personaggio nel gioco o un'immagine fissa no. Differenza
@@ -267,11 +269,26 @@ export async function findSpeakingWebcam(params: {
   });
   const best = means.indexOf(Math.max(...means));
   const second = Math.max(-Infinity, ...means.filter((_, k) => k !== best));
-  // Zoom solo se è sicuro: parla davvero, stacca gli altri, e la sua faccia in quel momento si vede.
-  const ok = best >= 0 && means[best]! >= MIN_SPEAKING_SCORE && means[best]! - second >= MIN_SPEAKING_MARGIN && visible[best] === true;
+  // In quanti fotogrammi del momento è proprio lui il più "parlante" (e parla): la media da sola
+  // scartava 7 zoom su 9 su Mimic Party per scarti piccoli (1,0 contro 0,7) anche quando era lui a
+  // parlare quasi tutto il tempo.
+  let lead = 0;
+  let frames = 0;
+  for (let f = a; f < b; f++) {
+    const row = scores.map((s) => s[f] ?? -Infinity);
+    if (!row.some(Number.isFinite)) continue;
+    frames++;
+    if (row.indexOf(Math.max(...row)) === best && row[best]! > 0) lead++;
+  }
+  const leadShare = frames > 0 ? lead / frames : 0;
+  // Zoom solo se è sicuro: parla davvero, stacca gli altri (in media o quasi sempre fotogramma per
+  // fotogramma), e la sua faccia in quel momento si vede.
+  const ok =
+    best >= 0 && means[best]! >= MIN_SPEAKING_SCORE && (means[best]! - second >= MIN_SPEAKING_MARGIN || leadShare >= MIN_LEAD_SHARE || (leadShare >= 0.5 && means[best]! - second >= MIN_SPEAKING_MARGIN / 2)) && visible[best] === true;
   logger.info("Primo piano: chi parla", {
     a: params.focusFrom.toFixed(1),
     webcam: cams.map((c, k) => `${c.rect.x},${c.rect.y}=${means[k]!.toFixed(1)}`),
+    inTesta: leadShare.toFixed(2),
     scelta: ok ? `${cams[best]!.rect.x},${cams[best]!.rect.y}` : "nessuno",
   });
   return ok ? cams[best]! : null;
