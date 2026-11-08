@@ -218,9 +218,20 @@ export async function planLongformEdit(params: {
         : null;
     const phases = screenPhases && gameShare(screenPhases) >= MIN_GAME_SHARE ? screenPhases : null;
     if (screenPhases && !phases) logger.info("Fasi a schermo: si gioca poco, montaggio senza regole delle partite", { giocato: gameShare(screenPhases).toFixed(2) });
+    // Coi giochi filtrati la presentazione prima del primo gioco non arriva all'AI, e con lei la frase
+    // d'apertura (Torneo della Porca Mad0nna di Marza, 2026-11-08: "Versione numero 20 del torneo della
+    // porca madonna" detta 7 minuti prima del primo gioco, montato uscito senza apertura).
+    const firstGameAt = byScreen ? Math.min(...byScreen.map((r) => r.start)) : 0;
+    const preGame = params.highlights.segments
+      .map((seg) => ({ ...seg, start: seg.start - params.start, end: seg.end - params.start }))
+      .filter((seg) => seg.end > Math.max(0, firstGameAt - PRE_GAME_OPENING_SECONDS) && seg.start < firstGameAt)
+      .map((seg) => `[${seg.start.toFixed(1)}-${seg.end.toFixed(1)}] ${seg.text.trim()}`);
     const notes = [
       byScreen
         ? `Le parti in cui fanno altro (altri giochi, chiacchiere) sono già state tolte guardando lo schermo: dove i tempi saltano c'era altro. Resta solo: ${games!.keep.join(", ")}. Non servono cambi di argomento (topicChanges vuoto).`
+        : null,
+      preGame.length > 0
+        ? `PRIMA DEL PRIMO GIOCO (solo per scegliere "opening": qui spesso presentano cosa stanno per fare; non tenere niente di queste righe in "keep", "intro" o "closeups"):\n${preGame.join("\n")}`
         : null,
       isReaction
         ? "È una REACTION: guardano un video e ci reagiscono. Per l'INTRO scegli i momenti più forti DEL VIDEO a cui reagiscono (la frase o la scena più assurda detta nel video), con la loro reazione subito dopo: in una reaction è questo che fa venire voglia di guardare. In \"quote\" metti le parole esatte dette NEL VIDEO. Qui la regola \"SOLO URLA\" dell'intro non vale."
@@ -296,12 +307,14 @@ export async function planLongformEdit(params: {
           const merged = intersectRanges(keep, chosen).filter((r) => r.end - r.start >= 1);
           keep.splice(0, keep.length, ...merged);
           // Frase d'apertura dopo l'intro, poi il video riparte da dove comincia il gioco.
-          openingRange = await locateOpening(aiPlan, locator, duration);
+          // L'apertura sta all'inizio del pezzo, o comunque prima del primo gioco tenuto.
+          const openingLimit = Math.min(duration * 0.3, Math.max(600, firstGameAt));
+          openingRange = await locateOpening(aiPlan, locator, openingLimit);
           if (openingRange) {
             const from = Math.max(openingRange.end, aiPlan.gameStart ?? openingRange.end);
             const dropped = keep.reduce((sum, k) => sum + Math.max(0, Math.min(k.end, from) - k.start), 0);
             // Un inizio del gioco troppo avanti è quasi certamente sbagliato: lì si salta solo la frase.
-            const to = from <= Math.min(duration * 0.3, 600) && dropped <= MAX_SKIPPED_TO_GAME_SECONDS ? from : openingRange.end;
+            const to = from <= openingLimit + 60 && dropped <= MAX_SKIPPED_TO_GAME_SECONDS ? from : openingRange.end;
             const trimmed = keep.map((k) => ({ start: Math.max(k.start, to), end: k.end })).filter((k) => k.end - k.start >= 1);
             keep.splice(0, keep.length, ...trimmed);
             logger.info("Frase d'apertura e inizio del gioco", { frase: `${openingRange.start.toFixed(1)}-${openingRange.end.toFixed(1)}`, riparteDa: to.toFixed(1), saltati: Math.round(dropped) });
@@ -987,6 +1000,8 @@ async function assignZoomCams(
 /** Punteggio medio minimo del modello chi-parla sulle frasi di una voce perché sia di quella webcam. */
 const VOICE_MIN_MEAN = 0.5;
 
+/** Coi giochi filtrati, quanto parlato prima del primo gioco arriva all'AI per la frase d'apertura (secondi). */
+const PRE_GAME_OPENING_SECONDS = 1200;
 /** Dalla frase d'apertura all'inizio del gioco si saltano al massimo tanti secondi di video tenuto. */
 const MAX_SKIPPED_TO_GAME_SECONDS = 180;
 /** La frase d'apertura dura fra queste due misure (secondi). */
@@ -997,13 +1012,13 @@ const OPENING_MAX_SECONDS = 7;
  * La frase d'apertura sulle parole vere: un attimo prima della prima parola fino a poco dopo
  * l'ultima. Solo nella prima parte del pezzo (deve lanciare il video, non stare a metà).
  */
-async function locateOpening(plan: HighlightsPlan, locator: PhraseLocator, duration: number): Promise<TimeRange | null> {
+async function locateOpening(plan: HighlightsPlan, locator: PhraseLocator, limit: number): Promise<TimeRange | null> {
   const o = plan.opening;
-  if (!o || o.start > Math.min(duration * 0.3, 600)) return null;
+  if (!o || o.start > limit) return null;
   const f = await locator.locate(o);
   if (!f) return null;
   const start = Math.max(0, f.start - 0.3);
-  const end = Math.min(duration, start + OPENING_MAX_SECONDS, f.end + 0.45);
+  const end = Math.min(start + OPENING_MAX_SECONDS, f.end + 0.45);
   return end - start >= OPENING_MIN_SECONDS ? { start, end } : null;
 }
 
