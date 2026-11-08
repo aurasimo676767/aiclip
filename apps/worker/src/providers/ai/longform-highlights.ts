@@ -46,7 +46,7 @@ const SYSTEM_PROMPT = `Sei il montatore di un canale YouTube italiano che ripubb
 PRIMA DI TUTTO, CAPISCI IL GIOCO (campo "gameStyle"): che tipo di gioco è (party game a round, gioco di doppiaggio o imitazioni, co-op di enigmi, horror, sparatutto o battle royale, sportivo, quiz, gioco da tavolo...), cos'è una partita o un round in QUESTO gioco e dove sta il divertimento. Esempi: in un gioco di doppiaggio il bello è RIASCOLTARE i doppiaggi e le loro risate, quindi ogni riascolto resta intero; in un gioco di imitazioni o di disegno ogni turno è un momento; in un co-op di enigmi sono i litigi, gli errori e quando ci arrivano; in un horror gli spaventi e le urla; in uno sparatutto le uccisioni, le morti e gli scleri; in un quiz le risposte assurde. Monta il video secondo come funziona quel gioco.
 
 COSA TENERE E COSA TOGLIERE
-- TUTTE LE PARTI DIVERTENTI RESTANO (simo, 2026-11-05: "voglio che lascia tutte le parti divertenti di ogni partita/round, di qualsiasi tipo di gioco"): ogni momento che fa ridere, sclerare o stupire, di OGNI partita e di OGNI round, col suo contesto. Non scegliere "i migliori": tienili tutti.
+- I MOMENTI DAVVERO DIVERTENTI DI OGNI PARTITA RESTANO (simo, 2026-11-05: "lascia tutte le parti divertenti di ogni partita/round"), col contesto minimo per capirli. Ma SOLO quelli davvero forti (risate vere, scleri, momenti assurdi): il resto della partita si taglia. simo, 2026-11-08, su un torneo di 4 ore diventato 2 ore e 46: "è troppo, praticamente non ha tolto niente". Di solito un'ora di gioco diventa 15-25 minuti di montato.
 - UN SOLO ARGOMENTO: il video parla solo di quello del titolo. Se in mezzo parlano d'altro (leggono la chat su altri temi, parlano di altri giochi, di soldi, di sponsor, di cosa mangiano) e poi tornano al gioco, quel pezzo si toglie TUTTO.
 - SI DEVE VEDERE CHE GIOCANO (simo, 2026-10-26): il video è fatto soprattutto di PARTITE. Menu, lobby, caricamenti, attese e tutorial restano solo per pochi secondi (al massimo una quindicina di fila), quanto basta a capire il passaggio, oppure se dentro c'è un momento davvero divertente (risate, sclero). Usa la parte "A SCHERMO" per sapere dove sono.
 - INIZIO DEL VIDEO: una breve presentazione, al massimo mezzo minuto: il momento in cui dicono a cosa giocano o lo scelgono ("dai andiamo a giocare a...", "andiamo in quel gioco di merda", la scelta del gioco, la ruota). Poi la prima partita parte quasi subito.
@@ -282,6 +282,8 @@ async function planHighlightsUncached(
 const TIGHTEN_TOOL = "accorcia_montaggio";
 /** Voto massimo di un pezzo che si può togliere per accorciare. */
 const WEAK_SCORE = 4;
+/** Quota massima del pezzo di live che il montato tiene prima di togliere anche i pezzi medi. */
+const MAX_KEPT_SHARE = 0.4;
 
 const TIGHTEN_PROMPT = `Sei il montatore di un canale YouTube italiano che ripubblica le live di streamer. Hai già montato un video e ora va asciugato. Ricevi i pezzi tenuti, numerati, con il loro testo. Dai a OGNI pezzo un voto da 1 a 10 su quanto è forte per il video: poi si tolgono TUTTI i pezzi deboli (voto 4 o meno). Non c'è una durata da raggiungere: il video dura quello che resta di forte.
 
@@ -325,8 +327,10 @@ async function tightenHighlightsUncached(
   input: {
     title: string;
     pieces: Array<HighlightsRange & { text: string }>;
-    /** Momenti forti già scelti (intro, zoom): i pezzi che li contengono non si tolgono mai. */
+    /** Momenti forti già scelti (intro): i pezzi che li contengono non si tolgono mai. */
     protect?: HighlightsRange[];
+    /** Durata del pezzo di live intero: se il montato ne tiene più di MAX_KEPT_SHARE si toglie anche il medio. */
+    sourceSeconds?: number;
   },
   options: { apiKey: string; model: string },
 ): Promise<HighlightsRange[] | null> {
@@ -356,12 +360,18 @@ async function tightenHighlightsUncached(
     const score = new Map(parsed.data.scores.map((x) => [x.piece, x.score]));
     const last = input.pieces.length - 1;
     const isProtected = (p: HighlightsRange) => (input.protect ?? []).some((r) => r.start < p.end && r.end > p.start);
-    const remove = new Set(input.pieces.map((_, i) => i).filter((i) => i !== 0 && i !== last && (score.get(i) ?? 5) <= WEAK_SCORE && !isProtected(input.pieces[i]!)));
+    const removeAt = (threshold: number) => new Set(input.pieces.map((_, i) => i).filter((i) => i !== 0 && i !== last && (score.get(i) ?? 5) <= threshold && !isProtected(input.pieces[i]!)));
+    const keptSeconds = (r: Set<number>) => input.pieces.reduce((sum, p, i) => sum + (r.has(i) ? 0 : p.end - p.start), 0);
+    // Se resta ancora troppo del pezzo di live (4 ore diventate 2 ore e 46), si toglie anche il medio (5, poi 6).
+    let threshold = WEAK_SCORE;
+    let remove = removeAt(threshold);
+    while (input.sourceSeconds && keptSeconds(remove) > input.sourceSeconds * MAX_KEPT_SHARE && threshold < WEAK_SCORE + 2) remove = removeAt(++threshold);
     const kept = input.pieces.filter((_, i) => !remove.has(i)).map((p) => ({ start: p.start, end: p.end }));
     logger.info("Montaggio da YouTuber: secondo giro per accorciare", {
       prima: Math.round(total),
       dopo: Math.round(kept.reduce((sum, p) => sum + (p.end - p.start), 0)),
       tolti: remove.size,
+      sogliaVoto: threshold,
     });
     return kept;
   } catch (error) {

@@ -276,7 +276,9 @@ export async function planLongformEdit(params: {
               {
                 title: params.highlights.title,
                 pieces,
-                protect: [...aiPlan.intro, ...aiPlan.closeups].map((r) => ({ start: r.start, end: r.end })),
+                // Solo i momenti dell'intro: proteggere anche le righe degli zoom (150 su un torneo) bloccava quasi ogni taglio.
+                protect: aiPlan.intro.map((r) => ({ start: r.start, end: r.end })),
+                sourceSeconds: duration,
               },
               { apiKey: params.highlights.apiKey, model: params.highlights.model },
             );
@@ -464,7 +466,29 @@ function pickIntro(
 }
 
 /** Renderizza il video montato secondo il piano, con la GPU (NVENC) e ripiego sulla CPU. */
-export async function renderEditedLongform(params: {
+export async function renderEditedLongform(params: RenderEditedParams): Promise<void> {
+  const parts = splitForRender(params);
+  if (parts.length <= 1) return renderEditedPart(params);
+  // A pezzi (simo, 2026-11-08: "Cannot allocate memory" su ogni montato da 2 ore in su): ogni zoom è
+  // un ingresso che apre il sorgente, e con 62-198 zoom in un solo ffmpeg la memoria finiva. Ogni
+  // pezzo ha al massimo MAX_ZOOMS_PER_PART zoom e MAX_PART_SECONDS di video; poi si uniscono senza
+  // ricodificare (stessa codifica per tutti).
+  logger.info("Montato renderizzato a pezzi", { pezzi: parts.length, zoom: params.plan.punches.length });
+  const files: string[] = [];
+  for (const [i, part] of parts.entries()) {
+    const out = path.join(params.workDir, `part-${i}.mp4`);
+    const dir = path.join(params.workDir, `part-${i}`);
+    await fsp.mkdir(dir, { recursive: true });
+    await renderEditedPart({ ...part, workDir: dir, outputPath: out });
+    files.push(out);
+  }
+  const list = path.join(params.workDir, "parts.ffconcat");
+  await fsp.writeFile(list, `ffconcat version 1.0\n${files.map((f) => `file '${path.resolve(f).replace(/\\/g, "/").replace(/'/g, "'\\''")}'\n`).join("")}`);
+  await runFfmpeg(["-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", params.outputPath], { timeoutMs: 30 * 60 * 1000 });
+  for (const f of files) await fsp.rm(f, { force: true }).catch(() => undefined);
+}
+
+interface RenderEditedParams {
   sourceVideoPath: string;
   start: number;
   end: number;
@@ -473,7 +497,74 @@ export async function renderEditedLongform(params: {
   outputPath: string;
   /** Banner "iscriviti" (video con trasparenza, vedi subscribe-banner.ts) e quando farlo comparire (secondi del video finale). */
   banner?: { path: string; times: number[]; sfx?: string | null };
-}): Promise<void> {
+}
+
+const MAX_ZOOMS_PER_PART = 25;
+const MAX_PART_SECONDS = 15 * 60;
+
+/**
+ * Il montato diviso in pezzi consecutivi, tagliati fra un tratto tenuto e l'altro. Il primo pezzo ha
+ * intro e frase d'apertura; ogni pezzo ha i suoi zoom e banner, coi tempi spostati al suo inizio. Ogni
+ * pezzo si apre dal sorgente al suo primo tratto (start), e i tempi del segmento si spostano di tanto.
+ */
+function splitForRender(params: RenderEditedParams): RenderEditedParams[] {
+  const { plan } = params;
+  const prefix = plan.intro.reduce((s, r) => s + (r.end - r.start), 0) + (plan.opening ? plan.opening.end - plan.opening.start : 0);
+  const groups: TimeRange[][] = [];
+  let current: TimeRange[] = [];
+  let currentOut = 0;
+  let cursor = 0;
+  let zoomsInCurrent = 0;
+  for (const k of plan.keep) {
+    const len = k.end - k.start;
+    const zooms = plan.punches.filter((p) => p.start >= cursor && p.start < cursor + len).length;
+    if (current.length > 0 && (currentOut + len > MAX_PART_SECONDS || zoomsInCurrent + zooms > MAX_ZOOMS_PER_PART)) {
+      groups.push(current);
+      current = [];
+      currentOut = 0;
+      zoomsInCurrent = 0;
+    }
+    current.push(k);
+    currentOut += len;
+    zoomsInCurrent += zooms;
+    cursor += len;
+  }
+  if (current.length > 0) groups.push(current);
+  if (groups.length <= 1) return [params];
+
+  const parts: RenderEditedParams[] = [];
+  let outStart = 0;
+  groups.forEach((g, i) => {
+    const outLen = g.reduce((s, r) => s + (r.end - r.start), 0);
+    const shift = g[0]!.start;
+    const at = (t: number) => t - shift;
+    const punches = plan.punches
+      .filter((p) => p.start >= outStart && p.start < outStart + outLen)
+      .map((p) => ({ ...p, start: p.start - outStart, end: Math.min(p.end, outStart + outLen) - outStart, sourceStart: at(p.sourceStart) }));
+    // Tempi del video finale coperti dal pezzo (il primo comprende intro e frase d'apertura).
+    const finalFrom = i === 0 ? 0 : prefix + outStart;
+    const finalTo = prefix + outStart + outLen;
+    const times = (params.banner?.times ?? []).filter((t) => t >= finalFrom && t < finalTo).map((t) => t - finalFrom);
+    parts.push({
+      ...params,
+      start: params.start + shift,
+      end: params.start + g[g.length - 1]!.end,
+      plan: {
+        ...plan,
+        keep: g.map((r) => ({ start: at(r.start), end: at(r.end) })),
+        punches,
+        intro: i === 0 ? plan.intro.map((r) => ({ start: at(r.start), end: at(r.end) })) : [],
+        opening: i === 0 && plan.opening ? { ...plan.opening, start: at(plan.opening.start), end: at(plan.opening.end) } : undefined,
+        outputDuration: outLen,
+      },
+      banner: params.banner && times.length > 0 ? { ...params.banner, times } : undefined,
+    });
+    outStart += outLen;
+  });
+  return parts;
+}
+
+async function renderEditedPart(params: RenderEditedParams): Promise<void> {
   const { plan } = params;
   const banners = params.banner?.times ?? [];
   const between = (ranges: TimeRange[]) => ranges.map((r) => `between(t,${r.start.toFixed(3)},${r.end.toFixed(3)})`).join("+");
