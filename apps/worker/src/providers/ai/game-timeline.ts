@@ -299,6 +299,40 @@ export function mainGame(timeline: GameSegment[]): string | null {
   return [...totals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 }
 
+/** Fra la ruota e il gioco che sceglie si saltano al massimo tanti secondi di altro (lobby, desktop, chiamata). */
+const WHEEL_TO_GAME_MAX_GAP_SECONDS = 300;
+/** Tratti più corti di così fra la ruota e il gioco sono letture sbagliate dei fotogrammi (es. 45 s di "COD"). */
+const WHEEL_BLIP_SECONDS = 60;
+/** Della ruota si tiene sicuro la parte finale, dove gira ed esce il gioco (la mappa ha tratti da 45 s). */
+const WHEEL_KEEP_SECONDS = 60;
+
+/**
+ * La ruota in posizione i sceglie un gioco tenuto? Si guarda il primo gioco dopo di lei, saltando
+ * l'"altro" e i tratti brevi in mezzo (Torneo della Porca Mad0nna, 2026-11-08: ruota, videochiamata,
+ * poi il gioco: la ruota veniva scartata).
+ */
+function wheelPicksChosen(timeline: GameSegment[], i: number, chosen: (s: GameSegment) => boolean): boolean {
+  const wheel = timeline[i]!;
+  for (const next of timeline.slice(i + 1)) {
+    if (next.start - wheel.end > WHEEL_TO_GAME_MAX_GAP_SECONDS) return false;
+    if (chosen(next)) return true;
+    if (next.kind === "ruota") return false;
+    if (next.kind === "gioco" && next.end - next.start >= WHEEL_BLIP_SECONDS) return false;
+  }
+  return false;
+}
+
+/**
+ * I giri della ruota che scelgono i giochi tenuti: il montato li tiene sempre, anche se l'AI li
+ * taglia (regola di simo: "il giro della ruota deve SEMPRE esserci").
+ */
+export function wheelSpins(timeline: GameSegment[], keep: string[]): Array<{ start: number; end: number }> {
+  const allowed = allowedRanges(timeline, keep);
+  return timeline
+    .filter((s) => s.kind === "ruota" && allowed.some((r) => s.start >= r.start - 0.5 && s.end <= r.end + 0.5))
+    .map((s) => ({ start: Math.max(s.start, s.end - WHEEL_KEEP_SECONDS), end: s.end }));
+}
+
 /**
  * Le parti da tenere per i giochi scelti: i loro tratti, più la ruota subito prima (la ruota che
  * sceglie quel gioco resta sempre, vedi le regole di simo sui VOD). "Altro" si tiene solo se scelto.
@@ -312,8 +346,7 @@ export function allowedRanges(timeline: GameSegment[], keep: string[]): Array<{ 
     (s.kind === "gioco" && keep.includes(s.name)) || (s.kind === "altro" && (keep.includes("Altro") || aboutChosen(s)));
   const out: Array<{ start: number; end: number }> = [];
   timeline.forEach((s, i) => {
-    const next = timeline[i + 1];
-    if (chosen(s) || (s.kind === "ruota" && next && chosen(next))) {
+    if (chosen(s) || (s.kind === "ruota" && wheelPicksChosen(timeline, i, chosen))) {
       const last = out[out.length - 1];
       if (last && s.start - last.end < 1) last.end = s.end;
       else out.push({ start: s.start, end: s.end });

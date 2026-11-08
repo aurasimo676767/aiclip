@@ -7,7 +7,7 @@ import { measureRmsWindows, WINDOW_SECONDS } from "./word-loudness.js";
 import type { TranscriptSegment } from "@clipforge/shared";
 import { planHighlights, tightenHighlights } from "../providers/ai/longform-highlights.js";
 import { PhraseLocator, type LocatedPhrase } from "./intro-moments.js";
-import { allowedRanges, type GameSegment } from "../providers/ai/game-timeline.js";
+import { allowedRanges, wheelSpins, type GameSegment } from "../providers/ai/game-timeline.js";
 import type { HighlightsPlan } from "../providers/ai/longform-highlights.js";
 import { renderHeadlinePng, ensureHeadlineSfx } from "./headline.js";
 import { findSpeakingWebcam, sameWebcam, scoreWebcamSpeakers, type StreamWebcam, type WebcamSpeakers } from "../face-tracking/closeup-cams.js";
@@ -304,6 +304,12 @@ export async function planLongformEdit(params: {
             logger.info("Montaggio: struttura delle partite", { esito: structured.note });
             chosen = byScreen ? intersectRanges(structured.keep, byScreen).filter((r) => r.end - r.start >= 1) : structured.keep;
           }
+          // Il giro della ruota che sceglie un gioco tenuto resta sempre, anche se l'AI l'ha tagliato.
+          if (byScreen) {
+            const wheels = wheelSpins(games!.timeline, games!.keep).filter((w) => w.end > 0 && w.start < duration);
+            chosen = unionRanges(chosen, wheels.map((w) => ({ start: Math.max(0, w.start), end: Math.min(duration, w.end) })));
+            if (wheels.length > 0) logger.info("Montaggio: giri della ruota tenuti", { ruote: wheels.map((w) => `${w.start.toFixed(0)}-${w.end.toFixed(0)}`) });
+          }
           const merged = intersectRanges(keep, chosen).filter((r) => r.end - r.start >= 1);
           keep.splice(0, keep.length, ...merged);
           // Frase d'apertura dopo l'intro, poi il video riparte da dove comincia il gioco.
@@ -438,6 +444,16 @@ function cleanRanges(ranges: TimeRange[], duration: number, segments: Transcript
     else merged.push({ ...r });
   }
   return merged.filter((r) => r.end - r.start >= MIN_KEEP_SECONDS);
+}
+
+function unionRanges(a: TimeRange[], b: TimeRange[]): TimeRange[] {
+  const out: TimeRange[] = [];
+  for (const r of [...a, ...b].sort((p, q) => p.start - q.start)) {
+    const last = out[out.length - 1];
+    if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
+    else out.push({ ...r });
+  }
+  return out;
 }
 
 function intersectRanges(a: TimeRange[], b: TimeRange[]): TimeRange[] {
