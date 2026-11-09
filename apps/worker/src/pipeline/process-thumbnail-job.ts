@@ -21,12 +21,16 @@ import {
   type YoutubeCredentials,
 } from "../providers/youtube/youtube-publisher.js";
 import { updateThumbnailJobStatus } from "../queue/thumbnail-queue.js";
+import { describeInspiration, pickInspiration, readInspoIndex, referenceWithHiddenFaces } from "../lib/cover-inspo.js";
+import { addApprovedCover } from "./cover-inspo-train.js";
 import { censorText } from "@clipforge/shared";
 
 const CANDIDATE_FRAME_COUNT = 8;
 // Le card dei crediti (3s) all'inizio/fine del render long-form non sono contenuto vero — le
 // escludiamo dal campionamento dei fotogrammi candidati.
 const CREDITS_CARD_MARGIN_SECONDS = 4;
+/** Copertine dei canali seguiti mostrate all'AI che sceglie la scritta (solo testo: ~1.500 token in più). */
+const INSPIRATION_COUNT = 10;
 
 /** Estrae l'id video da un URL YouTube in uno dei formati comuni (watch?v=, youtu.be/, shorts/). */
 function extractYoutubeVideoId(input: string): string | null {
@@ -121,6 +125,12 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       }
       await updateThumbnailJobStatus(job.id, "COMPLETED", { youtube_thumbnail_set: set, completed_at: new Date().toISOString() });
       logger.info("Copertina approvata", { jobId: job.id, clipId: clip.id, suYoutube: set });
+      // Le approvate allenano le copertine dopo (lib/cover-inspo.ts); se non riesce, la copertina è già a posto.
+      if (project) {
+        await addApprovedCover(project.user_id, coverPath, { id: clip.id, title: clip.title }, jobDir).catch((err) =>
+          logger.warn("Copertina approvata non aggiunta all'allenamento", { jobId: job.id, error: err instanceof Error ? err.message : String(err) }),
+        );
+      }
       return;
     }
 
@@ -175,6 +185,10 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
 
     // Istruzioni libere scritte da simo nel sito (colonna della migrazione 0033).
     const coverInstructions = (job as { cover_instructions?: string | null }).cover_instructions?.trim() || undefined;
+    // Allenamento (lib/cover-inspo.ts): le copertine dei canali seguiti più vicine a questo video e che
+    // hanno fatto più visualizzazioni del solito. Gioco e tipo non si sanno ancora: decide il titolo.
+    const inspoIndex = project ? await readInspoIndex(project.user_id, jobDir) : { items: [] };
+    const inspiration = pickInspiration(inspoIndex, { title: `${clip.title} ${clip.hook}` }, INSPIRATION_COUNT);
     const selection = await selectThumbnailAssets({
       apiKey: env.ANTHROPIC_API_KEY,
       // Con le istruzioni di simo il modello economico le ignorava (2026-09-30: "Rematch, NON Alpaca
@@ -185,7 +199,12 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       clipCaption: clip.caption ?? "",
       frameJpegsBase64: lowResBase64,
       userInstructions: coverInstructions,
+      inspiration: inspiration.length > 0 ? describeInspiration(inspiration) : undefined,
     });
+    const modelCover = selection.inspirationIndex ? inspiration[selection.inspirationIndex - 1] : undefined;
+    if (inspiration.length > 0) {
+      logger.info("Copertina: allenamento", { jobId: job.id, mostrate: inspiration.length, modello: modelCover ? `${modelCover.channel}: ${modelCover.title}` : null, scena: selection.sceneIdea });
+    }
 
     // 3) Sfondo, in ordine di affidabilità:
     //    a) link del video reagito incollato a mano dall'utente (il più affidabile: nessun
@@ -308,6 +327,17 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
         const stylePath = path.resolve("assets", "cover-style", "modello-scritta.jpg");
         // Logo vero del gioco (come nelle copertine di AvraiAuraBooter), anche negli Short di gioco.
         const logoPath = !isReaction && selection.gameName ? await findSteamLogo(selection.gameName, path.join(jobDir, "logo.png")) : null;
+        // La copertina modello scelta dall'AI, facce coperte; negli Short no (impaginazione verticale diversa).
+        let inspirationPath: string | null = null;
+        if (modelCover && !isShort) {
+          try {
+            const raw = path.join(jobDir, "modello.jpg");
+            await storageProvider.downloadToFile(modelCover.path, raw);
+            inspirationPath = await referenceWithHiddenFaces(raw, path.join(jobDir, "modello-senza-facce.jpg"));
+          } catch (err) {
+            logger.warn("Copertina modello non preparata, vado senza", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
+          }
+        }
         const aiPath = path.join(jobDir, "thumbnail-ai.jpg");
         const aiParams: AiCoverParams = {
           apiKey: env.OPENAI_API_KEY,
@@ -325,6 +355,8 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           logoPath,
           videoTitle: clip.title,
           userInstructions: coverInstructions,
+          inspirationPath,
+          sceneIdea: selection.sceneIdea,
           outputPath: aiPath,
         };
         try {

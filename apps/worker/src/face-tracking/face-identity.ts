@@ -200,6 +200,21 @@ export interface PersonReference {
 }
 
 /**
+ * Riquadri dei volti in un'immagine (pixel dell'immagine). YuNet a 640 prende intere anche le facce
+ * enormi e tagliate dal bordo delle copertine, che il rilevatore leggero prende a metà (2026-11-09).
+ */
+export async function detectFaceBoxes(image: Buffer): Promise<FaceBox[]> {
+  const { data, info } = await sharp(image).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const bgr = Buffer.alloc(data.length);
+  for (let i = 0; i < data.length; i += 3) {
+    bgr[i] = data[i + 2]!;
+    bgr[i + 1] = data[i + 1]!;
+    bgr[i + 2] = data[i]!;
+  }
+  return (await detectLandmarks({ data: bgr, width: info.width, height: info.height })).map((f) => ({ ...f.box, score: f.score }));
+}
+
+/**
  * Quanto è girata la testa nella foto (0 = di fronte, ~0,5 = quasi di profilo): distanza del naso dal
  * punto fra gli occhi, in rapporto alla distanza fra gli occhi (YuNet: occhi, naso, angoli della
  * bocca). null se non c'è un volto. Serve a scegliere le foto di riferimento per le copertine.

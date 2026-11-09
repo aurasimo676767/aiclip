@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { readFaceIndex } from "@/lib/face-library";
 import { PollingRefresher } from "@/components/polling-refresher";
+import { CoverInspoPanel } from "@/components/cover-inspo-panel";
 import { ThumbnailGeneratorForm } from "@/components/thumbnail-generator-form";
 import { ThumbnailJobCard, type ThumbnailJobViewModel } from "@/components/thumbnail-job-card";
 
@@ -56,6 +57,8 @@ export default async function ThumbnailsPage() {
           viene impostata subito su YouTube.
         </p>
       </div>
+
+      <CoverInspoPanel />
 
       <ThumbnailGeneratorForm people={people} />
 

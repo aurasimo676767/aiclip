@@ -47,6 +47,13 @@ export interface AiCoverParams {
   userInstructions?: string;
   /** Immagine SENZA scritta (la si aggiunge dopo, vedi addCoverTitle): quando il filtro di OpenAI rifiuta la scritta. */
   noText?: boolean;
+  /**
+   * Copertina di un canale seguito che ha funzionato, con le facce coperte (lib/cover-inspo.ts):
+   * modello per impaginazione, luce e energia, non per persone e parole.
+   */
+  inspirationPath?: string | null;
+  /** Idea della scena (in inglese) scritta dall'AI che sceglie la copertina, ispirata a quella modello. */
+  sceneIdea?: string | null;
   outputPath: string;
 }
 
@@ -90,6 +97,12 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
   if (params.logoPath) {
     const n = add(params.logoPath);
     inputLines.push(`- image ${n}: the OFFICIAL logo of the game${params.gameName ? ` "${params.gameName}"` : ""}: put this exact logo big and readable in the thumbnail (top area), do not redraw it differently.`);
+  }
+  if (params.inspirationPath) {
+    const n = add(params.inspirationPath);
+    inputLines.push(
+      `- image ${n}: a TOP-PERFORMING thumbnail of a big Italian clip channel, with the faces hidden on purpose. Use it as the model for composition, framing, how big the people are, lighting, color energy and where the title sits. Do NOT copy its people, its words, its game or its background.`,
+    );
   }
   if (params.styleExamplePath) {
     const n = add(params.styleExamplePath, true);
@@ -142,6 +155,7 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     // Stile scelto da simo il 2026-09-26: le copertine del canale AvraiAuraBooter (fatte anche loro
     // con l'AI): piene, sature, facce enormi, logo del gioco, bigliettini, costumi a tema.
     "Visual style: like the top Italian clip channels (e.g. \"Avrai Aura Booter\"): a dense, busy, hyper-saturated composition, glossy and dramatic, strong rim light and colored glow around the people, subtle vignette, bright complementary colors (blue/orange, purple/yellow, red/yellow). The people fill most of the frame, big faces close together, slightly overlapping, the main one biggest.",
+    ...(params.sceneIdea ? [`Scene idea for THIS video: ${params.sceneIdea}`] : []),
     "When it fits the video and is funny, dress the people for the theme (e.g. hard hats for a building game, costumes for a party game) and add a few themed props from the game or the topic around them.",
     "",
     params.noText

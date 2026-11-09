@@ -54,6 +54,14 @@ const TOOL_SCHEMA = {
         enum: ["giallo", "bianco", "rosso", "verde", "azzurro", "rosa", "arancio"],
         description: "Colore della scritta, a tema col gioco o col tono (es. horror rosso, gioco di prato verde, quiz giallo).",
       },
+      inspirationIndex: {
+        type: "integer",
+        description: "Solo se ti ho dato le COPERTINE CHE FUNZIONANO: il numero di quella da prendere come modello per scena e composizione (la più adatta a QUESTO video), 0 se nessuna va bene.",
+      },
+      sceneIdea: {
+        type: "string",
+        description: "IN INGLESE, 1-2 frasi concrete per il grafico: cosa fanno gli streamer in copertina, cosa c'è dietro, oggetti o costumi a tema, ispirandoti alla copertina modello ma adattata a QUESTO video. Mai nomi di persone vere diverse dagli streamer, mai parole come truffa/scam.",
+      },
     },
     required: ["backgroundFrameIndex", "kind", "coverColor"],
   },
@@ -72,6 +80,8 @@ Regole della SCRITTA: 1-3 parole in italiano, come le scrivono i canali di clip 
 - Si può usare il nome del gioco se è corto e riconoscibile (MEGA JEOPARDY), punti di domanda o esclamativi alla fine, lettere allungate (TELEFONATAAA).
 - Niente emoji, niente nomi degli streamer (le loro facce sono già in copertina).
 
+Se ti do le COPERTINE CHE FUNZIONANO (copertine vere dei canali che il proprietario segue, con quante visualizzazioni hanno fatto rispetto al solito del loro canale): sono il tuo allenamento. Guarda cosa hanno in comune quelle che fanno molte più visualizzazioni del solito (che tipo di parole, quante, punteggiatura, che scena) e fai lo stesso per questo video, senza copiarne le parole. Scegli la più adatta come modello (inspirationIndex) e scrivi sceneIdea.
+
 Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 
 export interface ThumbnailSelectionOptions {
@@ -84,6 +94,8 @@ export interface ThumbnailSelectionOptions {
   frameJpegsBase64: string[];
   /** Istruzioni scritte da simo nel sito (gioco, scritte, stile): hanno la precedenza. */
   userInstructions?: string;
+  /** Copertine dei canali seguiti che hanno funzionato (describeInspiration in lib/cover-inspo.ts). */
+  inspiration?: string;
 }
 
 export interface ThumbnailSelection {
@@ -95,6 +107,9 @@ export interface ThumbnailSelection {
   gameName: string | null;
   coverWords: string | null;
   coverColor: string;
+  /** 1-based fra le copertine passate in inspiration; null = nessuna. */
+  inspirationIndex: number | null;
+  sceneIdea: string | null;
 }
 
 export async function selectThumbnailAssets(options: ThumbnailSelectionOptions): Promise<ThumbnailSelection> {
@@ -104,6 +119,8 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     {
       type: "text",
       text: `Video: "${options.clipTitle}"\nRiassunto: ${options.clipHook}\nDescrizione: ${options.clipCaption}${
+        options.inspiration ? `\n\nCOPERTINE CHE FUNZIONANO (dai canali seguiti, le più vicine a questo video):\n${options.inspiration}` : ""
+      }${
         options.userInstructions ? `\n\nISTRUZIONI DEL PROPRIETARIO DEL CANALE (hanno la precedenza su tutto, anche sul gioco e sulla scritta): ${options.userInstructions}` : ""
       }`,
     },
@@ -139,6 +156,8 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     gameName?: string;
     coverWords?: string;
     coverColor?: string;
+    inspirationIndex?: number;
+    sceneIdea?: string;
   };
 
   if (typeof input.backgroundFrameIndex !== "number") {
@@ -155,5 +174,7 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     gameName: input.gameName?.trim() ? input.gameName.trim() : null,
     coverWords: input.coverWords?.trim() ? input.coverWords.trim().toUpperCase() : null,
     coverColor: input.coverColor ?? "giallo",
+    inspirationIndex: typeof input.inspirationIndex === "number" && input.inspirationIndex > 0 ? input.inspirationIndex : null,
+    sceneIdea: input.sceneIdea?.trim() ? input.sceneIdea.trim() : null,
   };
 }

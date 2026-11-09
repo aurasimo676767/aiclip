@@ -17,6 +17,7 @@ import { refreshYoutubeStats } from "./pipeline/refresh-youtube-stats.js";
 import { alertStuckShorts } from "./pipeline/stuck-shorts-alert.js";
 import { requeueFinishedLives } from "./pipeline/live-vod-wait.js";
 import { pauseControlLoop } from "./pipeline/pause-control-loop.js";
+import { coverInspoLoop } from "./pipeline/cover-inspo-train.js";
 import { isWorkerPaused } from "./lib/pause-control.js";
 import { processSourceDeleteRequests } from "./lib/cleanup-source.js";
 
@@ -212,4 +213,5 @@ await Promise.all([
   statsRefreshLoop(),
   pauseControlLoop(),
   sourceDeleteLoop(),
+  coverInspoLoop(() => shuttingDown),
 ]);
