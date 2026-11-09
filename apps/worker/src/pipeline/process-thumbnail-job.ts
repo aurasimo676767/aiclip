@@ -336,7 +336,28 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
         }
         const stylePath = path.resolve("assets", "cover-style", "modello-scritta.jpg");
         // Logo vero del gioco (come nelle copertine di AvraiAuraBooter), anche negli Short di gioco.
-        const logoPath = !isReaction && selection.gameName ? await findSteamLogo(selection.gameName, path.join(jobDir, "logo.png")) : null;
+        // Con più giochi i loghi li disegna l'AI sulle tessere della ruota: quello di uno solo lo faceva enorme.
+        const logoPath = !isReaction && selection.gameName && selection.otherGames.length === 0 ? await findSteamLogo(selection.gameName, path.join(jobDir, "logo.png")) : null;
+        // Reaction ai TikTok: i TikTok veri ritagliati dai fotogrammi a piena risoluzione (modello SdrogoCity).
+        const tiktokFramePaths: string[] = [];
+        if (isReaction && selection.reactedFormat === "tiktok") {
+          for (const [n, c] of selection.contentFrames.entries()) {
+            try {
+              const full = await grabFrame(localVideoPath, timestamps[c.index] ?? timestamps[0]!, path.join(jobDir, `tiktok-${n}-full.jpg`));
+              const { width = 0, height = 0 } = await sharp(full).metadata();
+              const left = Math.round(c.x * width);
+              const top = Math.round(c.y * height);
+              const w = Math.min(width - left, Math.round(c.width * width));
+              const h = Math.min(height - top, Math.round(c.height * height));
+              if (w < 80 || h < 120) continue;
+              const out = path.join(jobDir, `tiktok-${n}.jpg`);
+              await sharp(full).extract({ left, top, width: w, height: h }).jpeg({ quality: 92 }).toFile(out);
+              tiktokFramePaths.push(out);
+            } catch (err) {
+              logger.warn("Fotogramma TikTok non ritagliato", { jobId: job.id, error: err instanceof Error ? err.message : String(err) });
+            }
+          }
+        }
         // La copertina modello scelta dall'AI, facce coperte; negli Short no (impaginazione verticale diversa).
         let inspirationPath: string | null = null;
         if (modelCover && !isShort) {
@@ -356,9 +377,10 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           kind: isShort ? "short" : isReaction ? "reaction" : "game",
           // La bozza dei giochi è montata sul fotogramma del video: GPT la copiava.
           draftPath: isGame ? null : draftPath,
-          backgroundPath: isGame ? steamHeroPath : backgroundFullPath,
+          backgroundPath: isGame ? steamHeroPath : tiktokFramePaths.length > 0 ? null : backgroundFullPath,
+          tiktokFramePaths,
           people: aiPeople,
-          title: title.toUpperCase(),
+          title: asteriskCensor(title).toUpperCase(),
           gameName: selection.gameName ?? null,
           otherGames: selection.otherGames,
           // Se simo chiede un font o uno stile della scritta, la copertina-modello non si passa: GPT
@@ -472,6 +494,14 @@ async function grabFrame(videoPath: string, t: number, outputPath: string, longE
     outputPath,
   ]);
   return outputPath;
+}
+
+/**
+ * Le parole censurate con le cifre ("MAD0NNA") diventano ad asterischi ("M*****A") per GPT Image:
+ * la cifra la ridisegnava come lettera e la bestemmia usciva intera in copertina (2026-11-09).
+ */
+function asteriskCensor(text: string): string {
+  return text.replace(/[\p{L}\d]+/gu, (w) => (w.length >= 4 && /\p{L}/u.test(w) && /\d/.test(w) ? `${w[0]}${"*".repeat(w.length - 2)}${w[w.length - 1]}` : w));
 }
 
 /** Il titolo long-form segue già la convenzione "{ALIAS} REACTION: {argomento}" / "{ALIAS} GIOCA A {gioco}" (vedi longform-ranking.ts) — ne estrae solo la prima parte per il banner. */

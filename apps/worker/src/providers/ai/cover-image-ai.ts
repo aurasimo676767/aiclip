@@ -36,6 +36,11 @@ export interface AiCoverParams {
   backgroundPath: string | null;
   /** Altri giochi del video oltre a gameName (tornei, serate a più giochi). */
   otherGames?: string[];
+  /**
+   * Reaction ai TikTok: ritagli VERI dei TikTok dal video (simo, 2026-11-09, modello SdrogoCity "BLUR
+   * REACTION TIKTOK al LIMITE della FOLLIA ONIRICA": i tiktoker veri in schede verticali).
+   */
+  tiktokFramePaths?: string[];
   /** Nell'ordine della bozza: il primo è il protagonista. */
   people: AiCoverPerson[];
   /** Scritta esatta, già in maiuscolo. */
@@ -87,6 +92,12 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
           ? `official artwork of the game${params.gameName ? ` "${params.gameName}"` : ""}, ONLY as a reference of what the game really looks like (art style, characters, places, colors). Do not paste it: redraw the game world yourself as a new clean scene`
           : "the background, a frame of the Short clip itself (the key moment): use what happens in it as the scene behind the streamer (for a reaction to a TikTok or video, show that video behind; for a game, the game)";
     inputLines.push(`- image ${bgIndex}: ${background}.`);
+  }
+  const tiktokIndexes = (params.tiktokFramePaths ?? []).map((p) => add(p));
+  if (tiktokIndexes.length > 0) {
+    inputLines.push(
+      `- image${tiktokIndexes.length > 1 ? "s" : ""} ${tiktokIndexes.join(", ")}: REAL frames of the TikToks the streamers react to. They are real: put each one in the thumbnail as a vertical TikTok card, keeping the people and what happens in them exactly as they are (same faces, same scene), only cleaned up and sharper.`,
+    );
   }
   for (const person of params.people) {
     // Le foto di una persona vanno in un collage solo: GPT Image fa pagare ~1.000 token per OGNI
@@ -156,16 +167,22 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     params.people.length > 0
       ? `Exactly ${params.people.length} streamer${params.people.length === 1 ? "" : "s"} in the foreground, each drawn ONCE: ${params.people.map((p) => `"${p.name}"`).join(", ")}. ONE single person per name: never draw the same person twice, never give two people the same face, never add other streamers, and never invent someone who has no reference photos here.${params.draftPath ? " If someone is missing from the draft, add them next to the others, same size and style." : ""}`
       : `No reference photos: the streamer in the foreground is the person already visible in image ${bgIndex}, redrawn big and sharp with the SAME face; never invent a different person.`,
-    ...(params.kind === "reaction"
-      ? [`Keep the main person or subject of the original thumbnail (image ${bgIndex}) clearly visible in the background: it is what the streamers are reacting to.`]
-      : []),
+    ...(tiktokIndexes.length > 0
+      ? [
+          `LAYOUT of a TikTok reaction (like the Italian channel SdrogoCity): on the left two thirds, ${tiktokIndexes.length} vertical TikTok cards side by side (images ${tiktokIndexes.join(", ")}), each with a glowing neon pink-and-cyan border and a small TikTok logo, a couple of big emoji between them; on the right the main streamer HUGE, from the chest up, laughing or shocked while looking at them; electric pink/purple background.`,
+        ]
+      : params.kind === "reaction" && bgIndex !== null
+        ? [`Keep the main person or subject of the original thumbnail (image ${bgIndex}) clearly visible in the background: it is what the streamers are reacting to.`]
+        : []),
     // simo, 2026-09-30: "tutti facce incazzate mentre blur sembra che stia ammirando..." — una faccia fuori tono stona.
     `${layout}${protagonist ? ` "${protagonist}" is the main character.` : ""} Mood: ${mood}. All the people share the same mood: nobody has an unrelated or odd expression (no dreamy, admiring or confused look when the others are fired-up). The people are lit like the scene around them, with at most a very subtle light outline.`,
     ...(params.kind === "game" && games.length > 0
       ? [
+          // simo, 2026-11-09: "i giochi si vedono poco". Modelli: le copertine dei tornei di Blur Indietro
+          // (al centro la ruota del torneo fatta di riquadri, uno per gioco col suo logo, i giocatori ai lati).
           games.length === 1
-            ? `Background: the world of the video game "${games[0]}", recreated by you in its exact real art style with every recognizable detail (places, characters, items, interface elements fans would recognize), clean and spectacular like official key art. Never a blurry gameplay screenshot, no webcams, chat or stream overlays.`
-            : `Background: the worlds of these video games played in the video: ${games.map((g) => `"${g}"`).join(", ")}, each recreated by you in its exact real art style with recognizable details, blended into one clean spectacular scene (or split in clean diagonal sections). Never blurry gameplay screenshots, no webcams, chat or stream overlays.`,
+            ? `The GAME must be big and clearly visible: the world of the video game "${games[0]}", recreated by you in its exact real art style with every recognizable detail (places, characters, items, interface elements fans would recognize), clean and spectacular like official key art, filling the center of the image. The streamers stand at the left and right sides (or one big on one side) and never hide the middle of the game scene. Never a blurry gameplay screenshot, no webcams, chat or stream overlays.`
+            : `TOURNAMENT LAYOUT (like the Italian channel Blur Indietro): in the CENTER a big glowing wheel (or sphere) made of tiles, ONE tile per game played: ${games.map((g) => `"${g}"`).join(", ")}. Each tile shows that game's world recreated by you in its exact real art style, with the game's REAL logo big and readable on the tile, so every game is recognizable at first glance. The streamers are at the left and right sides of the wheel, big, and never cover it; behind everything a spectacular themed background. No gameplay screenshots, no webcams, chat or stream overlays.`,
         ]
       : []),
     // simo, 2026-11-09: la copertina in stile AvraiAuraBooter (lucida, satura) "si vede che è FULL ia".
@@ -181,8 +198,9 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
       : line2
       ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. First line white with a light grey gradient, second line in a bright yellow-to-orange gradient, thick black outline, slight 3D extrusion and drop shadow, with a rough red brush stroke behind the text (like CircolinoClip thumbnails).`
       : `Text: exactly "${line1}", spelled exactly, one line. Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. Bright yellow-to-orange gradient, thick black outline, slight 3D extrusion and drop shadow, with a rough red brush stroke behind the text (like CircolinoClip thumbnails).`,
+    ...(/[*]/.test(params.title) ? ["The asterisks (*) in the title are censorship of a bad word: draw them exactly as asterisks, NEVER fill in the hidden letters."] : []),
     // simo, 2026-10-25: "ci sono delle scritte nella copertina, 3 quadratini, non voglio che proprio ci siano".
-    `Apart from ${params.noText ? "" : "the title and "}the game logo there is NO other text anywhere: no stickers, no paper notes, no labels, no speech bubbles, no captions, no small words, no channel logos, no watermarks, no borders. Very sharp.`,
+    `Apart from ${params.noText ? "" : "the title and "}the game logos${tiktokIndexes.length > 0 ? ", the TikTok logos and any text inside the TikTok frames" : ""} there is NO other text anywhere: no stickers, no paper notes, no labels, no speech bubbles, no captions, no small words, no channel logos, no watermarks, no borders. Very sharp.`,
     // simo, 2026-09-29: "voglio poter dire all'ia come farle". Le sue istruzioni (in italiano) vincono.
     ...(params.userInstructions
       ? ["", `INSTRUCTIONS FROM THE CHANNEL OWNER (written in Italian; they have the HIGHEST priority and override any rule above about the text, how many texts, stickers, game, layout and style; the faces must still stay the real people): ${params.userInstructions}`]

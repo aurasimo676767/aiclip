@@ -45,6 +45,19 @@ const TOOL_SCHEMA = {
         type: "string",
         description: "Solo per game: il nome ESATTO del gioco com'è sul negozio (es. \"Trivia Murder Party 3\", \"Call of Duty: Black Ops II\", \"skribbl.io\"), per trovarne la grafica ufficiale. Ometti per le reaction.",
       },
+      reactedFormat: {
+        type: "string",
+        enum: ["tiktok", "video", "altro"],
+        description: "Solo per reaction: tiktok = reagiscono a TikTok/Reels/Shorts verticali (uno o tanti); video = a un video lungo orizzontale; altro = il resto.",
+      },
+      contentFrames: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { index: { type: "integer" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } },
+        },
+        description: "Solo per reaction a TikTok: fino a 3 fotogrammi (indici diversi) dove si vede BENE il TikTok a cui reagiscono, con la faccia o il soggetto del TikTok: per ognuno il riquadro (frazioni 0-1) che contiene SOLO il TikTok verticale, senza webcam, chat o interfaccia. Scegli quelli coi soggetti più espressivi o assurdi.",
+      },
       otherGames: {
         type: "array",
         items: { type: "string" },
@@ -77,7 +90,7 @@ const SYSTEM_PROMPT = `Sei un editor esperto di copertine YouTube per video reac
 1. Scegli l'indice del fotogramma migliore da usare come SFONDO della copertina — MAI uno con interfaccia browser/player visibile (barra di avanzamento, controlli, sidebar chat, testo di commenti): se capita in tutti, scegli quello con meno interfaccia e ritagliala via con contentCropBox.
 2. Se riesci a leggere con sicurezza il titolo o il canale del video/contenuto che si sta reagendo in uno dei fotogrammi, scrivilo in reactedVideoQuery.
 3. Scegli l'espressione delle facce più adatta al tono (desiredExpression).
-4. Dì se è una reaction o un gioco (kind); per un gioco scrivi il nome esatto del gioco (gameName) e, se nel video si gioca a più giochi (tornei, serate), gli altri in otherGames.
+4. Dì se è una reaction o un gioco (kind); per una reaction dì a cosa reagiscono (reactedFormat) e, se sono TikTok, scegli i fotogrammi dove si vedono (contentFrames); per un gioco scrivi il nome esatto del gioco (gameName) e, se nel video si gioca a più giochi (tornei, serate), gli altri in otherGames.
 5. Scrivi SEMPRE la SCRITTA della copertina (coverWords) e il colore (coverColor): per un gioco cosa succede nella partita, per una reaction o uno Short la battuta o la cosa assurda di cui si parla.
 
 Regole della SCRITTA: 1-3 parole in italiano, come le scrivono i canali di clip italiani su Blur, Marza e Pesh. Esempi VERI che funzionano (i primi tre sono del canale preferito del proprietario): "HO DOPPIATO HARRY POTTER", "SERATA SPORTIVA", "DOPPIAGGIO DROGHEGGIANTE", "MEGA JEOPARDY", "GIOCHI BRUTTI", "SIAMO DOPPIATORI", "TELEFONATAAA", "DISTRUTTI A GOLF", "LA RUN PERFETTA?", "COME HA FATTO??", "MEGA POKERATA", "JEOPARDY CHEATER?!", "TORNEO TUTTI CONTRO TUTTI", "DIVENTIAMO MURATORI", "SONO GAY?", "ERA UN'IA?!", "BARBA INCOLLATA".
@@ -113,6 +126,9 @@ export interface ThumbnailSelection {
   coverWords: string | null;
   coverColor: string;
   otherGames: string[];
+  reactedFormat: "tiktok" | "video" | "altro" | null;
+  /** Fotogrammi dei TikTok a cui reagiscono, col riquadro del solo TikTok (frazioni 0-1). */
+  contentFrames: Array<{ index: number; x: number; y: number; width: number; height: number }>;
   /** 1-based fra le copertine passate in inspiration; null = nessuna. */
   inspirationIndex: number | null;
   sceneIdea: string | null;
@@ -165,6 +181,8 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     inspirationIndex?: number;
     sceneIdea?: string;
     otherGames?: string[];
+    reactedFormat?: string;
+    contentFrames?: Array<{ index?: number; x?: number; y?: number; width?: number; height?: number }>;
   };
 
   if (typeof input.backgroundFrameIndex !== "number") {
@@ -181,8 +199,16 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     gameName: input.gameName?.trim() ? input.gameName.trim() : null,
     coverWords: input.coverWords?.trim() ? input.coverWords.trim().toUpperCase() : null,
     coverColor: input.coverColor ?? "giallo",
+    reactedFormat: input.reactedFormat === "tiktok" || input.reactedFormat === "video" || input.reactedFormat === "altro" ? input.reactedFormat : null,
+    contentFrames: (Array.isArray(input.contentFrames) ? input.contentFrames : [])
+      .filter((c) => typeof c.index === "number" && c.index >= 0 && c.index < options.frameJpegsBase64.length)
+      .map((c) => ({ index: c.index!, x: clamp01(c.x ?? 0), y: clamp01(c.y ?? 0), width: clamp01(c.width ?? 1), height: clamp01(c.height ?? 1) }))
+      .filter((c, i, all) => c.width > 0.05 && c.height > 0.1 && all.findIndex((o) => o.index === c.index) === i)
+      .slice(0, 3),
     otherGames: Array.isArray(input.otherGames) ? input.otherGames.map((g) => String(g).trim()).filter(Boolean).slice(0, 5) : [],
     inspirationIndex: typeof input.inspirationIndex === "number" && input.inspirationIndex > 0 ? input.inspirationIndex : null,
     sceneIdea: input.sceneIdea?.trim() ? input.sceneIdea.trim() : null,
   };
 }
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
