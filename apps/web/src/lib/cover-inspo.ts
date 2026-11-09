@@ -9,6 +9,8 @@ import { readTextObject, writeTextObject } from "./storage/r2";
 export interface InspoChannel {
   url: string;
   name?: string;
+  /** Stile preferito di simo: pesa anche se il canale fa poche visualizzazioni. */
+  favorite?: boolean;
 }
 
 export interface InspoConfig {
@@ -36,6 +38,7 @@ export const DEFAULT_INSPO_CHANNELS: InspoChannel[] = [
   { url: "https://www.youtube.com/@AvraiAuraBooter", name: "Avrai Aura Booter" },
   { url: "https://www.youtube.com/@BlurIndietro", name: "Blur Indietro" },
   { url: "https://www.youtube.com/@SdrogoLoco", name: "SdrogoLoco" },
+  { url: "https://www.youtube.com/@CircolinoClip", name: "CircolinoClip", favorite: true },
 ];
 
 const configKey = (userId: string) => `cover-inspo/${userId}/config.json`;

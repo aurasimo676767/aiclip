@@ -21,6 +21,12 @@ export interface InspoChannel {
   /** Link del canale YouTube (anche solo @nome). */
   url: string;
   name?: string;
+  /**
+   * Canale di cui a simo piace lo stile anche se fa poche visualizzazioni (2026-11-09: CircolinoClip,
+   * "HO DOPPIATO HARRY POTTER" e "SERATA SPORTIVA" con 380 e 120 views): le sue copertine passano
+   * davanti come se avessero fatto il triplo del solito.
+   */
+  favorite?: boolean;
 }
 
 export interface InspoConfig {
@@ -77,11 +83,15 @@ export const inspoRoot = (userId: string) => `cover-inspo/${userId}`;
 const configKey = (userId: string) => `${inspoRoot(userId)}/config.json`;
 const indexKey = (userId: string) => `${inspoRoot(userId)}/index.json`;
 
+/** Link dei canali segnati come preferiti. */
+export const favoriteChannels = (config: InspoConfig | null) => new Set((config?.channels ?? []).filter((c) => c.favorite).map((c) => c.url));
+
 /** Canali già guardati per le copertine (vedi memoria copertine-come-le-vuole): la partenza se simo non ne ha messi. */
 export const DEFAULT_INSPO_CHANNELS: InspoChannel[] = [
   { url: "https://www.youtube.com/@AvraiAuraBooter", name: "Avrai Aura Booter" },
   { url: "https://www.youtube.com/@BlurIndietro", name: "Blur Indietro" },
   { url: "https://www.youtube.com/@SdrogoLoco", name: "SdrogoLoco" },
+  { url: "https://www.youtube.com/@CircolinoClip", name: "CircolinoClip", favorite: true },
 ];
 
 async function readJson<T>(key: string, workDir: string, fallback: T): Promise<T> {
@@ -145,7 +155,12 @@ const words = (text: string | null | undefined) =>
  * poi le parole del titolo in comune; dentro ogni gruppo vincono quelle che hanno fatto più
  * visualizzazioni del solito. Una per video, al massimo 2 dallo stesso canale di fila in cima.
  */
-export function pickInspiration(index: InspoIndex, ctx: { kind?: "reaction" | "game" | null; game?: string | null; title: string }, count: number): InspoItem[] {
+export function pickInspiration(
+  index: InspoIndex,
+  ctx: { kind?: "reaction" | "game" | null; game?: string | null; title: string },
+  count: number,
+  favorites: Set<string> = new Set(),
+): InspoItem[] {
   const titleWords = words(ctx.title);
   const gameWords = words(ctx.game);
   const scored = index.items
@@ -159,7 +174,8 @@ export function pickInspiration(index: InspoIndex, ctx: { kind?: "reaction" | "g
       if (ctx.kind && a.kind === ctx.kind) relevance += 1;
       const shared = [...words(item.title)].filter((w) => titleWords.has(w)).length;
       relevance += Math.min(2.5, shared * 0.8);
-      return { item, score: relevance + performance(item) };
+      const liked = item.channelUrl && favorites.has(item.channelUrl);
+      return { item, score: relevance + (liked ? Math.max(performance(item), 0.75 * Math.log2(APPROVED_OUTLIER)) + 1 : performance(item)) };
     })
     .sort((a, b) => b.score - a.score);
   const out: InspoItem[] = [];
@@ -189,13 +205,15 @@ export function copiesInspiration(text: string, items: InspoItem[]): boolean {
 }
 
 /** Le copertine scelte come testo per l'AI che decide scritta e scena (numerate da 1, il numero torna in inspirationIndex). */
-export function describeInspiration(items: InspoItem[]): string {
+export function describeInspiration(items: InspoItem[], favorites: Set<string> = new Set()): string {
   return items
     .map((item, i) => {
       const a = item.analysis!;
       const perf =
         item.source === "approvata"
           ? "approvata dal proprietario del canale"
+          : item.channelUrl && favorites.has(item.channelUrl)
+            ? "canale PREFERITO dal proprietario: è lo stile che vuole"
           : item.outlier
             ? `${item.outlier >= 1 ? `${item.outlier.toFixed(1)}x` : `${item.outlier.toFixed(2)}x`} le visualizzazioni solite del canale`
             : "troppo recente per i numeri";

@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Brain, Check, Loader2, Plus, X } from "lucide-react";
+import { Brain, Check, Loader2, Plus, Star, X } from "lucide-react";
 
 interface Channel {
   url: string;
   name?: string;
+  favorite?: boolean;
 }
 
 interface TopCover {
@@ -134,7 +135,17 @@ export function CoverInspoPanel() {
         <p className="text-xs font-medium uppercase tracking-wide text-faint">Canali seguiti{state.saved ? "" : " (proposti)"}</p>
         <ul className="flex flex-wrap gap-1.5">
           {state.channels.map((c) => (
-            <li key={c.url} className="inline-flex max-w-full items-center gap-1 rounded-lg bg-canvas py-1 pl-2.5 pr-1 text-xs text-ink">
+            <li key={c.url} className="inline-flex max-w-full items-center gap-1 rounded-lg bg-canvas py-1 pl-1 pr-1 text-xs text-ink">
+              <button
+                type="button"
+                aria-label={c.favorite ? `Togli ${c.name || c.url} dai preferiti` : `Segna ${c.name || c.url} come stile preferito`}
+                aria-pressed={Boolean(c.favorite)}
+                disabled={busy}
+                onClick={() => void save({ channels: state.channels.map((x) => (x.url === c.url ? { ...x, favorite: !x.favorite } : x)) })}
+                className="rounded p-0.5 transition hover:bg-overlay"
+              >
+                <Star size={12} className={c.favorite ? "fill-brand-300 text-brand-300" : "text-faint"} />
+              </button>
               <span className="truncate">{c.name || c.url.replace(/^https?:\/\/(www\.)?youtube\.com\//, "")}</span>
               <button
                 type="button"
@@ -160,7 +171,7 @@ export function CoverInspoPanel() {
           </button>
         </form>
         <p className="text-xs text-faint">
-          Si guardano gli ultimi 60 video di ogni canale. Dopo il primo allenamento si riguardano da soli una volta a settimana. Costa
+          La stella segna lo stile che preferisci: quelle copertine pesano anche se il canale fa poche visualizzazioni. Si guardano gli ultimi 60 video di ogni canale. Dopo il primo allenamento si riguardano da soli una volta a settimana. Costa
           circa 1 centesimo ogni 30 copertine nuove.
         </p>
       </div>

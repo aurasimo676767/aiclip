@@ -28,8 +28,14 @@ export interface AiCoverParams {
   kind: "reaction" | "game" | "short";
   /** Copertina già montata (compose-cover): impaginazione da tenere. Gli Short non ce l'hanno. */
   draftPath: string | null;
-  /** Sfondo vero: copertina originale del video reagito, immagine del gioco o fotogramma dello Short. */
-  backgroundPath: string;
+  /**
+   * Reaction: copertina originale del video reagito; Short: fotogramma della clip. Giochi: solo la
+   * grafica ufficiale (Steam) come riferimento di com'è fatto il gioco, o null: il gioco lo ricrea
+   * l'AI (simo, 2026-11-09: "NON deve prendere fotogrammi veri dal video, ma creare in base al gioco reale").
+   */
+  backgroundPath: string | null;
+  /** Altri giochi del video oltre a gameName (tornei, serate a più giochi). */
+  otherGames?: string[];
   /** Nell'ordine della bozza: il primo è il protagonista. */
   people: AiCoverPerson[];
   /** Scritta esatta, già in maiuscolo. */
@@ -71,14 +77,17 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
       `- image ${n}: rough layout draft. Use it ONLY for the composition: who is where, their size, the text position. Do NOT copy the people's poses, hands, clothes or expressions from it.`,
     );
   }
-  const bgIndex = add(params.backgroundPath);
-  const background =
-    params.kind === "reaction"
-      ? "the thumbnail of the video the streamers are reacting to: keep its scene and people recognizable, but REMOVE its original text and logos"
-      : params.kind === "game"
-        ? `a real screenshot/artwork of the game${params.gameName ? ` "${params.gameName}"` : ""}: keep it recognizable as that real game, do not invent a different scene`
-        : "a frame of the Short clip itself (the key moment): use what happens in it as the scene behind the streamer (for a reaction to a TikTok or video, show that video behind; for a game, the game)";
-  inputLines.push(`- image ${bgIndex}: the background, ${background}.`);
+  const games = [params.gameName, ...(params.otherGames ?? [])].filter((g): g is string => Boolean(g));
+  const bgIndex = params.backgroundPath ? add(params.backgroundPath) : null;
+  if (bgIndex !== null) {
+    const background =
+      params.kind === "reaction"
+        ? "the background, the thumbnail of the video the streamers are reacting to: keep its scene and people recognizable, but REMOVE its original text and logos"
+        : params.kind === "game"
+          ? `official artwork of the game${params.gameName ? ` "${params.gameName}"` : ""}, ONLY as a reference of what the game really looks like (art style, characters, places, colors). Do not paste it: redraw the game world yourself as a new clean scene`
+          : "the background, a frame of the Short clip itself (the key moment): use what happens in it as the scene behind the streamer (for a reaction to a TikTok or video, show that video behind; for a game, the game)";
+    inputLines.push(`- image ${bgIndex}: ${background}.`);
+  }
   for (const person of params.people) {
     // Le foto di una persona vanno in un collage solo: GPT Image fa pagare ~1.000 token per OGNI
     // immagine (misurato il 2026-10-25, 17,7 cent per una copertina con 20 foto), qualunque misura abbia.
@@ -118,7 +127,7 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
   // reagisce o il momento della clip, scritta enorme che dice di cosa si tratta.
   const layout = vertical
     ? "Vertical 9:16 layout like the big Italian Shorts channels: the streamer very big in the foreground, from the chest up, face in the upper-middle of the frame looking at the camera or at what happens; behind him what the clip is about (the reacted TikTok/video, the funny moment, the game), or a simple bright background if the clip is just him talking. Keep face and text inside the central 3:4 area: the Shorts shelf crops the top and bottom."
-    : "Make the people huge: head and shoulders rising from the bottom edge, faces big and sharp.";
+    : "Head and shoulders rising from the bottom edge, faces big and sharp.";
   const mood =
     params.mood ??
     (params.kind === "reaction"
@@ -151,18 +160,27 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
       ? [`Keep the main person or subject of the original thumbnail (image ${bgIndex}) clearly visible in the background: it is what the streamers are reacting to.`]
       : []),
     // simo, 2026-09-30: "tutti facce incazzate mentre blur sembra che stia ammirando..." — una faccia fuori tono stona.
-    `${layout}${protagonist ? ` "${protagonist}" is the main character.` : ""} Mood: ${mood}. All the people share the same mood: nobody has an unrelated or odd expression (no dreamy, admiring or confused look when the others are fired-up). Clean cutout edges with a subtle white outline, lit to match the background.`,
-    // Stile scelto da simo il 2026-09-26: le copertine del canale AvraiAuraBooter (fatte anche loro
-    // con l'AI): piene, sature, facce enormi, logo del gioco, bigliettini, costumi a tema.
-    "Visual style: like the top Italian clip channels (e.g. \"Avrai Aura Booter\"): a dense, busy, hyper-saturated composition, glossy and dramatic, strong rim light and colored glow around the people, subtle vignette, bright complementary colors (blue/orange, purple/yellow, red/yellow). The people fill most of the frame, big faces close together, slightly overlapping, the main one biggest.",
+    `${layout}${protagonist ? ` "${protagonist}" is the main character.` : ""} Mood: ${mood}. All the people share the same mood: nobody has an unrelated or odd expression (no dreamy, admiring or confused look when the others are fired-up). The people are lit like the scene around them, with at most a very subtle light outline.`,
+    ...(params.kind === "game" && games.length > 0
+      ? [
+          games.length === 1
+            ? `Background: the world of the video game "${games[0]}", recreated by you in its exact real art style with every recognizable detail (places, characters, items, interface elements fans would recognize), clean and spectacular like official key art. Never a blurry gameplay screenshot, no webcams, chat or stream overlays.`
+            : `Background: the worlds of these video games played in the video: ${games.map((g) => `"${g}"`).join(", ")}, each recreated by you in its exact real art style with recognizable details, blended into one clean spectacular scene (or split in clean diagonal sections). Never blurry gameplay screenshots, no webcams, chat or stream overlays.`,
+        ]
+      : []),
+    // simo, 2026-11-09: la copertina in stile AvraiAuraBooter (lucida, satura) "si vede che è FULL ia".
+    // Le sue preferite sono di CircolinoClip ("HO DOPPIATO HARRY POTTER", "SERATA SPORTIVA"): fatte
+    // anch'esse con l'AI, ma persone che sembrano fotografate, vestite a tema, il gioco vero ricreato dietro.
+    "Visual style: like the best Italian thumbnail designers (e.g. the channel CircolinoClip). The streamers must look PHOTOGRAPHED, as in a real professional photo shoot composited by a designer: real skin texture with pores, stubble and small imperfections, natural photographic studio lighting with a soft colored rim light, real fabrics, real-looking hands. It must NOT look AI-generated: no smooth plastic skin, no airbrushed or waxy faces, no painterly or 3D-render look, no over-the-top glow. Bright clean saturated colors, the background slightly less sharp than the people.",
+    "Framing: 1 to 3 streamers, big, from the chest up, in the foreground; the main one biggest and closest. Expressions are strong and readable but natural (real reactions, not grimaces).",
     ...(params.sceneIdea ? [`Scene idea for THIS video: ${params.sceneIdea}`] : []),
-    "When it fits the video and is funny, dress the people for the theme (e.g. hard hats for a building game, costumes for a party game) and add a few themed props from the game or the topic around them.",
+    "Dress the people for the theme of the video in a believable, funny way, like a real costume they put on for the video (e.g. Harry Potter: Gryffindor scarf, round glasses, lightning scar, wand; a sports game: sweatbands, sports jerseys, controllers in hand; a building game: hard hats), keeping their own fixed style written above. Add a few themed props in their hands or around them.",
     "",
     params.noText
       ? `NO title text in the image: leave the area where a title usually goes (${textPlace}) clean, a big title will be added there afterwards.`
       : line2
-      ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. First line white with a light grey gradient, second line in one bold color that fits the video (red, yellow-orange, purple, green or blue gradient with a glossy highlight), thick dark outline, 3D extrusion and drop shadow, soft glow.`
-      : `Text: exactly "${line1}", spelled exactly, one line. Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. One bold color that fits the video (red, yellow-orange, purple, green or blue gradient with a glossy highlight), thick dark outline, 3D extrusion and drop shadow, soft glow.`,
+      ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. First line white with a light grey gradient, second line in a bright yellow-to-orange gradient, thick black outline, slight 3D extrusion and drop shadow, with a rough red brush stroke behind the text (like CircolinoClip thumbnails).`
+      : `Text: exactly "${line1}", spelled exactly, one line. Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. Bright yellow-to-orange gradient, thick black outline, slight 3D extrusion and drop shadow, with a rough red brush stroke behind the text (like CircolinoClip thumbnails).`,
     // simo, 2026-10-25: "ci sono delle scritte nella copertina, 3 quadratini, non voglio che proprio ci siano".
     `Apart from ${params.noText ? "" : "the title and "}the game logo there is NO other text anywhere: no stickers, no paper notes, no labels, no speech bubbles, no captions, no small words, no channel logos, no watermarks, no borders. Very sharp.`,
     // simo, 2026-09-29: "voglio poter dire all'ia come farle". Le sue istruzioni (in italiano) vincono.

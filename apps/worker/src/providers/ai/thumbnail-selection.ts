@@ -45,6 +45,11 @@ const TOOL_SCHEMA = {
         type: "string",
         description: "Solo per game: il nome ESATTO del gioco com'è sul negozio (es. \"Trivia Murder Party 3\", \"Call of Duty: Black Ops II\", \"skribbl.io\"), per trovarne la grafica ufficiale. Ometti per le reaction.",
       },
+      otherGames: {
+        type: "array",
+        items: { type: "string" },
+        description: "Solo per game con PIÙ giochi (tornei, serate a più giochi): gli ALTRI giochi oltre a gameName, nome esatto, dai fotogrammi e dal titolo. Vuoto se è un gioco solo.",
+      },
       coverWords: {
         type: "string",
         description: "SEMPRE: la SCRITTA della copertina, 1-3 parole (massimo 4 corte), vedi le regole nel prompt.",
@@ -72,10 +77,10 @@ const SYSTEM_PROMPT = `Sei un editor esperto di copertine YouTube per video reac
 1. Scegli l'indice del fotogramma migliore da usare come SFONDO della copertina — MAI uno con interfaccia browser/player visibile (barra di avanzamento, controlli, sidebar chat, testo di commenti): se capita in tutti, scegli quello con meno interfaccia e ritagliala via con contentCropBox.
 2. Se riesci a leggere con sicurezza il titolo o il canale del video/contenuto che si sta reagendo in uno dei fotogrammi, scrivilo in reactedVideoQuery.
 3. Scegli l'espressione delle facce più adatta al tono (desiredExpression).
-4. Dì se è una reaction o un gioco (kind); per un gioco scrivi il nome esatto del gioco (gameName).
+4. Dì se è una reaction o un gioco (kind); per un gioco scrivi il nome esatto del gioco (gameName) e, se nel video si gioca a più giochi (tornei, serate), gli altri in otherGames.
 5. Scrivi SEMPRE la SCRITTA della copertina (coverWords) e il colore (coverColor): per un gioco cosa succede nella partita, per una reaction o uno Short la battuta o la cosa assurda di cui si parla.
 
-Regole della SCRITTA: 1-3 parole in italiano, come le scrivono i canali di clip italiani su Blur, Marza e Pesh. Esempi VERI che funzionano: "MEGA JEOPARDY", "GIOCHI BRUTTI", "SIAMO DOPPIATORI", "TELEFONATAAA", "DISTRUTTI A GOLF", "LA RUN PERFETTA?", "COME HA FATTO??", "MEGA POKERATA", "JEOPARDY CHEATER?!", "TORNEO TUTTI CONTRO TUTTI", "DIVENTIAMO MURATORI", "SONO GAY?", "ERA UN'IA?!", "BARBA INCOLLATA".
+Regole della SCRITTA: 1-3 parole in italiano, come le scrivono i canali di clip italiani su Blur, Marza e Pesh. Esempi VERI che funzionano (i primi tre sono del canale preferito del proprietario): "HO DOPPIATO HARRY POTTER", "SERATA SPORTIVA", "DOPPIAGGIO DROGHEGGIANTE", "MEGA JEOPARDY", "GIOCHI BRUTTI", "SIAMO DOPPIATORI", "TELEFONATAAA", "DISTRUTTI A GOLF", "LA RUN PERFETTA?", "COME HA FATTO??", "MEGA POKERATA", "JEOPARDY CHEATER?!", "TORNEO TUTTI CONTRO TUTTI", "DIVENTIAMO MURATORI", "SONO GAY?", "ERA UN'IA?!", "BARBA INCOLLATA".
 - Dice cosa succede o la battuta del video, con parole da ragazzi: niente "INCREDIBILE", "EPICO", "PAZZESCO", "SFIDA ESTREMA", "IMPERDIBILE", niente frasi da pubblicità o da giornale.
 - Si può usare il nome del gioco se è corto e riconoscibile (MEGA JEOPARDY), punti di domanda o esclamativi alla fine, lettere allungate (TELEFONATAAA).
 - Niente emoji, niente nomi degli streamer (le loro facce sono già in copertina).
@@ -107,6 +112,7 @@ export interface ThumbnailSelection {
   gameName: string | null;
   coverWords: string | null;
   coverColor: string;
+  otherGames: string[];
   /** 1-based fra le copertine passate in inspiration; null = nessuna. */
   inspirationIndex: number | null;
   sceneIdea: string | null;
@@ -158,6 +164,7 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     coverColor?: string;
     inspirationIndex?: number;
     sceneIdea?: string;
+    otherGames?: string[];
   };
 
   if (typeof input.backgroundFrameIndex !== "number") {
@@ -174,6 +181,7 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     gameName: input.gameName?.trim() ? input.gameName.trim() : null,
     coverWords: input.coverWords?.trim() ? input.coverWords.trim().toUpperCase() : null,
     coverColor: input.coverColor ?? "giallo",
+    otherGames: Array.isArray(input.otherGames) ? input.otherGames.map((g) => String(g).trim()).filter(Boolean).slice(0, 5) : [],
     inspirationIndex: typeof input.inspirationIndex === "number" && input.inspirationIndex > 0 ? input.inspirationIndex : null,
     sceneIdea: input.sceneIdea?.trim() ? input.sceneIdea.trim() : null,
   };

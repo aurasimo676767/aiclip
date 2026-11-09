@@ -21,7 +21,7 @@ import {
   type YoutubeCredentials,
 } from "../providers/youtube/youtube-publisher.js";
 import { updateThumbnailJobStatus } from "../queue/thumbnail-queue.js";
-import { copiesInspiration, describeInspiration, pickInspiration, readInspoIndex, referenceWithHiddenFaces } from "../lib/cover-inspo.js";
+import { copiesInspiration, describeInspiration, favoriteChannels, pickInspiration, readInspoConfig, readInspoIndex, referenceWithHiddenFaces } from "../lib/cover-inspo.js";
 import { addApprovedCover } from "./cover-inspo-train.js";
 import { censorText } from "@clipforge/shared";
 
@@ -188,7 +188,8 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     // Allenamento (lib/cover-inspo.ts): le copertine dei canali seguiti più vicine a questo video e che
     // hanno fatto più visualizzazioni del solito. Gioco e tipo non si sanno ancora: decide il titolo.
     const inspoIndex = project ? await readInspoIndex(project.user_id, jobDir) : { items: [] };
-    const inspiration = pickInspiration(inspoIndex, { title: `${clip.title} ${clip.hook}` }, INSPIRATION_COUNT);
+    const favorites = favoriteChannels(project ? await readInspoConfig(project.user_id, jobDir) : null);
+    const inspiration = pickInspiration(inspoIndex, { title: `${clip.title} ${clip.hook}` }, INSPIRATION_COUNT, favorites);
     const selection = await selectThumbnailAssets({
       apiKey: env.ANTHROPIC_API_KEY,
       // Con le istruzioni di simo il modello economico le ignorava (2026-09-30: "Rematch, NON Alpaca
@@ -199,7 +200,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       clipCaption: clip.caption ?? "",
       frameJpegsBase64: lowResBase64,
       userInstructions: coverInstructions,
-      inspiration: inspiration.length > 0 ? describeInspiration(inspiration) : undefined,
+      inspiration: inspiration.length > 0 ? describeInspiration(inspiration, favorites) : undefined,
     });
     const modelCover = selection.inspirationIndex ? inspiration[selection.inspirationIndex - 1] : undefined;
     // Scritta copiata da una copertina dei canali: non parla di questo video, si usa quella dal titolo.
@@ -221,8 +222,12 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
     let backgroundFullPath: string | null = null;
     const isReaction = !isShort && (selection.kind === "reaction" || Boolean(job.reacted_video_url));
 
-    if (!isShort && !isReaction && selection.gameName) {
-      backgroundFullPath = await findSteamHero(selection.gameName, path.join(jobDir, "background-steam.jpg"));
+    // Per i giochi GPT Image ricrea il gioco da sé: gli si passa solo la grafica ufficiale (se c'è), mai
+    // un fotogramma del video (simo, 2026-11-09). Il fotogramma serve solo alla copertina montata di ripiego.
+    const isGame = !isShort && !isReaction;
+    let steamHeroPath: string | null = null;
+    if (isGame && selection.gameName) {
+      steamHeroPath = backgroundFullPath = await findSteamHero(selection.gameName, path.join(jobDir, "background-steam.jpg"));
     }
 
     const manualVideoId = !isShort && job.reacted_video_url ? extractYoutubeVideoId(job.reacted_video_url) : null;
@@ -349,11 +354,13 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           model: env.COVER_AI_MODEL,
           quality: env.COVER_AI_QUALITY,
           kind: isShort ? "short" : isReaction ? "reaction" : "game",
-          draftPath,
-          backgroundPath: backgroundFullPath,
+          // La bozza dei giochi è montata sul fotogramma del video: GPT la copiava.
+          draftPath: isGame ? null : draftPath,
+          backgroundPath: isGame ? steamHeroPath : backgroundFullPath,
           people: aiPeople,
           title: title.toUpperCase(),
           gameName: selection.gameName ?? null,
+          otherGames: selection.otherGames,
           // Se simo chiede un font o uno stile della scritta, la copertina-modello non si passa: GPT
           // la copiava comunque (2026-09-30, "usa il font del logo di Rematch" → uscito il font solito).
           styleExamplePath: coverInstructions && /font|carattere|scritta|stile/i.test(coverInstructions) ? null : await fsp.access(stylePath).then(() => stylePath, () => null),
@@ -375,7 +382,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           // aggiunge dopo con la grafica delle copertine montate. Se il motivo era un altro, il secondo
           // rifiuto fa restare la copertina montata come prima.
           logger.warn("GPT Image ha rifiutato la copertina: la rifaccio senza scritta e la aggiungo dopo", { jobId: job.id, scritta: title });
-          const draftNoText = draftPath ? path.join(jobDir, "thumbnail-draft-notext.jpg") : null;
+          const draftNoText = draftPath && !isGame ? path.join(jobDir, "thumbnail-draft-notext.jpg") : null;
           if (draftNoText) {
             await composeCover({ backgroundPath: backgroundFullPath, kind: isReaction ? "reaction" : "game", faces: facePaths, title: "", theme, outputPath: draftNoText });
           }

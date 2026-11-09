@@ -6,7 +6,7 @@ import { getPresignedDownloadUrl } from "@/lib/storage/r2";
 
 const bodySchema = z.object({
   /** Canali da seguire (link o @nome): sostituiscono la lista salvata. */
-  channels: z.array(z.object({ url: z.string().trim().min(2).max(300), name: z.string().trim().max(80).optional() })).max(40).optional(),
+  channels: z.array(z.object({ url: z.string().trim().min(2).max(300), name: z.string().trim().max(80).optional(), favorite: z.boolean().optional() })).max(40).optional(),
   /** true = "Allena adesso": il worker lo vede entro 2 minuti. */
   train: z.boolean().optional(),
 });
