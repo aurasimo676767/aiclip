@@ -89,7 +89,11 @@ export const PERSON_STYLE: Record<string, { note: string; tag?: string; /** Prim
   // simo, 2026-09-26: "blur, facciamolo SEMPRE con cuffie della redbull, o cappello della redbull".
   BLUR: { note: "always wearing his Red Bull cap or his Red Bull gaming headphones, exactly as in his reference photos that show them", tag: "redbull" },
   // simo, 2026-09-30, dopo le prove: "marza non è ciccione", "lo fa sempre ciccione".
-  MARZA: { note: "SLIM: thin face, defined cheekbones, no double chin, slim body. Never draw him heavier or chubbier than in the photos" },
+  // simo, 2026-11-09, ancora: "marza è sempre troppo ciccione". Le foto lo mostrano magro: GPT con
+  // testa calva e barba folta allargava la faccia. I tratti scritti uno per uno, come per Manuxo.
+  MARZA: {
+    note: "a SLIM man: a LONG, NARROW face (clearly taller than wide), high forehead and a tall narrow bald head, hollow cheeks under the cheekbones, a full dark beard that is dense but close to a thin jaw, thin neck, narrow shoulders and thin arms; black rectangular glasses. His face is NOT round, NOT wide, NO chubby cheeks, NO double chin, NO big belly or wide body: never draw him heavier than in the photos",
+  },
   // simo, 2026-09-30: "manuxo è diventato marocchino", "cambia sempre etnia", "sembra uscito da gossip girl".
   // simo, 2026-10-25: "manuxo in faccia non è manuxo" con le 5 foto giuste (confermate tutte da lui): più
   // foto e i tratti che si vedono nelle sue foto, scritti uno per uno.
