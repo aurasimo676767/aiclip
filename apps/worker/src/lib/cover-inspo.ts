@@ -114,11 +114,21 @@ export const writeInspoIndex = (userId: string, index: InspoIndex, workDir: stri
 /** Peso delle copertine approvate da simo: contano come una copertina che ha fatto il triplo del solito. */
 const APPROVED_OUTLIER = 3;
 
-/** Quanto ha funzionato (0 = come il solito del canale, negativo = peggio), in scala logaritmica. */
+/**
+ * Quanto ha funzionato (0 = come il solito del canale, negativo = peggio), in scala logaritmica e
+ * con un tetto basso: AvraiAuraBooter ha video da 80 volte il suo solito (mediana bassissima) e con
+ * un tetto alto le sue copertine passavano davanti a quelle dello stesso tipo di video (2026-11-09:
+ * per il Torneo della Porca Madonna in cima una reaction a Ciccio, il torneo vero ottavo).
+ */
 function performance(item: InspoItem): number {
   const outlier = item.source === "approvata" ? APPROVED_OUTLIER : item.outlier;
-  return outlier ? Math.log2(Math.max(0.25, Math.min(outlier, 16))) : 0;
+  return outlier ? 0.75 * Math.log2(Math.max(0.25, Math.min(outlier, 4))) : 0;
 }
+
+/** Parole che non dicono di che video si tratta: i nomi degli streamer sono in quasi tutti i titoli. */
+const NOISE = new Set(
+  "blur marza pesh manuxo manuuxo kurolily fazzone zazzone lollo con del della dei delle che piu mai stato fatto sempre nel nella per una uno gli sono the and with".split(" "),
+);
 
 const words = (text: string | null | undefined) =>
   new Set(
@@ -127,7 +137,7 @@ const words = (text: string | null | undefined) =>
       .normalize("NFD")
       .replace(/[̀-ͯ]/g, "")
       .split(/[^a-z0-9]+/)
-      .filter((w) => w.length > 2),
+      .filter((w) => w.length > 2 && !NOISE.has(w)),
   );
 
 /**
@@ -148,7 +158,7 @@ export function pickInspiration(index: InspoIndex, ctx: { kind?: "reaction" | "g
       else if (gameWords.size > 0 && [...gameWords].some((w) => itemGame.has(w))) relevance += 1.5;
       if (ctx.kind && a.kind === ctx.kind) relevance += 1;
       const shared = [...words(item.title)].filter((w) => titleWords.has(w)).length;
-      relevance += Math.min(1.5, shared * 0.5);
+      relevance += Math.min(2.5, shared * 0.8);
       return { item, score: relevance + performance(item) };
     })
     .sort((a, b) => b.score - a.score);
