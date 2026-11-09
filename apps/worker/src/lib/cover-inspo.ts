@@ -174,6 +174,20 @@ export function pickInspiration(index: InspoIndex, ctx: { kind?: "reaction" | "g
   return out;
 }
 
+/**
+ * true se la scritta scelta è presa da una delle copertine mostrate: tutte le sue parole stanno in
+ * quella scritta (2026-11-09: per il Torneo della Porca Madonna l'AI ha scritto "TORNEO TUTTI",
+ * dalla copertina di Blur Indietro "TORNEO TUTTI CONTRO TUTTI", anche col divieto nel prompt).
+ */
+export function copiesInspiration(text: string, items: InspoItem[]): boolean {
+  const mine = [...words(text)];
+  if (mine.length === 0) return false;
+  return items.some((item) => {
+    const theirs = words(item.analysis?.text);
+    return theirs.size > 0 && mine.every((w) => theirs.has(w));
+  });
+}
+
 /** Le copertine scelte come testo per l'AI che decide scritta e scena (numerate da 1, il numero torna in inspirationIndex). */
 export function describeInspiration(items: InspoItem[]): string {
   return items

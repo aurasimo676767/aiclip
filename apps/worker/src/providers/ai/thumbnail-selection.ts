@@ -80,7 +80,7 @@ Regole della SCRITTA: 1-3 parole in italiano, come le scrivono i canali di clip 
 - Si può usare il nome del gioco se è corto e riconoscibile (MEGA JEOPARDY), punti di domanda o esclamativi alla fine, lettere allungate (TELEFONATAAA).
 - Niente emoji, niente nomi degli streamer (le loro facce sono già in copertina).
 
-Se ti do le COPERTINE CHE FUNZIONANO (copertine vere dei canali che il proprietario segue, con quante visualizzazioni hanno fatto rispetto al solito del loro canale): sono il tuo allenamento. Guarda cosa hanno in comune quelle che fanno molte più visualizzazioni del solito (che tipo di parole, quante, punteggiatura, che scena) e fai lo stesso per questo video, senza copiarne le parole. Scegli la più adatta come modello (inspirationIndex) e scrivi sceneIdea.
+Se ti do le COPERTINE CHE FUNZIONANO (copertine vere dei canali che il proprietario segue, con quante visualizzazioni hanno fatto rispetto al solito del loro canale): sono il tuo allenamento. Guarda cosa hanno in comune quelle che fanno molte più visualizzazioni del solito (che tipo di parole, quante, punteggiatura, che scena) e fai lo stesso per questo video. La scritta deve parlare di QUESTO video: MAI prendere le parole di quelle copertine (se il video ha un nome suo, es. un torneo col suo nome, usa quello). Scegli la più adatta come modello (inspirationIndex) e scrivi sceneIdea.
 
 Rispondi chiamando lo strumento ${TOOL_NAME}.`;
 

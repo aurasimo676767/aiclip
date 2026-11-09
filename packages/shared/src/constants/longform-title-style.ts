@@ -6,6 +6,9 @@
 export const LONGFORM_STREAMER_ALIASES: Record<string, string> = {
   tumblurr: "BLUR",
   justmarza: "MARZA",
+  // Il canale Twitch dei VOD di Marza (2026-11-09: senza, la copertina del Torneo della Porca Madonna
+  // usciva senza facce perché non sapeva che era lui).
+  therealmarzaa: "MARZA",
   pesh: "PESH",
   manuxoo: "MANUXO",
 };

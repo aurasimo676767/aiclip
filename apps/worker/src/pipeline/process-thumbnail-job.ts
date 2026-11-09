@@ -21,7 +21,7 @@ import {
   type YoutubeCredentials,
 } from "../providers/youtube/youtube-publisher.js";
 import { updateThumbnailJobStatus } from "../queue/thumbnail-queue.js";
-import { describeInspiration, pickInspiration, readInspoIndex, referenceWithHiddenFaces } from "../lib/cover-inspo.js";
+import { copiesInspiration, describeInspiration, pickInspiration, readInspoIndex, referenceWithHiddenFaces } from "../lib/cover-inspo.js";
 import { addApprovedCover } from "./cover-inspo-train.js";
 import { censorText } from "@clipforge/shared";
 
@@ -202,6 +202,11 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       inspiration: inspiration.length > 0 ? describeInspiration(inspiration) : undefined,
     });
     const modelCover = selection.inspirationIndex ? inspiration[selection.inspirationIndex - 1] : undefined;
+    // Scritta copiata da una copertina dei canali: non parla di questo video, si usa quella dal titolo.
+    if (selection.coverWords && copiesInspiration(selection.coverWords, inspiration)) {
+      logger.warn("Copertina: scritta copiata da una copertina dell'allenamento, uso quella dal titolo", { jobId: job.id, scritta: selection.coverWords });
+      selection.coverWords = null;
+    }
     if (inspiration.length > 0) {
       logger.info("Copertina: allenamento", { jobId: job.id, mostrate: inspiration.length, modello: modelCover ? `${modelCover.channel}: ${modelCover.title}` : null, scena: selection.sceneIdea });
     }
