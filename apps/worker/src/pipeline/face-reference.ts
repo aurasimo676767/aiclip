@@ -95,10 +95,16 @@ export async function headCrop(pngPath: string, outPath: string, cropSize = CROP
  */
 export async function bestHeadCrops(library: FaceLibraryIndex, label: string, n: number, dir: string, cropSize = CROP_SIZE): Promise<HeadCrop[]> {
   const tag = PERSON_STYLE[label]?.tag;
+  const preferTag = PERSON_STYLE[label]?.preferTag;
   const pool = library.faces
     .filter((f) => f.status === "labeled" && f.label === label && !f.tags?.includes("meme") && !f.tags?.includes("noref"))
     // Prima quelle confermate da simo come riferimento, poi le meno esagerate.
-    .sort((a, b) => Number(Boolean(b.tags?.includes("ref"))) - Number(Boolean(a.tags?.includes("ref"))) || a.intensity - b.intensity)
+    .sort(
+      (a, b) =>
+        Number(Boolean(preferTag && tag && b.tags?.includes(tag))) - Number(Boolean(preferTag && tag && a.tags?.includes(tag))) ||
+        Number(Boolean(b.tags?.includes("ref"))) - Number(Boolean(a.tags?.includes("ref"))) ||
+        a.intensity - b.intensity,
+    )
     .slice(0, MAX_CANDIDATES);
   const files = await downloadFaces(pool, dir);
   const crops: HeadCrop[] = [];
@@ -113,6 +119,8 @@ export async function bestHeadCrops(library: FaceLibraryIndex, label: string, n:
       // Con +3 passavano anche di lato o a testa bassa: Marza tutte dalla stessa live, "le foto
       // peggiori" per simo (2026-10-27), e Manuxo 7 su 7 con lo sguardo in basso.
       (face.tags?.includes("ref") ? 1 : 0) +
+      // Marza con gli auricolari gialli (simo, 2026-11-11): con 2 riferimenti su 5 con le cuffie grandi le disegnava sempre.
+      (preferTag && tag && face.tags?.includes(tag) ? 1 : 0) +
       Math.min(measured.faceWidth, 260) / 260 + // faccia grande = più dettagli veri
       Math.min(measured.sharpness, 1500) / 1500 - // nitida
       (face.intensity >= 4 ? 0.6 : face.intensity === 3 ? 0.2 : 0) - // smorfie forti deformano

@@ -85,14 +85,28 @@ export function pickFaces(
  * libreria (etichetta `tags`) da passare per forza come riferimento, così il modello vede davvero
  * cappello e cuffie.
  */
-export const PERSON_STYLE: Record<string, { note: string; tag?: string; /** Primi piani di riferimento per GPT Image (default 5). */ refs?: number }> = {
+export const PERSON_STYLE: Record<
+  string,
+  {
+    note: string;
+    tag?: string;
+    /** Primi piani di riferimento per GPT Image (default 5). */
+    refs?: number;
+    /** true = fra i riferimenti passano prima le foto col tag (non solo una): GPT copia gli accessori che vede di più. */
+    preferTag?: boolean;
+  }
+> = {
   // simo, 2026-09-26: "blur, facciamolo SEMPRE con cuffie della redbull, o cappello della redbull".
   BLUR: { note: "always wearing his Red Bull cap or his Red Bull gaming headphones, exactly as in his reference photos that show them", tag: "redbull" },
   // simo, 2026-09-30, dopo le prove: "marza non è ciccione", "lo fa sempre ciccione".
   // simo, 2026-11-09, ancora: "marza è sempre troppo ciccione". Le foto lo mostrano magro: GPT con
   // testa calva e barba folta allargava la faccia. I tratti scritti uno per uno, come per Manuxo.
+  // simo, 2026-11-11: "vorrei che avesse la maggior parte le cuffiette gialle che ha nelle foto, ha
+  // sempre e solo le cuffie grandi, che non usa mai". 15 foto su 36 col tag "auricolari".
   MARZA: {
-    note: "a SLIM man: a LONG, NARROW face (clearly taller than wide), high forehead and a tall narrow bald head, hollow cheeks under the cheekbones, a full dark beard that is dense but close to a thin jaw, thin neck, narrow shoulders and thin arms; black rectangular glasses. His face is NOT round, NOT wide, NO chubby cheeks, NO double chin, NO big belly or wide body: never draw him heavier than in the photos",
+    tag: "auricolari",
+    preferTag: true,
+    note: "almost always wearing his small YELLOW in-ear monitor earphones with a thin cable (NOT big over-ear headphones, he never uses them), and a SLIM man: a LONG, NARROW face (clearly taller than wide), high forehead and a tall narrow bald head, hollow cheeks under the cheekbones, a full dark beard that is dense but close to a thin jaw, thin neck, narrow shoulders and thin arms; black rectangular glasses. His face is NOT round, NOT wide, NO chubby cheeks, NO double chin, NO big belly or wide body: never draw him heavier than in the photos",
   },
   // simo, 2026-09-30: "manuxo è diventato marocchino", "cambia sempre etnia", "sembra uscito da gossip girl".
   // simo, 2026-10-25: "manuxo in faccia non è manuxo" con le 5 foto giuste (confermate tutte da lui): più
