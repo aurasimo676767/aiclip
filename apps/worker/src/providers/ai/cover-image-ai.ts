@@ -144,7 +144,7 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
   // Modello di simo per gli Short (2026-09-26): la persona in primo piano grande, dietro quello a cui
   // reagisce o il momento della clip, scritta enorme che dice di cosa si tratta.
   const layout = vertical
-    ? "Vertical 9:16 layout like the big Italian Shorts channels: the streamer very big in the foreground, from the chest up, face in the upper-middle of the frame looking at the camera or at what happens; behind him what the clip is about (the reacted TikTok/video, the funny moment, the game), or a simple bright background if the clip is just him talking. Keep face and text inside the central 3:4 area: the Shorts shelf crops the top and bottom."
+    ? "Vertical 9:16 layout like the big Italian Shorts channels: the streamer very big in the foreground, from the chest up, face in the upper-middle of the frame looking at what happens (not into the camera); behind him what the clip is about (the reacted TikTok/video, the funny moment, the game), or a simple bright background if the clip is just him talking. Keep face and text inside the central 3:4 area: the Shorts shelf crops the top and bottom."
     : "Head and shoulders rising from the bottom edge, faces big and sharp.";
   const mood =
     params.mood ??
@@ -197,6 +197,9 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     // Le sue preferite sono di CircolinoClip ("HO DOPPIATO HARRY POTTER", "SERATA SPORTIVA"): fatte
     // anch'esse con l'AI, ma persone che sembrano fotografate, vestite a tema, il gioco vero ricreato dietro.
     "Visual style: like the best Italian thumbnail designers (e.g. the channel CircolinoClip). The streamers must look PHOTOGRAPHED, as in a real professional photo shoot composited by a designer: real skin texture with pores, stubble and small imperfections, natural photographic studio lighting with a soft colored rim light, real fabrics, real-looking hands. It must NOT look AI-generated: no smooth plastic skin, no airbrushed or waxy faces, no painterly or 3D-render look, no over-the-top glow. Bright clean saturated colors, the background slightly less sharp than the people.",
+    // simo, 2026-11-11: "MARZA CHE GUARDA IN CAM PROPRIO NO HAHAHA PARE DISLESSICO": nessuno guarda in
+    // camera, a meno che le istruzioni non dicano che qualcuno ci guarda.
+    "GAZE: NOBODY looks into the camera. Each streamer looks at something in the scene (the game, the central element, the reacted content, or another streamer), with both eyes clearly aimed at the same point, natural and never cross-eyed. Only if the owner's instructions below say that a specific person looks at the camera, that person (and only that person) does.",
     "Framing: the streamers big, close to the camera, the main one biggest and closest. Expressions are strong and readable but natural (real reactions, not grimaces). Vivid, energetic, saturated colors and dramatic light like the top Italian clip channels (e.g. AuraBooter), while the people stay photographic.",
     ...(params.sceneIdea ? [`Scene idea for THIS video: ${params.sceneIdea}`] : []),
     "Dress the people for the theme of the video in a believable, funny way, like a real costume they put on for the video (e.g. Harry Potter: Gryffindor scarf, round glasses, lightning scar, wand; a sports game: sweatbands, sports jerseys, controllers in hand; a building game: hard hats), keeping their own fixed style written above. Add a few themed props in their hands or around them.",
