@@ -80,6 +80,21 @@ const TOOL_SCHEMA = {
         type: "string",
         description: "IN INGLESE, 1-2 frasi concrete per il grafico: cosa fanno gli streamer in copertina, cosa c'è dietro, oggetti o costumi a tema, ispirandoti alla copertina modello ma adattata a QUESTO video. Mai nomi di persone vere diverse dagli streamer, mai parole come truffa/scam.",
       },
+      layout: {
+        type: "string",
+        enum: ["lati", "fila", "tabellone", "gioco"],
+        description:
+          "Impaginazione, la più adatta a QUESTO video (varia, non sempre la stessa): lati = 2-3 streamer enormi ai lati e al centro un ELEMENTO gigante e buffo del video; fila = 3-4 streamer in fila, vestiti tutti a tema (operai, calciatori...), dietro il mondo del gioco; tabellone = dietro l'interfaccia del gioco/quiz ricreata grande (tabellone di Jeopardy, carte del bingo, griglia di un quiz) e gli streamer davanti; gioco = il mondo del gioco grande al centro e gli streamer in primo piano ai lati.",
+      },
+      heroElement: {
+        type: "string",
+        description: "IN INGLESE: l'elemento centrale gigante e buffo che riassume il video (es. 'a lion wearing a football jersey', 'a giant blue tarantula', 'Bigfoot roaring'); vuoto se non serve.",
+      },
+      textStyle: {
+        type: "string",
+        description:
+          "IN INGLESE: come disegnare la scritta, A TEMA col video o col gioco e diversa ogni volta: font, colori delle due righe, effetti. Es. horror: 'dripping blood-red horror font with scratches'; un gioco: 'the game's own logo font and colors (e.g. EA FC neon green)'; Dragon Ball: 'Dragon Ball style flaming orange 3D letters'; un quiz: 'glossy TV quiz show yellow and blue letters'; un film: 'serif movie-title font'. Sempre grande, leggibilissima, con contorno spesso.",
+      },
     },
     required: ["backgroundFrameIndex", "kind", "coverColor"],
   },
@@ -92,6 +107,8 @@ const SYSTEM_PROMPT = `Sei un editor esperto di copertine YouTube per video reac
 3. Scegli l'espressione delle facce più adatta al tono (desiredExpression).
 4. Dì se è una reaction o un gioco (kind); per una reaction dì a cosa reagiscono (reactedFormat) e, se sono TikTok, scegli i fotogrammi dove si vedono (contentFrames); per un gioco scrivi il nome esatto del gioco (gameName) e, se nel video si gioca a più giochi (tornei, serate), gli altri in otherGames.
 5. Scrivi SEMPRE la SCRITTA della copertina (coverWords) e il colore (coverColor): per un gioco cosa succede nella partita, per una reaction o uno Short la battuta o la cosa assurda di cui si parla.
+
+OGNI COPERTINA DEVE ESSERE DIVERSA (simo: le nostre sembrano "ripetitive, schematizzate"): come il canale AuraBooter, che per BIGFOOT usa un font horror rosso che cola, per PROCLUB il verde di EA FC, per QUIPLASH il font del gioco, per una reaction a Dragon Ball lettere infuocate stile Dragon Ball. Scegli layout, heroElement e textStyle a tema con QUESTO video.
 
 Regole della SCRITTA: 1-3 parole in italiano, come le scrivono i canali di clip italiani su Blur, Marza e Pesh. Esempi VERI che funzionano (i primi tre sono del canale preferito del proprietario): "HO DOPPIATO HARRY POTTER", "SERATA SPORTIVA", "DOPPIAGGIO DROGHEGGIANTE", "MEGA JEOPARDY", "GIOCHI BRUTTI", "SIAMO DOPPIATORI", "TELEFONATAAA", "DISTRUTTI A GOLF", "LA RUN PERFETTA?", "COME HA FATTO??", "MEGA POKERATA", "JEOPARDY CHEATER?!", "TORNEO TUTTI CONTRO TUTTI", "DIVENTIAMO MURATORI", "SONO GAY?", "ERA UN'IA?!", "BARBA INCOLLATA".
 - Dice cosa succede o la battuta del video, con parole da ragazzi: niente "INCREDIBILE", "EPICO", "PAZZESCO", "SFIDA ESTREMA", "IMPERDIBILE", niente frasi da pubblicità o da giornale.
@@ -129,6 +146,9 @@ export interface ThumbnailSelection {
   reactedFormat: "tiktok" | "video" | "altro" | null;
   /** Fotogrammi dei TikTok a cui reagiscono, col riquadro del solo TikTok (frazioni 0-1). */
   contentFrames: Array<{ index: number; x: number; y: number; width: number; height: number }>;
+  layout: "lati" | "fila" | "tabellone" | "gioco" | null;
+  heroElement: string | null;
+  textStyle: string | null;
   /** 1-based fra le copertine passate in inspiration; null = nessuna. */
   inspirationIndex: number | null;
   sceneIdea: string | null;
@@ -181,6 +201,9 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     inspirationIndex?: number;
     sceneIdea?: string;
     otherGames?: string[];
+    layout?: string;
+    heroElement?: string;
+    textStyle?: string;
     reactedFormat?: string;
     contentFrames?: Array<{ index?: number; x?: number; y?: number; width?: number; height?: number }>;
   };
@@ -199,6 +222,9 @@ export async function selectThumbnailAssets(options: ThumbnailSelectionOptions):
     gameName: input.gameName?.trim() ? input.gameName.trim() : null,
     coverWords: input.coverWords?.trim() ? input.coverWords.trim().toUpperCase() : null,
     coverColor: input.coverColor ?? "giallo",
+    layout: input.layout === "lati" || input.layout === "fila" || input.layout === "tabellone" || input.layout === "gioco" ? input.layout : null,
+    heroElement: input.heroElement?.trim() || null,
+    textStyle: input.textStyle?.trim() || null,
     reactedFormat: input.reactedFormat === "tiktok" || input.reactedFormat === "video" || input.reactedFormat === "altro" ? input.reactedFormat : null,
     contentFrames: (Array.isArray(input.contentFrames) ? input.contentFrames : [])
       .filter((c) => typeof c.index === "number" && c.index >= 0 && c.index < options.frameJpegsBase64.length)

@@ -41,6 +41,13 @@ export interface AiCoverParams {
    * REACTION TIKTOK al LIMITE della FOLLIA ONIRICA": i tiktoker veri in schede verticali).
    */
   tiktokFramePaths?: string[];
+  /**
+   * Impaginazione, elemento centrale e stile della scritta scelti dall'AI per QUESTO video (simo,
+   * 2026-11-11: le nostre "ripetitive, schematizzate"; modello AuraBooter, font e colori a tema).
+   */
+  layout?: "lati" | "fila" | "tabellone" | "gioco" | null;
+  heroElement?: string | null;
+  textStyle?: string | null;
   /** Nell'ordine della bozza: il primo è il protagonista. */
   people: AiCoverPerson[];
   /** Scritta esatta, già in maiuscolo. */
@@ -181,20 +188,23 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
           // simo, 2026-11-09: "i giochi si vedono poco". Modelli: le copertine dei tornei di Blur Indietro
           // (al centro la ruota del torneo fatta di riquadri, uno per gioco col suo logo, i giocatori ai lati).
           games.length === 1
-            ? `The GAME must be big and clearly visible: the world of the video game "${games[0]}", recreated by you in its exact real art style with every recognizable detail (places, characters, items, interface elements fans would recognize), clean and spectacular like official key art, filling the center of the image. The streamers stand at the left and right sides (or one big on one side) and never hide the middle of the game scene. Never a blurry gameplay screenshot, no webcams, chat or stream overlays.`
+            ? `The game "${games[0]}" must be clearly recognizable: its world, characters and items recreated by you in its exact real art style with the details fans know, clean and spectacular like official key art. Never a blurry gameplay screenshot, no webcams, chat or stream overlays.`
             : `TOURNAMENT LAYOUT (like the Italian channel Blur Indietro): in the CENTER a big glowing wheel (or sphere) made of tiles, ONE tile per game played: ${games.map((g) => `"${g}"`).join(", ")}. Each tile shows that game's world recreated by you in its exact real art style, with the game's REAL logo big and readable on the tile, so every game is recognizable at first glance. The streamers are at the left and right sides of the wheel, big, and never cover it; behind everything a spectacular themed background. No gameplay screenshots, no webcams, chat or stream overlays.`,
         ]
       : []),
+    ...(tiktokIndexes.length === 0 && games.length <= 1 && params.layout ? [LAYOUTS[params.layout](params.heroElement ?? null)] : []),
     // simo, 2026-11-09: la copertina in stile AvraiAuraBooter (lucida, satura) "si vede che è FULL ia".
     // Le sue preferite sono di CircolinoClip ("HO DOPPIATO HARRY POTTER", "SERATA SPORTIVA"): fatte
     // anch'esse con l'AI, ma persone che sembrano fotografate, vestite a tema, il gioco vero ricreato dietro.
     "Visual style: like the best Italian thumbnail designers (e.g. the channel CircolinoClip). The streamers must look PHOTOGRAPHED, as in a real professional photo shoot composited by a designer: real skin texture with pores, stubble and small imperfections, natural photographic studio lighting with a soft colored rim light, real fabrics, real-looking hands. It must NOT look AI-generated: no smooth plastic skin, no airbrushed or waxy faces, no painterly or 3D-render look, no over-the-top glow. Bright clean saturated colors, the background slightly less sharp than the people.",
-    "Framing: 1 to 3 streamers, big, from the chest up, in the foreground; the main one biggest and closest. Expressions are strong and readable but natural (real reactions, not grimaces).",
+    "Framing: the streamers big, close to the camera, the main one biggest and closest. Expressions are strong and readable but natural (real reactions, not grimaces). Vivid, energetic, saturated colors and dramatic light like the top Italian clip channels (e.g. AuraBooter), while the people stay photographic.",
     ...(params.sceneIdea ? [`Scene idea for THIS video: ${params.sceneIdea}`] : []),
     "Dress the people for the theme of the video in a believable, funny way, like a real costume they put on for the video (e.g. Harry Potter: Gryffindor scarf, round glasses, lightning scar, wand; a sports game: sweatbands, sports jerseys, controllers in hand; a building game: hard hats), keeping their own fixed style written above. Add a few themed props in their hands or around them.",
     "",
     params.noText
       ? `NO title text in the image: leave the area where a title usually goes (${textPlace}) clean, a big title will be added there afterwards.`
+      : params.textStyle
+      ? `Text: ${line2 ? `exactly two lines, spelled exactly: first line "${line1}", second line "${line2}"` : `exactly "${line1}", spelled exactly, one line`}. ${textPlace}. Lettering designed for THIS video: ${params.textStyle}. Huge, bold, with a thick dark outline and a drop shadow so it is perfectly readable on a phone.`
       : line2
       ? `Text: exactly two lines, spelled exactly: first line "${line1}", second line "${line2}". Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. First line white with a light grey gradient, second line in a bright yellow-to-orange gradient, thick black outline, slight 3D extrusion and drop shadow, with a rough red brush stroke behind the text (like CircolinoClip thumbnails).`
       : `Text: exactly "${line1}", spelled exactly, one line. Huge bold 3D glossy lettering (heavy condensed, slightly italic), ${textPlace}. Bright yellow-to-orange gradient, thick black outline, slight 3D extrusion and drop shadow, with a rough red brush stroke behind the text (like CircolinoClip thumbnails).`,
@@ -402,3 +412,14 @@ async function keepUnchangedPixels(basePath: string, edited: Buffer, width: numb
   const editedRgba = await editedImage().joinChannel(alpha, { raw: { width, height, channels: 1 } }).png().toBuffer();
   return sharp(basePath).resize(width, height, { fit: "fill" }).composite([{ input: editedRgba }]).jpeg({ quality: 92 }).toBuffer();
 }
+
+/** Impaginazioni fra cui l'AI sceglie (thumbnail-selection.ts, campo layout). */
+const LAYOUTS: Record<"lati" | "fila" | "tabellone" | "gioco", (hero: string | null) => string> = {
+  lati: (hero) =>
+    `LAYOUT: two or three streamers HUGE at the left and right edges, very close to the camera; in the CENTER, between them, ${hero ?? "one giant funny element that sums up the video"}, big, detailed and spectacular; the themed world behind.`,
+  fila: () => "LAYOUT: the streamers side by side in a row (all of them big), all wearing the same themed outfit for this video, the themed world or game behind them.",
+  tabellone: (hero) =>
+    `LAYOUT: behind the streamers the interface of the game or quiz recreated big and clean (board, cards, grid, buttons), readable and recognizable; the streamers in front at the bottom and sides.${hero ? ` Add ${hero}.` : ""}`,
+  gioco: (hero) =>
+    `LAYOUT: the game world big in the center, the streamers in the foreground at the left and right sides, never hiding the middle of the scene.${hero ? ` In the middle of the scene: ${hero}.` : ""}`,
+};

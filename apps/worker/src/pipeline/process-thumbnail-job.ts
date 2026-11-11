@@ -209,7 +209,7 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
       selection.coverWords = null;
     }
     if (inspiration.length > 0) {
-      logger.info("Copertina: allenamento", { jobId: job.id, mostrate: inspiration.length, modello: modelCover ? `${modelCover.channel}: ${modelCover.title}` : null, scena: selection.sceneIdea });
+      logger.info("Copertina: allenamento", { jobId: job.id, impaginazione: selection.layout, centro: selection.heroElement, scritta: selection.textStyle, mostrate: inspiration.length, modello: modelCover ? `${modelCover.channel}: ${modelCover.title}` : null, scena: selection.sceneIdea });
     }
 
     // 3) Sfondo, in ordine di affidabilità:
@@ -385,7 +385,13 @@ export async function processThumbnailJob(job: ThumbnailJobRow): Promise<void> {
           otherGames: selection.otherGames,
           // Se simo chiede un font o uno stile della scritta, la copertina-modello non si passa: GPT
           // la copiava comunque (2026-09-30, "usa il font del logo di Rematch" → uscito il font solito).
-          styleExamplePath: coverInstructions && /font|carattere|scritta|stile/i.test(coverInstructions) ? null : await fsp.access(stylePath).then(() => stylePath, () => null),
+          // Neanche quando l'AI ha scelto lo stile della scritta per questo video: con la copertina-modello
+          // fissa uscivano tutte uguali (simo, 2026-11-11: "ripetitive, schematizzate").
+          styleExamplePath:
+            selection.textStyle || (coverInstructions && /font|carattere|scritta|stile/i.test(coverInstructions)) ? null : await fsp.access(stylePath).then(() => stylePath, () => null),
+          layout: selection.layout,
+          heroElement: selection.heroElement,
+          textStyle: selection.textStyle,
           logoPath,
           videoTitle: clip.title,
           userInstructions: coverInstructions,
