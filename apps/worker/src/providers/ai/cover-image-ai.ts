@@ -244,21 +244,8 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
   }
 
   const started = Date.now();
-  const res = await fetch("https://api.openai.com/v1/images/edits", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${params.apiKey}` },
-    body: form,
-    signal: AbortSignal.timeout(300_000),
-  });
-  const body = (await res.json()) as {
-    data?: Array<{ b64_json?: string }>;
-    usage?: unknown;
-    error?: { message?: string; code?: string };
-  };
-  if (!res.ok || !body.data?.[0]?.b64_json) {
-    throw new Error(`GPT Image ${res.status}: ${body.error?.message ?? "nessuna immagine"}`);
-  }
-  await sharp(Buffer.from(body.data[0].b64_json, "base64"))
+  const body = await postImageEdit(params.apiKey, form);
+  await sharp(Buffer.from(body.b64, "base64"))
     .resize(vertical ? 1080 : 1280, vertical ? 1920 : 720, { fit: "cover" })
     .jpeg({ quality: 92 })
     .toFile(params.outputPath);
@@ -269,6 +256,29 @@ export async function generateAiCover(params: AiCoverParams): Promise<void> {
     secondi: Math.round((Date.now() - started) / 1000),
     usage: body.usage,
   });
+}
+
+/**
+ * Chiamata a /images/edits. Sugli errori dei server OpenAI (5xx) si riprova una volta dopo 20 s:
+ * il 2026-11-12 un 500 isolato ha fatto uscire la copertina montata al posto di quella AI e simo
+ * l'ha dovuta rifare a mano. Gli altri errori (filtro di sicurezza, credito) non si riprovano.
+ */
+async function postImageEdit(apiKey: string, form: FormData): Promise<{ b64: string; usage?: unknown }> {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch("https://api.openai.com/v1/images/edits", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(300_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as { data?: Array<{ b64_json?: string }>; usage?: unknown; error?: { message?: string } };
+    const b64 = body.data?.[0]?.b64_json;
+    if (res.ok && b64) return { b64, usage: body.usage };
+    const message = `GPT Image ${res.status}: ${body.error?.message ?? "nessuna immagine"}`;
+    if (res.status < 500 || attempt >= 2) throw new Error(message);
+    logger.warn("GPT Image: errore del server, riprovo tra 20 s", { error: message });
+    await new Promise((resolve) => setTimeout(resolve, 20_000));
+  }
 }
 
 /** Le foto di una persona affiancate in una griglia (tasselli da 512 px, fondo grigio neutro), salvata in `out`. */
@@ -365,16 +375,9 @@ export async function editCover(params: {
   form.append("image[]", new Blob([await fsp.readFile(params.basePath)], { type: "image/jpeg" }), "copertina.jpg");
   for (const r of refs) form.append("image[]", new Blob([await fsp.readFile(r.path)], { type: "image/jpeg" }), path.basename(r.path));
   const started = Date.now();
-  const res = await fetch("https://api.openai.com/v1/images/edits", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${params.apiKey}` },
-    body: form,
-    signal: AbortSignal.timeout(300_000),
-  });
-  const body = (await res.json()) as { data?: Array<{ b64_json?: string }>; usage?: unknown; error?: { message?: string } };
-  if (!res.ok || !body.data?.[0]?.b64_json) throw new Error(`GPT Image ${res.status}: ${body.error?.message ?? "nessuna immagine"}`);
+  const body = await postImageEdit(params.apiKey, form);
   // Pixel grezzi RGB alla misura della copertina di partenza.
-  const edited = await sharp(Buffer.from(body.data[0].b64_json, "base64")).resize(width, height, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  const edited = await sharp(Buffer.from(body.b64, "base64")).resize(width, height, { fit: "fill" }).removeAlpha().raw().toBuffer();
   const out = await keepUnchangedPixels(params.basePath, edited, width, height);
   await fsp.writeFile(params.outputPath, out);
   logger.info("Copertina ritoccata con GPT Image", { model: params.model, secondi: Math.round((Date.now() - started) / 1000), usage: body.usage });
