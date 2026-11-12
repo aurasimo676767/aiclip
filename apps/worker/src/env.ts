@@ -69,12 +69,12 @@ const envSchema = z.object({
   ANTHROPIC_MODEL_CONTENT_FOCUS: z.string().default("claude-sonnet-5"),
   OPENAI_API_KEY: z.string().min(1),
   // Rifinitura delle copertine con GPT Image (providers/ai/cover-image-ai.ts): la copertina montata
-  // coi ritagli fa da bozza e il modello la ridisegna come un grafico. ~6-11 centesimi a copertina a
-  // qualità "medium". "off" = resta la copertina montata, nessuna chiamata. Dal 2026-11-12
-  // gpt-image-2.6-sunburst (scelto da simo): stesse tariffe della 2.5-sunburst ma ~3 volte i token
-  // d'uscita, ~2 cent in più a copertina. Acceso: le copertine partono solo dal pulsante "Genera
-  // copertina" del sito, quindi si spende solo quando lo preme simo.
-  COVER_AI_MODEL: z.string().default("gpt-image-2.6-sunburst"),
+  // coi ritagli fa da bozza e il modello la ridisegna come un grafico. ~5-8 centesimi a copertina a
+  // qualità "medium". "off" = resta la copertina montata, nessuna chiamata. Modello provato:
+  // gpt-image-2.5-sunburst (lo stesso di ChatGPT a settembre 2026). La 2.6-sunburst provata il
+  // 2026-11-12 su Haaland: ~2 cent in più e simo l'ha bocciata ("fa cagare"). Acceso: le copertine
+  // partono solo dal pulsante "Genera copertina" del sito, quindi si spende solo quando lo preme simo.
+  COVER_AI_MODEL: z.string().default("gpt-image-2.5-sunburst"),
   COVER_AI_QUALITY: z.enum(["low", "medium", "high"]).default("medium"),
   // Titolo fisso in alto negli Shorts (edl.headline). "off" = niente titolo. Spento dal 2026-10-25
   // (simo: "la scritta in alto fissa di ogni video fa schifo, togliamola").
