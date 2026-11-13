@@ -113,7 +113,7 @@ export function ClipCard({ clip, rank, selectable, selected, selectionActive, on
       </button>
       {isShort && <PublishChips clip={clip} />}
       {!isShort && <EditToggle clipId={clip.id} enabled={clip.longformEdit} />}
-      {!isShort && clip.longformEdit && <GamePicker clipId={clip.id} games={clip.longformGames} keep={clip.longformKeepGames} compact />}
+      {!isShort && clip.longformEdit && <GamePicker clipId={clip.id} title={clip.title} games={clip.longformGames} keep={clip.longformKeepGames} compact />}
     </div>
   );
 }

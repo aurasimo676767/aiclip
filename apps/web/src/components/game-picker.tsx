@@ -8,21 +8,26 @@ import { Check, Gamepad2 } from "lucide-react";
  * Quali giochi tenere nel video montato (simo, 2026-09-28): in una clip di un'ora possono esserci
  * 2-3 giochi, riconosciuti dall'AI guardando lo schermo; simo sceglie quali lasciare. Se non sceglie
  * niente resta il gioco che dura di più. Vale dal prossimo render.
+ * Un torneo (titolo con "torneo") tiene di default TUTTI i giochi, come fa il worker in gamesToKeep:
+ * il 2026-11-13 qui risultava acceso solo Fortnite mentre il montato li stava facendo tutti.
  */
 export function GamePicker({
   clipId,
+  title,
   games,
   keep,
   compact = false,
 }: {
   clipId: string;
+  title: string;
   games: Array<{ name: string; seconds: number; contents?: string[] }> | null;
   keep: string[] | null;
   compact?: boolean;
 }) {
   const router = useRouter();
-  const main = games?.find((g) => g.name !== "Altro")?.name ?? null;
-  const [picked, setPicked] = useState<string[]>(keep && keep.length > 0 ? keep : main ? [main] : []);
+  const played = games?.filter((g) => g.name !== "Altro").map((g) => g.name) ?? [];
+  const defaults = /torneo/i.test(title) ? played : played.slice(0, 1);
+  const [picked, setPicked] = useState<string[]>(keep && keep.length > 0 ? keep : defaults);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

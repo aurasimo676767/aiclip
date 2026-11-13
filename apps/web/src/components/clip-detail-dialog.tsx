@@ -178,7 +178,7 @@ ${clip.publishDescription}`} />}
             }
           />
         )}
-        {!isShort && clip.longformEdit && <GamePicker clipId={clip.id} games={clip.longformGames} keep={clip.longformKeepGames} />}
+        {!isShort && clip.longformEdit && <GamePicker clipId={clip.id} title={clip.title} games={clip.longformGames} keep={clip.longformKeepGames} />}
 
         {/* Azioni principali */}
         <div className="flex flex-wrap items-center gap-2">
